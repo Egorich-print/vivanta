@@ -52,6 +52,9 @@ This replaces the earlier "Adaptive Computing Platform" / "Adaptive Operating Pl
 | RFC-005 | State Document Format | ✅ Accepted | M1-A experiment |
 | RFC-006 | Environment Continuity Model | ✅ Accepted | M2-A experiment |
 | RFC-007 | Dynamic Device Tree and Hardware Adaptation | 📝 Draft | M1-B (pending) |
+| RFC-008 | Boot Protocol (revised) | ✅ Accepted | AArch64 + ARMv7 boot |
+| RFC-009 | Platform Capability Model | ✅ Accepted | Architecture design |
+| RFC-010 | Memory Resource Model | 🔬 Experimental | Awaiting hardware validation |
 
 ## Terminology
 
@@ -81,7 +84,10 @@ This replaces the earlier "Adaptive Computing Platform" / "Adaptive Operating Pl
 | M1-A | ✅ Complete | Continuity Proof Experiment on QEMU — core thesis validated |
 | M2-A | ✅ Complete | Environment Continuity Experiment — user data persistence validated |
 | M3-A | ✅ Complete | Incremental Environment Continuity — tracked changes without state migration |
-| M1-B | 🔧 In Preparation | Dynamic Device Tree strategy for Xiaomi Redmi Note 7 (lavender) |
+| M3-B | ✅ Complete | Memory Object Foundation — resource-oriented memory model (QEMU) |
+| M3-C | ✅ Complete | Memory Object Semantics — lifecycle, clone, share, revoke |
+| M1-B | 🔧 In Preparation | Hardware bringup — Redmi Note 7 (lavender, SDM660) |
+| R2 | 🔧 In Progress | Reality Lock — architecture freeze, repository reorg, hardware bringup |
 
 All milestones beyond M1 were collapsible; M2 and M3 have been executed successfully. The focus now shifts to real hardware preparation.
 
@@ -95,7 +101,9 @@ M1 is defined as a **Continuity Proof Experiment**, not an OS implementation. It
 
 The Theseus Continuity Layer is architecturally separate from the Operating System Layer (kernel, drivers, filesystem, applications). M1 proves the former. The latter begins after M1 is accepted.
 
-Full acceptance criteria and non-goals are documented in `M1_ACCEPTANCE_CRITERIA.md`.
+Full acceptance criteria and non-goals are documented in `docs/milestones/M1/A-continuity/acceptance.md`.
+
+Hardware bringup acceptance is documented in `docs/milestones/M1/B-hardware/acceptance.md`.
 
 ## Architecture Constraints
 
@@ -126,6 +134,11 @@ The following architectural claims are now experimentally validated between QEMU
 | 11 | Environment chain independent of state chain | M3-A |
 | 12 | Incremental environment updates without state migration | M3-A |
 | 13 | Cross-link consistency between State Documents and Environment Manifests | M3-A |
+| 14 | AArch64 + ARMv7 boot on QEMU with shared BootInfo contract | M3-AB |
+| 15 | Page table construction and MMU enable on two architectures | M3-AB |
+| 16 | MemoryObject: create, allocate, map, clone, share, revoke lifecycle | M3-C |
+| 17 | Resource-oriented memory model: MemoryBackend, MRM, placement policy | M3-BC |
+| 18 | Multiple virtual mappings per MemoryObject | M3-C |
 
 ## Key Architectural Decisions
 

@@ -1,4 +1,8 @@
 target/
 .DS_Store
 *.bin
+*.elf
+*.img
+*.dtb
+*.map
 *.o
