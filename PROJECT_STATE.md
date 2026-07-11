@@ -1,0 +1,151 @@
+# Project State
+
+This document summarizes the durable architectural knowledge of the Theseus OS project. It is a living architectural artifact, intended to guide the project's long-term evolution.
+
+## Vision
+
+Theseus OS is an operating system that preserves its identity and user environment across complete replacement of its hardware components. The core philosophy is minimizing friction between users and hardware evolution.
+
+The project has evolved from "a universal operating system" to a more precise identity: **a continuity-preserving computing platform**. The central innovation is not a new kernel or driver model, but a formal protocol for system identity persistence across physical hardware transitions.
+
+## Philosophy
+
+The project is guided by the "Ship of Theseus" principle: a system can survive complete replacement of its parts if its identity and history are preserved. Key tenets:
+
+*   **User First**: The system exists to serve the user, not the other way around.
+*   **Adaptive System**: The OS adapts to hardware; hardware does not dictate OS limitations.
+*   **Architecture Independence**: The core platform must be portable across major architectures (x86_64, ARM, RISC-V).
+*   **Minimal Friction**: The system makes technical decisions automatically; advanced users can override defaults.
+*   **Document Before Code**: Architectural decisions are documented before implementation and serve as the definitive reference.
+*   **Modularity and Composability**: The system is built from independent, composable components.
+
+## Core Invariants
+
+These are fundamental, non-negotiable properties that must hold true throughout the project's evolution:
+
+1.  **User Environment Preservation**: User's applications, data, and settings must persist across hardware changes.
+2.  **Hardware Adaptability**: The OS must adapt to hardware; hardware should not dictate OS limitations.
+3.  **Architecture Independence**: The core platform must be portable across major architectures.
+4.  **Minimal Friction**: System automates decisions; reduces manual user configuration.
+5.  **Documentation as Source of Truth**: Architecture is documented before implementation.
+6.  **Long-Term Maintainability**: Architecture must be designed for evolution over decades.
+7.  **Identity Independence**: The Root Keypair must not depend on the component it is designed to survive replacement of.
+8.  **No Booting in Unknown State**: If identity cannot be resolved, the system halts rather than booting in an indeterminate state.
+
+## Architecture Identity
+
+The project's resolved identity is:
+
+> **Theseus OS is an operating system that preserves its identity and user environment across complete replacement of its hardware components.**
+
+This replaces the earlier "Adaptive Computing Platform" / "Adaptive Operating Platform" framing, which was too abstract. The core concept is **cryptographic continuity**: a system proves it is the same entity across hardware changes through a verifiable chain of signed State Documents.
+
+## Completed RFCs
+
+| RFC | Title | Status | Validated By |
+|-----|-------|--------|-------------|
+| RFC-001 | Identity Model | ✅ Accepted | M1-A experiment |
+| RFC-001.5 | Identity Utility Model | ✅ Accepted | M1-A experiment |
+| RFC-002 | Bootstrap Architecture | ✅ Accepted | M1-A experiment |
+| RFC-003 | Boot Protocol | ✅ Accepted | M1-A experiment |
+| RFC-004 | Recovery Seed Format | ✅ Accepted | M1-A experiment |
+| RFC-005 | State Document Format | ✅ Accepted | M1-A experiment |
+| RFC-006 | Environment Continuity Model | ✅ Accepted | M2-A experiment |
+| RFC-007 | Dynamic Device Tree and Hardware Adaptation | 📝 Draft | M1-B (pending) |
+
+## Terminology
+
+| Term | Definition |
+|------|-----------|
+| **System Identity** | Ed25519 keypair. The canonical identity of a Theseus system. |
+| **Root Keypair** | The genesis keypair from which all identity claims derive. |
+| **Recovery Seed** | BIP-39 mnemonic (12 words) that can regenerate the Root Keypair. |
+| **State Document** | Signed CBOR document recording the system's hardware/software inventory at a point in time. |
+| **State Chain** | Ordered sequence of State Documents linked by cryptographic hashes. |
+| **Genesis State** | State Document 0, created at first boot. The root of the chain. |
+| **Continuity** | Property of being the same system (same Root Keypair + verified State Chain). |
+| **Fork** | Two systems sharing a Root Keypair but with diverging State Chains. |
+| **Divorce Statement** | Signed document establishing a fork as an independent identity. |
+| **Boot Protocol** | 5-stage sequence: Bootloader → Identity Check → Identity Resolution → Boot Decision → System Boot. |
+| **Identity Independence** | Architectural constraint: the Root Keypair must survive replacement of the component it is stored on. |
+| **Environment Manifest** | Signed JSON document recording user data hash, config hash, and software inventory. Peer to State Document. |
+| **Environment Chain** | Ordered sequence of Environment Manifests linked by cryptographic hashes, tracking environment continuity independently of the State Chain. |
+| **Incremental Update** | Environment Manifest update that occurs between State Document transitions, tracking file changes without hardware migration. |
+
+## Current Milestones
+
+| Phase | Status | Description |
+|-------|--------|-------------|
+| R0 | ✅ Complete | Peer review, architecture audit, identity resolved |
+| RFC Chain | ✅ Complete | RFC-001 through RFC-006 defining the identity and environment protocol |
+| M1-A | ✅ Complete | Continuity Proof Experiment on QEMU — core thesis validated |
+| M2-A | ✅ Complete | Environment Continuity Experiment — user data persistence validated |
+| M3-A | ✅ Complete | Incremental Environment Continuity — tracked changes without state migration |
+| M1-B | 🔧 In Preparation | Dynamic Device Tree strategy for Xiaomi Redmi Note 7 (lavender) |
+
+All milestones beyond M1 were collapsible; M2 and M3 have been executed successfully. The focus now shifts to real hardware preparation.
+
+## M1 Boundary
+
+M1 is defined as a **Continuity Proof Experiment**, not an OS implementation. It validates the Theseus Continuity Layer:
+- Identity generation and recovery
+- State Chain management
+- Boot mode engine (Genesis → Normal → Recovery)
+- Storage replacement continuity
+
+The Theseus Continuity Layer is architecturally separate from the Operating System Layer (kernel, drivers, filesystem, applications). M1 proves the former. The latter begins after M1 is accepted.
+
+Full acceptance criteria and non-goals are documented in `M1_ACCEPTANCE_CRITERIA.md`.
+
+## Architecture Constraints
+
+*   **Primary Systems Programming Language**: Rust. Confirmed during M1-A. Used for the entire Continuity Proof Experiment.
+*   **Initial Implementation Target**: QEMU (M1-A) — ✅ Complete. Xiaomi Redmi Note 7 / lavender (M1-B) — pending.
+*   **State Document Format for M1**: JSON (CBOR deferred).
+*   **Recovery Seed Format**: BIP-39 12-word mnemonic.
+*   **Signature Algorithm**: Ed25519.
+*   **Hash Function**: SHA-256.
+*   **Identity Derivation**: The Root Keypair is DERIVED FROM the recovery seed, not generated independently. The seed is the single root of truth. This was the critical correction discovered during M1-A.
+
+## Validated by Experiment
+
+The following architectural claims are now experimentally validated between QEMU runs:
+
+| # | Claim | Validated In |
+|---|-------|-------------|
+| 1 | Ed25519 keypair generation, signing, and verification | M1-A |
+| 2 | BIP-39 seed → deterministic keypair derivation (same seed → same keypair) | M1-A |
+| 3 | State Document creation, signing, signature verification | M1-A |
+| 4 | State Chain linkage and chain verification | M1-A |
+| 5 | Full recovery flow: seed entry → keypair restoration → public key match → continuity proof | M1-A |
+| 6 | Three boot modes (Genesis, Normal, Recovery) as a valid state machine | M1-A |
+| 7 | Identity independence from storage (keypair lives in seed, not on storage) | M1-A |
+| 8 | Environment Manifest creation, signing, and verification | M2-A |
+| 9 | User data integrity hashing and verification | M2-A |
+| 10 | Storage replacement with identity + environment preserved | M2-A |
+| 11 | Environment chain independent of state chain | M3-A |
+| 12 | Incremental environment updates without state migration | M3-A |
+| 13 | Cross-link consistency between State Documents and Environment Manifests | M3-A |
+
+## Key Architectural Decisions
+
+1. Identity is cryptographic (Ed25519 keypair), not a UUID or hostname.
+2. Continuity is formal: same keypair + verified State Chain = same system.
+3. Identity must be independent of the component it outlives (Recovery Seed).
+4. No booting in unknown identity state (safety halt).
+5. Boot protocol has 5 stages with 3 modes: Genesis, Normal, Recovery.
+6. M1 proves one thing: storage replacement without reinstallation.
+7. M1-A (QEMU) before M1-B (hardware).
+
+## Open Research Topics
+
+*   Fork detection and Divorce Statements (deferred past M1).
+*   Ownership transfer and multi-device identity (deferred past M1).
+*   Autonomous agent continuity (deferred past M1).
+*   Secure element / TPM key storage (deferred past M1).
+*   Encrypted State Documents (deferred past M1).
+*   Bootloader-level identity verification (deferred past M1).
+
+---
+
+This document is a living architectural artifact. Future work should rely on this file as the primary source of context.
