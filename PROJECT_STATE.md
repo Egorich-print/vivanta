@@ -2,6 +2,8 @@
 
 This document summarizes the durable architectural knowledge of the Theseus OS project. It is a living architectural artifact, intended to guide the project's long-term evolution.
 
+The definitive order of development, milestones, and engineering tracks is governed by the [Master Roadmap](docs/architecture/master-roadmap.md), which serves as the core engineering constitution for the project. All architectural decisions and technical sprints must align with the roadmap.
+
 ## Vision
 
 Theseus OS is an operating system that preserves its identity and user environment across complete replacement of its hardware components. The core philosophy is minimizing friction between users and hardware evolution.
