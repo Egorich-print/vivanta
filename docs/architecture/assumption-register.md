@@ -22,8 +22,8 @@ knowledge** from **working hypotheses**.
 | A-001 | UART base address = `0x0C1B0000` (BLSP1 UART0) | ❌ **REJECTED**: `earlycon=msm_serial_dm,0xc170000`, DTB alias `serial0` → `/soc/serial@0c170000` | EXP-001: DTB extraction, recovery kernel `cmdline` | 🔴 Rejected |
 | | **Corrected**: UART base = `0x0C170000` | Confirmed by DTB reg `0x0C170000` size `0x100000`, compatible `qcom,msm-uartdm-v1.4` | | 🟢 Verified |
 | A-002 | UART is initialized by ABL before kernel entry | `earlycon=msm_serial_dm` works at boot without kernel UART initialization | EXP-001: observe kernel cmdline earlycon behaviour | 🟡 Partially Verified |
-| A-003 | Kernel load address = `0x80000000` | boot.img header reports `kernel_load_addr = 0x00008000`; this may be overridden by ABL | EXP-001: inspect boot.img header | 🔶 Unverified |
-| A-004 | Entry point = load address (no offset) | boot.img header entry field not explicitly present in v1 format; ARM64 entry is at `load_addr + text_offset` | EXP-001: requires ABL source code analysis | 🔶 Unverified |
+| A-003 | Kernel load address = `0x80000000` | boot.img header reports `kernel_load_addr = 0x00008000`; ABL ignores this and loads at `0x40000000` (start of DDR on SDM660). Confirmed from `/proc/iomem`: `Kernel code` at `0x40080000 = 0x40000000 + 0x80000`. Stub is PIC, so any address works. | EXP-002: decompress kernel Image, parse header, cross-reference iomem | 🟢 Verified |
+| A-004 | Entry point = load address (no offset) | ARM64 boot protocol: bootloader jumps to load address (offset 0 of Image). ABL jumps to `0x40000000` → `_start` → `b _real_start` branches to real entry. Stub uses PC-relative code. | EXP-002: ARM64 Image header analysis + boot protocol spec | 🟢 Verified |
 | A-005 | ABL loads the kernel via ARM64 Linux boot protocol | boot.img format: Android v1, gzip kernel, page_size=4096, uses DTBO | EXP-001: boot.img header + partition inspection | 🟡 Partially Verified |
 | A-006 | DTB is appended to the kernel image or in a separate dtbo partition | DTBO partition exists (`mmcblk0p52`); `androidboot.dtb_idx=11` selects DTB from table | EXP-001: `ls /dev/block/by-name/dtbo`, inspect `/proc/device-tree` | 🟢 Verified |
 | A-007 | MSM UART DM register layout (TX at +0x00, SR at +0x08, bit 2 = TX ready) | Compatible string `qcom,msm-uartdm-v1.4` matches MSM UART DM register layout | EXP-001: DTB compatible string | 🟡 Partially Verified |
@@ -34,8 +34,8 @@ knowledge** from **working hypotheses**.
 
 | ID | Assumption | Evidence | Validation Method | Status |
 |----|-----------|----------|-------------------|--------|
-| A-008 | Page table walk on SDM660 uses standard ARMv8 MMU | ARMv8 architecture reference | Hardware bringup: observe MMU enable + page walk | 🟢 Verified (by ARM spec) |
-| A-009 | MemoryObject lifecycle (Created→Allocated→Mapped→Shared→Revoked) is complete for M1-B use cases | M3-C QEMU validation | Hardware bringup: verify on lavender | 🟡 Partially Verified (QEMU only) |
+| A-010 | Page table walk on SDM660 uses standard ARMv8 MMU | ARMv8 architecture reference | Hardware bringup: observe MMU enable + page walk | 🟢 Verified (by ARM spec) |
+| A-011 | MemoryObject lifecycle (Created→Allocated→Mapped→Shared→Revoked) is complete for M1-B use cases | M3-C QEMU validation | Hardware bringup: verify on lavender | 🟡 Partially Verified (QEMU only) |
 
 ## Process
 
