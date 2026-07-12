@@ -19,13 +19,16 @@ knowledge** from **working hypotheses**.
 
 | ID | Assumption | Evidence | Validation Method | Status |
 |----|-----------|----------|-------------------|--------|
-| A-001 | UART base address = `0x0C1B0000` (BLSP1 UART0) | Downstream kernel DTS references, common SDM660 UART mapping | EXP-001: DTB extraction, recovery kernel `iomem` | 🔶 Unverified |
-| A-002 | UART is initialized by ABL before kernel entry | ABL is known to use UART for debug output | EXP-001: observe UART output before driver init | 🔶 Unverified |
-| A-003 | Kernel load address = `0x80000000` | Android boot.img defaults for ARM64, common Qualcomm base | EXP-001: inspect boot.img header | 🔶 Unverified |
-| A-004 | Entry point = load address (no offset) | Linker script assumes `.text` at `0x80000000` | EXP-001: boot.img header entry point field | 🔶 Unverified |
-| A-005 | ABL loads the kernel via ARM64 Linux boot protocol | Standard Android boot chain | EXP-001: verify with boot.img header version + format | 🔶 Unverified |
-| A-006 | DTB is appended to the kernel image or in a separate dtbo partition | Common Qualcomm implementation | EXP-001: inspect boot.img, recovery `/proc/device-tree` | 🔶 Unverified |
-| A-007 | MSM UART DM register layout (TX at +0x00, SR at +0x08, bit 2 = TX ready) | Qualcomm UART DM documentation | EXP-001: verify against DTS compatible string | 🔶 Unverified |
+| A-001 | UART base address = `0x0C1B0000` (BLSP1 UART0) | ❌ **REJECTED**: `earlycon=msm_serial_dm,0xc170000`, DTB alias `serial0` → `/soc/serial@0c170000` | EXP-001: DTB extraction, recovery kernel `cmdline` | 🔴 Rejected |
+| | **Corrected**: UART base = `0x0C170000` | Confirmed by DTB reg `0x0C170000` size `0x100000`, compatible `qcom,msm-uartdm-v1.4` | | 🟢 Verified |
+| A-002 | UART is initialized by ABL before kernel entry | `earlycon=msm_serial_dm` works at boot without kernel UART initialization | EXP-001: observe kernel cmdline earlycon behaviour | 🟡 Partially Verified |
+| A-003 | Kernel load address = `0x80000000` | boot.img header reports `kernel_load_addr = 0x00008000`; this may be overridden by ABL | EXP-001: inspect boot.img header | 🔶 Unverified |
+| A-004 | Entry point = load address (no offset) | boot.img header entry field not explicitly present in v1 format; ARM64 entry is at `load_addr + text_offset` | EXP-001: requires ABL source code analysis | 🔶 Unverified |
+| A-005 | ABL loads the kernel via ARM64 Linux boot protocol | boot.img format: Android v1, gzip kernel, page_size=4096, uses DTBO | EXP-001: boot.img header + partition inspection | 🟡 Partially Verified |
+| A-006 | DTB is appended to the kernel image or in a separate dtbo partition | DTBO partition exists (`mmcblk0p52`); `androidboot.dtb_idx=11` selects DTB from table | EXP-001: `ls /dev/block/by-name/dtbo`, inspect `/proc/device-tree` | 🟢 Verified |
+| A-007 | MSM UART DM register layout (TX at +0x00, SR at +0x08, bit 2 = TX ready) | Compatible string `qcom,msm-uartdm-v1.4` matches MSM UART DM register layout | EXP-001: DTB compatible string | 🟡 Partially Verified |
+| A-008 | Exception level at kernel entry = EL1 | dmesg: `CPU: All CPU(s) started at EL1` | EXP-001: dmesg | 🟢 Verified |
+| A-009 | MMU state at kernel entry = disabled | Standard ARM64 Linux boot protocol; kernel enables MMU in `__primary_switch` | EXP-001: kernel boot flow analysis | 🟢 Verified (by ARM spec) |
 
 ### M3 Memory Model
 
