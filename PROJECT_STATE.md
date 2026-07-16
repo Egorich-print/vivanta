@@ -88,10 +88,26 @@ This replaces the earlier "Adaptive Computing Platform" / "Adaptive Operating Pl
 | M3-A | ✅ Complete | Incremental Environment Continuity — tracked changes without state migration |
 | M3-B | ✅ Complete | Memory Object Foundation — resource-oriented memory model (QEMU) |
 | M3-C | ✅ Complete | Memory Object Semantics — lifecycle, clone, share, revoke |
-| M1-B | 🔧 In Preparation | Hardware bringup — Redmi Note 7 (lavender, SDM660) |
-| R2 | 🔧 In Progress | Reality Lock — architecture freeze, repository reorg, hardware bringup |
+| M1-B | ⏸️ Deferred | Hardware bringup — Redmi Note 7 (lavender, SDM660) |
+| R2 | ✅ Complete | Reality Lock — architecture freeze, repository reorg |
+| ACS | ✅ Complete | Architecture Cleanup Sprint — kernel/arch/platform/target split, extern "Rust" contract |
+| **M4** | ✅ **Complete** | **Execution Foundation — cooperative multi-threading, timer, thread lifecycle, repository restructuring** |
+| M4.4 | 🔧 In Preparation | Address Spaces — VMM fill, mmap/munmap/mprotect |
 
-All milestones beyond M1 were collapsible; M2 and M3 have been executed successfully. The focus now shifts to real hardware preparation.
+### M4 — Execution Foundation
+
+M4 delivered the first working kernel-thread environment on TheseusOS:
+
+- **Cooperative round-robin scheduling** with 3 threads (boot + persistent + terminating)
+- **Thread lifecycle management**: `create_kernel_thread`, `thread_exit`, `thread_trampoline`, `cleanup()`, idle thread (WFI)
+- **Timer at ~79 Hz** on QEMU (CNTP, IRQ 30, tick counting)
+- **Architecture-independent kernel**: verified by `cargo build -p target-test` (kernel + arch-test-stub, no ISA dependency)
+- **Repository restructuring**: `boot/` → `archive/boot_legacy/`, `kernel/src/memory/` → `kernel-memory-frozen/` crate
+- **5 ADRs documented**: ADR-011 through ADR-015
+
+**Known limitation**: True preemptive context switching is blocked on QEMU (writing to on-stack ExceptionFrame from IRQ prevents subsequent timer IRQs). Validation deferred to physical ARM64 hardware (RK3568). Cooperative switching works correctly.
+
+Details in `docs/milestones/M4/acceptance.md`.
 
 ## M1 Boundary
 
@@ -141,6 +157,13 @@ The following architectural claims are now experimentally validated between QEMU
 | 16 | MemoryObject: create, allocate, map, clone, share, revoke lifecycle | M3-C |
 | 17 | Resource-oriented memory model: MemoryBackend, MRM, placement policy | M3-BC |
 | 18 | Multiple virtual mappings per MemoryObject | M3-C |
+| 19 | Kernel depends only on arch-api (not arch-aarch64) | ACS |
+| 20 | Thread scheduling policy in kernel, context switching mechanism in arch | ACS |
+| 21 | Through-type boundary: `ArchContext = usize`, `InterruptFrameHandle = usize` | ACS |
+| 22 | extern "Rust" bidirectional contract between kernel and arch | ACS |
+| 23 | MMIO addresses moved from kernel to platform (BootInfo.mmio_regions) | ACS |
+| 24 | Build-time proof: kernel links with arch-test-stub (no real ISA) | ACS |
+| 25 | boot-info crate: zero dependencies, core-only contract types | ACS |
 
 ## Key Architectural Decisions
 
