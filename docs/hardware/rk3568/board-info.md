@@ -126,17 +126,26 @@ FDT and ATAGS support not compiled in - hanging
 This means `bootm` cannot pass a device tree or ATAGs to the kernel.
 **This is a blocker for bootm-based boot.**
 
-### Option B: ARM64 Image + booti (working)
+### Option B: ARM64 Image + booti (working, validated)
 
 U-Boot has `booti` available. The kernel must:
 1. Have a valid 64-byte ARM64 Image header (magic `0x644d5241` at offset 56)
 2. Be PIE-capable (bit 3 of flags = 1) or use `text_offset = 0`
 3. Accept a DTB address in x0 (or handle x0 = 0)
 
-For `booti` to work, pass a DTB (either loaded from flash or written to RAM):
+Two working boot commands (validated 2026-07-19):
+
 ```
+# With U-Boot's internal control FDT (no external DTB needed):
+booti 0x20500000 - 0xebd753c0
+
+# With external DTB loaded to fdt_addr_r:
 booti 0x20500000 - 0x0a100000
 ```
+
+**U-Boot control FDT** at `0xebd753c0` is always available and contains the board's
+device tree (memory banks, CPUs, UART, GIC). This is the simplest boot path —
+no external DTB loading required.
 
 The DTB at `fdt_addr_r` (0x0a100000) must be written to RAM before booting.
 U-Boot does NOT automatically load a DTB for `booti` on this board.
@@ -149,11 +158,33 @@ The board has a DTB header in flash but the data partition is missing/corrupt.
 A working DTB for this board: `rk3568-nvr-demo-v12.dtb` (58 KiB).
 When loaded to `fdt_addr_r`, U-Boot parses it correctly (adds memory banks, configs video).
 
-### Option C: Serial download (fallback)
+### Option C: Serial download (fallback, validated)
 
 No serial download commands (`loadx`, `loady`, `loadb`) are available in this U-Boot.
-To load data over serial, use `mm.l` (interactive memory modify) with a Python script.
-At 115200 baud, ~280 words/second is achievable; a 72 KiB kernel loads in ~65 seconds.
+No `go` command either. To load data over serial, use `mm.l` (interactive memory modify)
+with a Python script.
+
+**Reliable mm.l parameters (validated 2026-07-19):**
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Words per chunk | 64 | Larger chunks cause UART FIFO overflow |
+| Delay per word | 0.06s | Required for U-Boot to drain NS16550 64-byte FIFO |
+| Delay per chunk start | 0.1s | For mm.l command echo |
+| Delay per chunk end | 0.15s | For mm.l exit + U-Boot prompt sync |
+| Buffer drain | `s.reset_input_buffer()` | Discard echo, no per-word reads needed |
+| Total for 4.5K | ~90s | 1141 words at proven timing |
+| Total for 8.5K | ~3 min | 2173 words at proven timing |
+
+**Known failure modes:**
+- **Burst writes** (>64 words without sync) → data corruption (FIFO overflow)
+- **Per-word delay < 0.03s** → echo buffering causes address/value misalignment
+- **TFTP** → hangs if Ethernet cable not connected (PHY auto-negotiation timeout)
+
+**NOT available:**
+- `go` command (not compiled in)
+- `loadx`, `loady`, `loadb` (not compiled in)
+- Fast serial download protocols
 
 ## Kernel Requirements
 
@@ -272,13 +303,13 @@ Protocol: sends kernel binary + DTB via interactive `mm.l` U-Boot commands.
 Each word (32-bit) is sent with a 3-byte hex value + CR, synchronized on `?` prompt.
 Achieves ~280 words/second at 115200 baud.
 
-## Bring-up Status (2026-07-17)
+## Bring-up Status (2026-07-19 — M4.5.2 diagnostic complete)
 
 ### Stage 1 ✅ — Kernel boots, UART outputs text
 
 | Step | Status | Details |
 |------|--------|---------|
-| U-Boot accepts image | ✅ | `booti` with uImage header (PIE=1, text_offset=0) |
+| U-Boot accepts image | ✅ | `booti 0x20500000 - 0xebd753c0` |
 | Kernel entry reached | ✅ | Entry code executes at EL2 |
 | MMU disabled | ✅ | Both SCTLR_EL2 and SCTLR_EL1 cleared before memory access |
 | EL2→EL1 transition | ✅ | via `eret` with SPSR_EL2=0x3c5, HCR_EL2.RW=1 |
@@ -288,38 +319,152 @@ Achieves ~280 words/second at 115200 baud.
 | UART outputs text | ✅ | Direct register writes via `strb` to 0xFE660000 |
 | Hardcoded memory map | ✅ | |
 
-### Stage 2 🔲 — Full initialization
+### Stage 2 ✅ — Full initialization (M4.5.2 complete)
 
 | Step | Status | Notes |
 |------|--------|-------|
-| `println!` macro | ❌ | Hangs — GlobalConsole lock or Write impl issue |
-| FDT console init | ❌ | Hangs on DTB memory access (cache coherency) |
-| FDT memory map | ❌ | Same DTB access issue |
+| CPACR_EL1 fix (EL2 path) | ✅ | FPEN=3, CPTR_EL2.TFP=0 (was bug: CPTR_EL2 set instead of CPACR_EL1) |
+| `println!` / `with_console` | ✅ | Works through GlobalConsole via Ns16550 driver |
+| Console trait (direct call) | ✅ | `c.write_str()` via `write_volatile` |
+| FP/SIMD instructions | ✅ | `fmov d0, x6` executes without trap |
 | MMU enable | 🔲 | |
 | Scheduler | 🔲 | |
-| EL0 transition | 🔲 | |
+| FDT console init | 🔲 | Blocked on DTB cache coherency |
+| FDT memory map | 🔲 | Blocked on DTB cache coherency |
+| EL0 transition | 🔲 | | |
 
 ### Known Issues
 
-1. **println! hangs** — the `GlobalConsole` implementation in `boot_common` hangs when
-   `println!()` is called. Likely a lock issue or borrow conflict with `static`
-   `GLOBAL_CONSOLE`. Workaround: use direct UART writes.
+1. ~~**println! hangs** — the `GlobalConsole` implementation in `boot_common` hangs when~~
+   ~~`println!()` is called.~~ ✅ **RESOLVED 2026-07-19**. Root cause: CPACR_EL1.FPEN=0
+   (not set in EL2 entry path) + CPTR_EL2.TFP=1 (trap all FP/SIMD to EL2). FP/SIMD
+   instructions used by `write_volatile` alignment checks in debug builds caused
+   silent trap → hang. Fix: `msr CPACR_EL1, x5` + `msr CPTR_EL2, xzr` in EL2 entry path.
 
 2. **DTB cache coherency** — DTB loaded via `mm.l` while MMU was on. After MMU disable,
    the data cache has stale entries. DTB at physical address 0x0A100000 is not reliably
    readable. Fix: clean/invalidate D-cache for the DTB region after MMU disable.
    Workaround: hardcode UART init and memory map.
 
-### Kernel Boot Signature (for verification)
+### RAM Persistence
 
-After `booti 0x20500000 - 0xA100000`, expected output:
+- **U-Boot `reset` command**: RAM contents preserved (DDR in self-refresh)
+- **Power cycle** (unplug/replug): RAM cleared
+- **boot_flashkernel** reads 12 MiB from SPI NAND to 0x20500000 on each boot, overwriting
+  anything previously loaded via mm.l
+
+### Diagnostic Boot Output (validated 2026-07-19)
+
+Minimal boot signature (with diagnostic markers):
+
 ```
 Starting kernel ...
 
-─── Theseus Boot v0.1 ────
-  Arch:      AArch64
-  Platform:  Rockchip RK3568
-  Memory:    3824 MiB across 1 region(s)
-  CPUs:      4 core(s)
-  Status:    Stage 1 ✓
+KC3FGZAB1CONSOLE OK231234WITH CONSOLE OK54X
 ```
+
+| Marker | Location | Meaning |
+|--------|----------|---------|
+| `K` | After BSS zeroing | asm entry alive |
+| `C` + digit | After TX wait | CPACR_EL1.FPEN bits 21:20 (3 = full FP access) |
+| `F` | Before fmov | FP/SIMD test start |
+| `G` | After fmov | FP/SIMD test passed (no trap) |
+| `Z` | Before bl adapter_main | Rust function will be called |
+| `A` | First line of adapter_main | Rust code executing |
+| `B` | After set_console() | Console reference stored |
+| `1` | Before Console trait call | Direct write_str test |
+| `CONSOLE OK` | | Console trait output |
+| `2` | After write_str | Direct test complete |
+| `3` | Before with_console | GlobalConsole lock test |
+| `12345` | Inside with_console | Lock steps (enter, get, expect, call, exit) |
+| `WITH CONSOLE OK` | | with_console() output |
+| `4` | After with_console | GlobalConsole test complete |
+| `X` | Spin loop | Kernel alive, idle |
+
+## Debugging Notes (2026-07-19 Session)
+
+### CPACR_EL1 / CPTR_EL2 Fix (Root cause of all early hangs)
+
+**Problem**: EL2 entry path (`10:` in entry code) had:
+
+```asm
+mov x5, #(0b11 << 20)
+msr CPTR_EL2, x5       // BUG: sets TFP=1 (trap ALL FP/SIMD to EL2)
+```
+
+And did NOT set CPACR_EL1. After eret to EL1:
+- CPTR_EL2.TFP=1 → any FP/SIMD instruction traps to EL2 (no vector table → hang)
+- CPACR_EL1=0 (reset value) → FPEN=0 → would trap to EL1 anyway
+
+**Fix** (applied 2026-07-19):
+
+```asm
+mov x5, #(0b11 << 20)
+msr CPACR_EL1, x5       // FPEN=3: enable FP at EL1 and EL0
+msr CPTR_EL2, xzr       // clear TFP — no FP/SIMD traps to EL2
+```
+
+**Symptom**: `write_volatile` in debug builds calls `precondition_check` →
+`is_aligned_to` which uses NEON (fmov, cnt, addv) → silent trap → hang.
+Release builds or `-C opt-level=z` omit these checks, which explains why QEMU
+with different optimisation settings sometimes worked.
+
+### Kernel entry debug markers
+
+For early bring-up, kernel entry code writes debug characters to UART:
+
+| Marker | Location | Meaning |
+|--------|----------|---------|
+| `K` | After BSS zeroing, before BOOT_CONTEXT | asm entry alive |
+| `C` + digit | After K, CPACR_EL1 read | CPACR_EL1.FPEN bits 21:20 (0-3) |
+| `F` | Before fmov d0, x6 | FP/SIMD test marker |
+| `G` | After fmov d0, x6 | FP/SIMD works (no trap) |
+| `Z` | Before bl adapter_main | Rust function will be called |
+| `A` | First line of adapter_main | Rust code executing |
+| `B` | After set_console() | Console reference stored |
+| `1`–`5` | Inside with_console | Lock steps debug |
+| `3` | Before with_console test | GlobalConsole lock test |
+| `4` | After with_console | Test complete |
+| `X` | Spin loop | Kernel alive, idle |
+
+### UART byte write methods (validated on RK3568)
+
+- ✅ `asm!("strb {val:w}, [{base}]")` — works (16-bit strh also works)
+- ✅ `core::ptr::write_volatile(base as *mut u32, val)` — works NOW (FP/SIMD fixed)
+- ❌ `core::ptr::write_volatile(base, b)` where base is `*mut u8` — 8-bit STRB not
+   supported on all NS16550 implementations with reg-shift=2; 32-bit write required.
+- ✅ Direct asm from entry code (`mov w5, #0x4b; str w5, [x4]`) — always works
+
+### mm.l Flash Reliability (2026-07-19 findings)
+
+The proven flash approach for this U-Boot (no flow control, no serial download protocol):
+
+```python
+for i in range(0, len(words), 64):
+    chunk = words[i:i+64]
+    base = ADDR + i * 4
+    s.write(f'mm.l 0x{base:08x}\n'.encode())
+    time.sleep(0.1)
+    for v in chunk:
+        s.write(f'0x{v:08x}\n'.encode())
+        time.sleep(0.06)
+    s.write(b'.\n')
+    time.sleep(0.15)
+    s.reset_input_buffer()
+```
+
+**Rules**:
+- 64 words per chunk max (NS16550 64-byte FIFO limit)
+- 0.06s minimum per-word delay (allows U-Boot to drain FIFO)
+- 0.1s delay before chunk (mm.l startup echo)
+- 0.15s delay after chunk (mm.l exit + prompt sync)
+- `reset_input_buffer()` to discard echo without per-word reads
+- Burst mode (>1 word without inter-word delay) causes data corruption
+
+### Autoboot behavior
+
+The board's `boot_flashkernel` reads 12 MiB from flash and tries `bootm` at five
+addresses (0x20500000, 0x20520000, 0x20540000, 0x20560000, 0x20580000).
+After all 5 attempts fail, returns to U-Boot prompt (~30 seconds total).
+
+The written kernel binary (5-20 KiB) fits easily in the 12 MiB partition.
