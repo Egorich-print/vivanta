@@ -1,0 +1,13 @@
+[package]
+name = "vivanta-target-qemu-armv7a"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — QEMU ARMv7-A target binary"
+
+[dependencies]
+vivanta-boot-info = { path = "../boot-info" }
+vivanta-boot-common = { path = "../boot_common" }
+vivanta-arch-api = { path = "../arch-api" }
+vivanta-arch-armv7a = { path = "../arch-armv7a" }
+vivanta-platform-qemu = { path = "../platform-qemu" }
+vivanta-kernel = { path = "../kernel" }

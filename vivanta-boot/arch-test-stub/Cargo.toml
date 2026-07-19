@@ -1,0 +1,8 @@
+[package]
+name = "vivanta-arch-test-stub"
+version = "0.1.0"
+edition = "2021"
+description = "Architecture test stub — provides extern \"Rust\" implementations for build-time validation"
+
+[dependencies]
+vivanta-arch-api = { path = "../arch-api" }

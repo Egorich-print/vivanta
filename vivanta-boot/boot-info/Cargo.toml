@@ -1,0 +1,7 @@
+[package]
+name = "vivanta-boot-info"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — boot-time contract between Platform and Kernel"
+
+[dependencies]

@@ -1,0 +1,8 @@
+[package]
+name = "vivanta-kernel-memory-frozen"
+version = "0.1.0"
+edition = "2021"
+description = "Frozen Memory Resource Model — RFC-012/013/015/016 (ADR-011)"
+
+[dependencies]
+vivanta-boot-common = { path = "../boot_common" }

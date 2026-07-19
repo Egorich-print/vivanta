@@ -1,0 +1,13 @@
+[package]
+name = "vivanta-kernel"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — architecture-independent kernel logic"
+
+[features]
+trace-address-space = []
+
+[dependencies]
+vivanta-boot-info = { path = "../boot-info" }
+vivanta-boot-common = { path = "../boot_common" }
+vivanta-arch-api = { path = "../arch-api" }

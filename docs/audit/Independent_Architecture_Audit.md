@@ -8,7 +8,7 @@
 
 ## 1. Project Context
 
-**Vivanta** (formerly TheseusOS) is an operating system research and engineering project.
+**Vivanta** (formerly Vivanta) is an operating system research and engineering project.
 
 Vivanta is **not** a Linux clone, **not** a microkernel experiment, and **not** intended to reproduce Unix semantics.
 
@@ -582,7 +582,7 @@ P7  Additional hardware targets (RPi3, SDM660)
   - **Rust crate name**: `boot_common` → `vivanta_boot_common` (hyphen→underscore)
   - **Filesystem path**: `../boot_common` → **UNCHANGED**
 - Update `build.sh` package references.
-- Update `description` fields: "Theseus OS —" → "Vivanta —"
+- Update `description` fields: "Vivanta —" → "Vivanta —"
 
 **Verify**:
 - `cargo metadata` succeeds
@@ -598,15 +598,15 @@ P7  Additional hardware targets (RPi3, SDM660)
   - ADR titles (historical)
   - RFC numbers
   - "Ship of Theseus" philosophy term
-  - Links to Theseus OS research
+  - Links to Vivanta research
   - Git history
 
 **Verify**: `./build.sh rk3568` still clean.
 
 ### V0.1c — Directory Rename
 
-- `TheseusOS/` → `Vivanta/`
-- `theseus-boot/` → `vivanta-boot/`
+- `Vivanta/` → `Vivanta/`
+- `vivanta-boot/` → `vivanta-boot/`
 - Inner crate directories (`boot_common/`, `kernel/`, etc.) remain unchanged.
 
 **Verify**: full rebuild after rename.
@@ -643,7 +643,7 @@ docs/vivanta/
 **P0 Exit Criteria**:
 - 0 warnings on all platforms
 - `cargo metadata` correct
-- No "TheseusOS" branding remains (historical ADR/RFC references preserved)
+- No "Vivanta" branding remains (historical ADR/RFC references preserved)
 - Roadmap and PROJECT_STATE reflect actual state
 
 ---

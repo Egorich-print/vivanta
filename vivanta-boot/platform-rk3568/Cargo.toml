@@ -1,0 +1,8 @@
+[package]
+name = "vivanta-platform-rk3568"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — Rockchip RK3568 platform (NS16550 UART)"
+
+[dependencies]
+vivanta-boot-common = { path = "../boot_common" }

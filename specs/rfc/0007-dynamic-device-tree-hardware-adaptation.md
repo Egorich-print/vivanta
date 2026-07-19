@@ -100,7 +100,7 @@ The adaptation happens at three levels:
 - Theseus can use this to add platform-specific information
 - Example: inject `theseus,system-serial` property into the DTB
 
-**Level 2: Runtime DTB Parsing (Theseus Boot Stub)**
+**Level 2: Runtime DTB Parsing (Vivanta Stub)**
 - Minimal DTB parser reads the fixed-up DTB
 - Extracts hardware inventory
 - Records in State Document

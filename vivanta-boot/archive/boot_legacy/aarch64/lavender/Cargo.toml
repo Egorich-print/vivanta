@@ -1,0 +1,7 @@
+[package]
+name = "vivanta-boot-aarch64-lavender"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vivanta-boot-common = { path = "../../../../boot_common" }

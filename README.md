@@ -1,4 +1,4 @@
-# Theseus OS
+# Vivanta
 
 Experimental operating system exploring identity continuity, resource-oriented memory, and portable boot architecture.
 
@@ -9,7 +9,7 @@ See `docs/architecture/repository-layout.md` for directory organization and nami
 ## Quick start
 
 ```bash
-cd theseus-boot
+cd vivanta-boot
 cargo build -p boot-aarch64-qemu-kernel --target aarch64-unknown-none
 cargo build -p boot-aarch32-qemu-virt --target armv7a-none-eabi
 ```

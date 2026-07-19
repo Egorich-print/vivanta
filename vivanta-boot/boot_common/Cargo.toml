@@ -1,0 +1,7 @@
+[package]
+name = "vivanta-boot-common"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vivanta-boot-info = { path = "../boot-info" }

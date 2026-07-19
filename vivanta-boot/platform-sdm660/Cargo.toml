@@ -1,0 +1,8 @@
+[package]
+name = "vivanta-platform-sdm660"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — Qualcomm SDM660 platform (MSM UART)"
+
+[dependencies]
+vivanta-boot-common = { path = "../boot_common" }

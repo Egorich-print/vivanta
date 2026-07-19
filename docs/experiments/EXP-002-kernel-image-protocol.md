@@ -84,4 +84,4 @@ The lavender boot stub was converted from absolute (`ldr x1, =symbol`) to PC-rel
 
 - [x] `docs/experiments/EXP-002-kernel-image-protocol.md` (this document)
 - [x] Updated `docs/architecture/assumption-register.md`
-- [x] Position-independent lavender boot stub (`theseus-boot/boot/aarch64/lavender/`)
+- [x] Position-independent lavender boot stub (`vivanta-boot/boot/aarch64/lavender/`)

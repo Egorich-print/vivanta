@@ -1,0 +1,8 @@
+[package]
+name = "vivanta-platform-qemu"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — QEMU virt platform (PL011 UART, FDT)"
+
+[dependencies]
+vivanta-boot-common = { path = "../boot_common" }

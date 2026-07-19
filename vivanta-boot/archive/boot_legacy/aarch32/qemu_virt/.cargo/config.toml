@@ -1,0 +1,7 @@
+[target.armv7a-none-eabi]
+rustflags = [
+    "-C", "link-arg=-Tboot/aarch32/qemu_virt/linker.ld",
+]
+
+[build]
+target = "armv7a-none-eabi"

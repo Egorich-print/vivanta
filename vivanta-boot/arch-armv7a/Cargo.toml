@@ -1,0 +1,9 @@
+[package]
+name = "vivanta-arch-armv7a"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — ARMv7-A architecture implementation (frozen, ADR-011)"
+
+[dependencies]
+vivanta-boot-common = { path = "../boot_common" }
+vivanta-arch-api = { path = "../arch-api" }

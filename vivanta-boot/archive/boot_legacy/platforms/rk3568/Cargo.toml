@@ -1,0 +1,9 @@
+[package]
+name = "vivanta-rk3568-legacy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vivanta-boot-common = { path = "../../../../boot_common" }
+vivanta-boot-info = { path = "../../../../boot-info" }
+

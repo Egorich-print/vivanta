@@ -7,7 +7,7 @@
 | `docs/` | Active architecture documentation, milestones, ADRs, hardware notes |
 | `specs/` | Formal specifications — RFCs and schemas |
 | `archive/` | Preserved historical artifacts (not authoritative) |
-| `theseus-boot/` | Active boot/kernel code (Rust workspace) |
+| `vivanta-boot/` | Active boot/kernel code (Rust workspace) |
 | `theseus-m1/` | M1 experiment code (to be classified — see below) |
 
 ## docs/

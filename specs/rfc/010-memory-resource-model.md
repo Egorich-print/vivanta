@@ -25,7 +25,7 @@ Physical RAM
     └── Swap
 ```
 
-TheseusOS memory model:
+Vivanta memory model:
 
 ```
 AllocationRequirements (size, latency, bandwidth, persistence, policy)

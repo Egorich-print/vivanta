@@ -10,7 +10,7 @@
 
 *   **Active Track:** `V-epics V0–V1` (Rename + System State)
 *   **Active Milestone:** `M4.5.2` (RK3568 bring-up — hardware diagnostic compiled, waiting on board connection)
-*   **Current Engineering Objective:** Stabilise `println!` and DTB parsing on RK3568 real hardware. In parallel: rename TheseusOS → Vivanta, create SystemState.
+*   **Current Engineering Objective:** Stabilise `println!` and DTB parsing on RK3568 real hardware. In parallel: rename Vivanta → Vivanta, create SystemState.
 *   **Architecture Version:** R2 (historical baseline) + V-epics (current active track)
 *   **Architecture Status:** Stable. 4 new ADRs (020–023) ratified post-audit.
 
@@ -43,7 +43,7 @@ The following topics are intentionally out of scope for the near and mid-term:
 ### Current Track — V-epics
 
 ```
-P0  Rename + cleanup (TheseusOS → Vivanta)
+P0  Rename + cleanup (Vivanta → Vivanta)
     ↓
 P1  SystemState + Volatile Identity
     ↓
@@ -198,7 +198,7 @@ V-epics replace the earlier R-phase model as the primary planning structure. M-n
 |----------|-------------|---------------|
 | V0.1a | Cargo package rename (scripted, git tags) | `cargo check --workspace` + 2 build targets pass |
 | V0.1b | Documentation rename | Build clean |
-| V0.1c | Directory rename (`TheseusOS/` → `Vivanta/`) | Full rebuild clean |
+| V0.1c | Directory rename (`Vivanta/` → `Vivanta/`) | Full rebuild clean |
 | V0.2 | Roadmap refresh (this document + PROJECT_STATE.md) | All references consistent |
 | V0.3 | `docs/vivanta/` scaffold | Stubs created, no dead links |
 
@@ -278,7 +278,7 @@ V-epics replace the earlier R-phase model as the primary planning structure. M-n
 
 ## Design Watchlist (Architectural Lessons)
 
-### Theseus OS (Academic Research)
+### Vivanta (Academic Research)
 -   **Study:** Safe live component replacement, Rust typing as a safety boundary, module loading without ELFs.
 -   **Do Not Copy:** Process-less monolithic single-address-space design, custom non-standard object format.
 

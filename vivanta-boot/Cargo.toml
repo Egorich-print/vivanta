@@ -1,0 +1,50 @@
+[workspace]
+
+resolver = "2"
+
+members = [
+    # --- Shared libraries ---
+    "boot-info",
+    "boot_common",
+    "arch-api",
+    "arch-aarch64",
+    "arch-armv7a",
+
+    # --- Kernel ---
+    "kernel",
+
+    # --- Frozen RFC prototypes (ADR-011) ---
+    "kernel-memory-frozen",
+
+    # --- Platform support ---
+    "platform-qemu",
+    "platform-rk3568",
+    "platform-sdm660",
+    "platform-allwinner-h616",
+
+    # --- Target binaries ---
+    "target-qemu-aarch64",
+    "target-qemu-armv7a",
+    "target-rk3568",
+    "target-x96q",
+    "target-lavender",
+
+    # --- Test / proof ---
+    "arch-test-stub",
+    "target-test",
+
+    # --- Legacy (pre-ACS boot adapters, frozen) ---
+    "archive/boot_legacy/aarch64/qemu_kernel",
+    "archive/boot_legacy/aarch32/qemu_virt",
+    "archive/boot_legacy/aarch64/lavender",
+    "archive/boot_legacy/platforms/rk3568",
+]
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = "z"
+lto = true
+debug = false

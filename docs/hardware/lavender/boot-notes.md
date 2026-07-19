@@ -14,7 +14,7 @@
 adb reboot bootloader
 
 # Test boot (without flashing)
-fastoot boot theseus-boot.img
+fastoot boot vivanta-boot.img
 
 # UART
 # Find UART pins on the motherboard

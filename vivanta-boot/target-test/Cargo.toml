@@ -1,0 +1,12 @@
+[package]
+name = "vivanta-target-test"
+version = "0.1.0"
+edition = "2021"
+description = "Build-time proof: kernel links with arch-test-stub instead of a real arch"
+
+[dependencies]
+vivanta-boot-info = { path = "../boot-info" }
+vivanta-boot-common = { path = "../boot_common" }
+vivanta-arch-api = { path = "../arch-api" }
+vivanta-arch-test-stub = { path = "../arch-test-stub" }
+vivanta-kernel = { path = "../kernel" }

@@ -1,0 +1,9 @@
+[package]
+name = "vivanta-arch-aarch64"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — AArch64 architecture implementation"
+
+[dependencies]
+vivanta-boot-common = { path = "../boot_common" }
+vivanta-arch-api = { path = "../arch-api" }

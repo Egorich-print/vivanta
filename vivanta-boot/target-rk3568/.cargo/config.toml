@@ -1,0 +1,3 @@
+[build]
+target = "aarch64-unknown-none"
+rustflags = ["-C", "link-arg=-Ttarget-rk3568/linker.ld", "-C", "link-arg=-zmax-page-size=0x1000"]

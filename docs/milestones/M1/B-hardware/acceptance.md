@@ -42,7 +42,7 @@ The simulation used hardcoded hardware inventories. Real hardware requires:
 Qualcomm PBL → SBL → ABL
     │
     ▼ loads theseus_boot.img from boot partition
-Theseus Boot Stub
+Vivanta Stub
     │  validates, parses DTB, extracts inventory
     ▼
 Continuity Check

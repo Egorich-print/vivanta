@@ -1,0 +1,13 @@
+[package]
+name = "vivanta-target-qemu-aarch64"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — QEMU AArch64 target binary"
+
+[dependencies]
+vivanta-boot-info = { path = "../boot-info" }
+vivanta-boot-common = { path = "../boot_common" }
+vivanta-arch-api = { path = "../arch-api" }
+vivanta-arch-aarch64 = { path = "../arch-aarch64" }
+vivanta-platform-qemu = { path = "../platform-qemu" }
+vivanta-kernel = { path = "../kernel" }

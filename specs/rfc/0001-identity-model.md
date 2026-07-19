@@ -18,7 +18,7 @@ Every operating system has a notion of "this system" — typically expressed as 
 - **Shallow**: Easily forged, rarely verified.
 - **Single-dimensional**: One name, one machine.
 
-Theseus OS requires a fundamentally different identity model because the system is defined by its ability to evolve hardware while preserving continuity. The Ship of Theseus metaphor demands that we can answer the question:
+Vivanta requires a fundamentally different identity model because the system is defined by its ability to evolve hardware while preserving continuity. The Ship of Theseus metaphor demands that we can answer the question:
 
 > "Is this the same system it was before the hardware change?"
 

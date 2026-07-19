@@ -1,4 +1,4 @@
-# RFC-008 — Theseus Boot Protocol (TBP)
+# RFC-008 — Vivanta Protocol (TBP)
 
 | Field       | Value                                   |
 |-------------|-----------------------------------------|
@@ -10,7 +10,7 @@
 
 ## Abstract
 
-This RFC defines the **Theseus Boot Protocol (TBP)** — a stable contract between
+This RFC defines the **Vivanta Protocol (TBP)** — a stable contract between
 boot adapters and the kernel.  Every boot path (UEFI, U-Boot, OpenSBI, QEMU
 `-kernel`, BIOS, …) must produce a single `BootInfo` structure and hand it to
 `kernel_main`.  The kernel never calls any boot-adapter code after entry.
@@ -158,7 +158,7 @@ Platform power-on
         │
         ▼
   ┌───────────────────────────┐
-  │  Theseus Boot Adapter     │
+  │  Vivanta Adapter     │
   │  - arch-specific setup    │
   │  - console                │
   │  - memory discovery       │

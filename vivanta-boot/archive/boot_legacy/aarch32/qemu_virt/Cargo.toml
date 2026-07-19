@@ -1,0 +1,10 @@
+[package]
+name = "vivanta-boot-aarch32-qemu-virt"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+vivanta-boot-common = { path = "../../../../boot_common" }
+vivanta-boot-info = { path = "../../../../boot-info" }
+vivanta-kernel = { path = "../../../../kernel" }
+vivanta-arch-armv7a = { path = "../../../../arch-armv7a" }

@@ -1,4 +1,4 @@
-# The Theseus OS Manifesto
+# The Vivanta Manifesto
 
 ## The Problem
 
@@ -6,15 +6,15 @@ The current operating system landscape is fragmented. Users are forced to adapt 
 
 ## Our Vision
 
-Theseus OS is a radical reimagining of what an operating system can be. It is a **universal software platform** designed to be hardware-agnostic, continuously adaptable, and user-centric. Our vision is an OS that evolves with hardware, allowing users to preserve their digital environment across hardware generations and diverse device types without interruption or reinstallation. We aim to eliminate the friction between users, their devices, and their software.
+Vivanta is a radical reimagining of what an operating system can be. It is a **universal software platform** designed to be hardware-agnostic, continuously adaptable, and user-centric. Our vision is an OS that evolves with hardware, allowing users to preserve their digital environment across hardware generations and diverse device types without interruption or reinstallation. We aim to eliminate the friction between users, their devices, and their software.
 
 ## Core Philosophy: The Ship of Theseus
 
-The central metaphor for Theseus OS is the Ship of Theseus. Our operating system must be capable of having every component, including the core architecture, gradually replaced over time without the user perceiving a fundamental change. This principle guides our design towards modularity, adaptability, and backward compatibility.
+The central metaphor for Vivanta is the Ship of Theseus. Our operating system must be capable of having every component, including the core architecture, gradually replaced over time without the user perceiving a fundamental change. This principle guides our design towards modularity, adaptability, and backward compatibility.
 
 ## What is Success?
 
-Success for Theseus OS means:
+Success for Vivanta means:
 
 *   **Hardware Agnosticism**: The ability to run on diverse hardware architectures (x86_64, ARM, RISC-V, etc.) and device types (mobile, desktop, IoT) with a single, cohesive software platform.
 *   **Seamless Hardware Evolution**: Users can replace hardware components (CPU, GPU, peripherals) without needing to reinstall or reconfigure their OS and applications.
@@ -34,4 +34,4 @@ When making decisions about the project, the following principles must be upheld
 6.  **Document Before Code**: Significant architectural decisions must be documented and debated (via ADRs/RFCs) *before* implementation.
 7.  **Modularity and Composability**: The system should be built from independent, composable components.
 
-Theseus OS is not just another Linux distribution; it is a commitment to a fundamentally new approach to operating system design.
+Vivanta is not just another Linux distribution; it is a commitment to a fundamentally new approach to operating system design.

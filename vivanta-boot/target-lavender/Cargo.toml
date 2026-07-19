@@ -1,0 +1,13 @@
+[package]
+name = "vivanta-target-lavender"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — Lavender (SDM660) target binary"
+
+[dependencies]
+vivanta-boot-common = { path = "../boot_common" }
+vivanta-boot-info = { path = "../boot-info" }
+vivanta-arch-api = { path = "../arch-api" }
+vivanta-arch-aarch64 = { path = "../arch-aarch64" }
+vivanta-platform-sdm660 = { path = "../platform-sdm660" }
+vivanta-kernel = { path = "../kernel" }

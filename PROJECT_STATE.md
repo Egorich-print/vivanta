@@ -1,12 +1,12 @@
 # Project State
 
-This document summarizes the durable architectural knowledge of the Vivanta project (formerly TheseusOS). It is a living architectural artifact, intended to guide the project's long-term evolution.
+This document summarizes the durable architectural knowledge of the Vivanta project (formerly Vivanta). It is a living architectural artifact, intended to guide the project's long-term evolution.
 
 The definitive order of development, milestones, and engineering tracks is governed by the [Master Roadmap](docs/architecture/master-roadmap.md), which serves as the core engineering constitution for the project. All architectural decisions and technical sprints must align with the roadmap.
 
 ## Vision
 
-Vivanta (formerly TheseusOS) is an operating system that preserves its identity and user environment across complete replacement of its hardware components. The core philosophy is minimizing friction between users and hardware evolution.
+Vivanta (formerly Vivanta) is an operating system that preserves its identity and user environment across complete replacement of its hardware components. The core philosophy is minimizing friction between users and hardware evolution.
 
 The project has evolved from "a universal operating system" to a more precise identity: **a continuity-preserving computing platform**. The central innovation is not a new kernel or driver model, but a formal protocol for system identity persistence across physical hardware transitions.
 
@@ -119,7 +119,7 @@ V-epics replace the earlier R-phase model as the primary planning structure. See
 
 | V-Epic | Priority | Status | Summary |
 |--------|----------|--------|---------|
-| V0 | P0 | ✅ Partial | Rename TheseusOS → Vivanta (pending), roadmap refresh (✅), docs scaffold (✅) |
+| V0 | P0 | ✅ Partial | Rename Vivanta → Vivanta (pending), roadmap refresh (✅), docs scaffold (✅) |
 | V0.1 | P0 | ✅ Complete | Runtime Identity Bootstrap — SystemState skeleton, IdentityState::Volatile, BootInfo owned copy |
 | V1 | P1 | 🔧 Planning | Continuity model — BootInfo migration, boot-time state separation |
 | V2 / M5 | P2 | 🔧 Planning | Memory Resource Manager — integrate existing MemoryObject |

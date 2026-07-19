@@ -1,0 +1,5 @@
+[package]
+name = "vivanta-arch-api"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — ISA contract (architecture-independent trait definitions)"
