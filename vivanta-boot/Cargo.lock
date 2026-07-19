@@ -168,6 +168,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "vivanta-target-rpi3b-plus"
+version = "0.1.0"
+dependencies = [
+ "vivanta-arch-aarch64",
+ "vivanta-arch-api",
+ "vivanta-boot-common",
+ "vivanta-boot-info",
+ "vivanta-kernel",
+]
+
+[[package]]
 name = "vivanta-target-test"
 version = "0.1.0"
 dependencies = [

@@ -106,47 +106,11 @@ core::arch::global_asm!(
     "subs x3, x3, #8",
     "b.gt 1b",
     "2:",
-    // === PL011 init (BCM2837, base 0x3F201000, 115200 8N1) ===
-    "mov x4, #0x0",
-    "movk x4, #0xfe20, lsl #16",
-    "movk x4, #0x3f20, lsl #0",  // x4 = 0x3F201000
-    // Disable UART
-    "str wzr, [x4, #0x030]",
-    // IBRD = 26 (48 MHz / 16 / 115200 ≈ 26.041)
-    "mov w5, #26",
-    "str w5, [x4, #0x024]",
-    // FBRD = 3 (fraction: 0.041 × 64 ≈ 2.6, round to 3)
-    "mov w5, #3",
-    "str w5, [x4, #0x028]",
-    // LCR_H = 0x70 (8 bits, 1 stop, FIFO enable, no parity)
-    "mov w5, #0x70",
-    "str w5, [x4, #0x02C]",
-    // ICR = 0x7FF (clear all interrupts)
-    "mov w5, #0xFF",
-    "movk w5, #0x7, lsl #16",
-    "str w5, [x4, #0x044]",
-    // IMSC = 0 (mask all interrupts)
-    "str wzr, [x4, #0x038]",
-    // CR = 0x301 (UARTEN | TXE | RXE)
-    "mov w5, #0x301",
-    "str w5, [x4, #0x030]",
-    // === Debug: write '.' as RP0 marker ===
-    "20:",
-    "ldr w3, [x4, #0x018]",     // UARTFR
-    "tst w3, #0x20",             // FR_TXFF (bit 5)
-    "b.ne 20b",                  // wait if TX FIFO full
-    "mov w5, #0x2E",             // '.'
-    "str w5, [x4]",
-    // Wait for TX completion
-    "21:",
-    "ldr w3, [x4, #0x018]",
-    "tst w3, #0x20",
-    "b.ne 21b",
     // Save DTB pointer (x0) into BOOT_CONTEXT
     "adrp x1, BOOT_CONTEXT",
     "add x1, x1, :lo12:BOOT_CONTEXT",
     "str x0, [x1]",
-    // Call adapter_main
+    // Call adapter_main (never returns)
     "bl adapter_main",
     "3:",
     "wfi",
@@ -160,9 +124,23 @@ pub unsafe extern "C" fn adapter_main() -> ! {
         vivanta_boot_common::EarlyPlatformInfo { uart_base: 0x3F201000 },
     );
 
-    // Currently: RP0 — kernel booted, '.' output shown
-    // TODO: PL011 driver in platform-bcm2837, println!, SystemState
+    // Initialize PL011 UART at 0x3F201000, 115200 8N1
+    let uart = 0x3F201000 as *mut u32;
 
+    // Disable UART, set baud, line control, clear interrupts, re-enable
+    uart.add(0x030 / 4).write_volatile(0);                    // UARTCR = 0
+    uart.add(0x024 / 4).write_volatile(26);                   // IBRD = 26
+    uart.add(0x028 / 4).write_volatile(3);                    // FBRD = 3
+    uart.add(0x02C / 4).write_volatile(0x70);                 // LCR_H = 8N1 + FIFO
+    uart.add(0x044 / 4).write_volatile(0x7FF);                // ICR = clear all
+    uart.add(0x038 / 4).write_volatile(0);                    // IMSC = 0
+    uart.add(0x030 / 4).write_volatile(0x301);                // UARTCR = enable TX/RX
+
+    // Wait for TX FIFO ready, then write '.'
+    while uart.add(0x018 / 4).read_volatile() & 0x20 != 0 {}  // FR_TXFF
+    uart.write_volatile(b'.' as u32);                          // UARTDR = '.'
+
+    // Loop forever
     loop {
         core::hint::spin_loop();
     }
