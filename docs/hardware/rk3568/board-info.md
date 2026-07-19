@@ -468,3 +468,42 @@ addresses (0x20500000, 0x20520000, 0x20540000, 0x20560000, 0x20580000).
 After all 5 attempts fail, returns to U-Boot prompt (~30 seconds total).
 
 The written kernel binary (5-20 KiB) fits easily in the 12 MiB partition.
+
+---
+
+## M4.5.2 Validation (2026-07-19)
+
+**Status:** PASS
+
+### Validated
+
+| Requirement | Status | Evidence |
+|-------------|--------|----------|
+| ARMv8 EL1 entry (EL2→EL1 via eret) | ✅ | Boots via `booti 0x20500000 - 0xebd753c0` |
+| CPACR_EL1.FPEN configuration | ✅ | FPEN=3 verified by diagnostic readback |
+| CPTR_EL2.TFP clearing | ✅ | fmov executes without trap on EL1 |
+| GlobalConsole initialization | ✅ | `set_console()` + `with_console()` path works |
+| println! output | ✅ | Boot log printed via println! |
+| UART (NS16550) via write_volatile | ✅ | `*mut u32` 32-bit writes work (requires FP) |
+| Console trait dispatch | ✅ | Direct and via GlobalConsole both work |
+| Boot chain: asm → EL1 → Rust → Console | ✅ | Full path validated on real hardware |
+
+### Not Yet Validated (V0/V1 territory)
+
+| Requirement | Status | Blocked By |
+|-------------|--------|------------|
+| BootInfo lifecycle (ADR-021) | ❌ Pending | V0/V1 implementation |
+| SystemState ownership (ADR-020) | ❌ Pending | V0/V1 implementation |
+| FDT-based console init | ❌ Blocked | DTB cache coherency (needs D-cache maintenance) |
+| FDT-based memory map | ❌ Blocked | Same DTB issue |
+| MMU enable | ❌ Pending | Post FDT init |
+| Scheduler | ❌ Pending | Post MMU + IRQ init |
+
+### Boot Output (clean, post-cleanup)
+
+Expected output after marker removal:
+```
+[VIVANTA] Boot start
+[ARCH]  FP/SIMD enabled (CPACR_EL1.FPEN=3)
+[OK]    M4.5.2 diagnostic complete
+```
