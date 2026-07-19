@@ -1,12 +1,12 @@
 # Project State
 
-This document summarizes the durable architectural knowledge of the Theseus OS project. It is a living architectural artifact, intended to guide the project's long-term evolution.
+This document summarizes the durable architectural knowledge of the Vivanta project (formerly TheseusOS). It is a living architectural artifact, intended to guide the project's long-term evolution.
 
 The definitive order of development, milestones, and engineering tracks is governed by the [Master Roadmap](docs/architecture/master-roadmap.md), which serves as the core engineering constitution for the project. All architectural decisions and technical sprints must align with the roadmap.
 
 ## Vision
 
-Theseus OS is an operating system that preserves its identity and user environment across complete replacement of its hardware components. The core philosophy is minimizing friction between users and hardware evolution.
+Vivanta (formerly TheseusOS) is an operating system that preserves its identity and user environment across complete replacement of its hardware components. The core philosophy is minimizing friction between users and hardware evolution.
 
 The project has evolved from "a universal operating system" to a more precise identity: **a continuity-preserving computing platform**. The central innovation is not a new kernel or driver model, but a formal protocol for system identity persistence across physical hardware transitions.
 
@@ -38,7 +38,7 @@ These are fundamental, non-negotiable properties that must hold true throughout 
 
 The project's resolved identity is:
 
-> **Theseus OS is an operating system that preserves its identity and user environment across complete replacement of its hardware components.**
+> **Vivanta is an operating system that preserves its identity and user environment across complete replacement of its hardware components.**
 
 This replaces the earlier "Adaptive Computing Platform" / "Adaptive Operating Platform" framing, which was too abstract. The core concept is **cryptographic continuity**: a system proves it is the same entity across hardware changes through a verifiable chain of signed State Documents.
 
@@ -62,7 +62,7 @@ This replaces the earlier "Adaptive Computing Platform" / "Adaptive Operating Pl
 
 | Term | Definition |
 |------|-----------|
-| **System Identity** | Ed25519 keypair. The canonical identity of a Theseus system. |
+| **System Identity** | Ed25519 keypair. The canonical identity of a Vivanta system. |
 | **Root Keypair** | The genesis keypair from which all identity claims derive. |
 | **Recovery Seed** | BIP-39 mnemonic (12 words) that can regenerate the Root Keypair. |
 | **State Document** | Signed CBOR document recording the system's hardware/software inventory at a point in time. |
@@ -92,11 +92,15 @@ This replaces the earlier "Adaptive Computing Platform" / "Adaptive Operating Pl
 | R2 | ✅ Complete | Reality Lock — architecture freeze, repository reorg |
 | ACS | ✅ Complete | Architecture Cleanup Sprint — kernel/arch/platform/target split, extern "Rust" contract |
 | **M4** | ✅ **Complete** | **Execution Foundation — cooperative multi-threading, timer, thread lifecycle, repository restructuring** |
-| M4.4 | 🔧 In Preparation | Address Spaces — VMM fill, mmap/munmap/mprotect |
+| M4.4 | ✅ Complete | Address Spaces — multi-AS model with verified hardware isolation |
+| M4.4.5 | ✅ Complete | Execution Contract Freeze — unified context switch (ADR-017) |
+| M4.5.0 | ✅ Complete | EL0 Transition Preparation — InterruptGuard, eret_to_user_stub |
+| M4.5.1 | ✅ Complete | First EL0 entry + SVC roundtrip (QEMU) |
+| M4.5.2 | 🔧 In Progress | RK3568 bring-up — println! + DTB on real hardware |
 
 ### M4 — Execution Foundation
 
-M4 delivered the first working kernel-thread environment on TheseusOS:
+M4 delivered the first working kernel-thread environment on Vivanta:
 
 - **Cooperative round-robin scheduling** with 3 threads (boot + persistent + terminating)
 - **Thread lifecycle management**: `create_kernel_thread`, `thread_exit`, `thread_trampoline`, `cleanup()`, idle thread (WFI)
@@ -109,15 +113,41 @@ M4 delivered the first working kernel-thread environment on TheseusOS:
 
 Details in `docs/milestones/M4/acceptance.md`.
 
+## V-Epic Milestones
+
+V-epics replace the earlier R-phase model as the primary planning structure. See [Master Roadmap](docs/architecture/master-roadmap.md) for full dependency graph.
+
+| V-Epic | Priority | Status | Summary |
+|--------|----------|--------|---------|
+| V0 | P0 | 🔧 Planning | Rename TheseusOS → Vivanta, roadmap refresh, docs scaffold |
+| V1 | P1 | 🔧 Planning | SystemState (ADR-020, ADR-021), IdentityState (ADR-023) |
+| V2 / M5 | P2 | 🔧 Planning | Memory Resource Manager — integrate existing MemoryObject |
+| V3 | P3 | 🔧 Planned | Device Graph + minimal Driver contract (ADR-022) |
+| V4 | P4 | 🔧 Planned | Task abstraction + Scheduler policies |
+| V5 | P5 | 🔧 Planned | Service Framework — LoggingService first |
+| V6 | P6 | 🔧 Planned | Recovery Manager |
+| V7 | P7 | 🔧 Planned | Additional hardware targets |
+| V8 | — | 🔧 Planned | Documentation scaffold |
+
+## New ADRs (July 2026)
+
+| ADR | Title | Status |
+|-----|-------|--------|
+| ADR-020 | System Runtime Ownership | Accepted |
+| ADR-021 | BootInfo Escape Prevention | Accepted |
+| ADR-022 | Minimal Driver Lifecycle Contract | Accepted |
+| ADR-023 | IdentityState Model | Accepted |
+| ADR-011 | (Amendment) Frozen Component Unfreezing | Amended |
+
 ## M1 Boundary
 
-M1 is defined as a **Continuity Proof Experiment**, not an OS implementation. It validates the Theseus Continuity Layer:
+M1 is defined as a **Continuity Proof Experiment**, not an OS implementation. It validates the Vivanta Continuity Layer:
 - Identity generation and recovery
 - State Chain management
 - Boot mode engine (Genesis → Normal → Recovery)
 - Storage replacement continuity
 
-The Theseus Continuity Layer is architecturally separate from the Operating System Layer (kernel, drivers, filesystem, applications). M1 proves the former. The latter begins after M1 is accepted.
+The Vivanta Continuity Layer is architecturally separate from the Operating System Layer (kernel, drivers, filesystem, applications). M1 proves the former. The latter begins after M1 is accepted.
 
 Full acceptance criteria and non-goals are documented in `docs/milestones/M1/A-continuity/acceptance.md`.
 
@@ -126,7 +156,7 @@ Hardware bringup acceptance is documented in `docs/milestones/M1/B-hardware/acce
 ## Architecture Constraints
 
 *   **Primary Systems Programming Language**: Rust. Confirmed during M1-A. Used for the entire Continuity Proof Experiment.
-*   **Initial Implementation Target**: QEMU (M1-A) — ✅ Complete. Xiaomi Redmi Note 7 / lavender (M1-B) — pending.
+*   **Initial Implementation Target**: QEMU (M1-A) — ✅ Complete. RK3568 — 🔧 In Progress (M4.5.2). Xiaomi Redmi Note 7 / lavender (M1-B) — deferred; superseded by RK3568.
 *   **State Document Format for M1**: JSON (CBOR deferred).
 *   **Recovery Seed Format**: BIP-39 12-word mnemonic.
 *   **Signature Algorithm**: Ed25519.

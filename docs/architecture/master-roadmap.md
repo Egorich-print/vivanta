@@ -1,6 +1,6 @@
 # Master Roadmap
 
-**Purpose:** This is the single authoritative engineering document defining the development and porting sequence for TheseusOS over the next 1–2 years. It does not introduce new specifications, but maps existing architectural components (BootInfo, PMM, VMM, MemoryObject, Capability) onto a phased execution plan.
+**Purpose:** This is the single authoritative engineering document defining the development and porting sequence for Vivanta over the next 1–2 years. It does not introduce new specifications, but maps existing architectural components (BootInfo, PMM, VMM, MemoryObject) onto a phased execution plan.
 
 **Authority:** If any implementation plan, TODO list, sprint document, or experimental branch conflicts with this roadmap, this document takes precedence unless explicitly superseded by a newer approved version.
 
@@ -8,11 +8,11 @@
 
 ## Current Focus
 
-*   **Active Milestone:** `M1-B0: First Light`
-*   **Current Engineering Objective:** Obtain early UART output on the physical Xiaomi Redmi Note 7 (lavender / SDM660) target.
-*   **Architecture Version:** R2
-*   **Architecture Status:** Frozen (except for hardware-driven bugs and minor integration adjustments).
-*   **Specification Status:** New RFC creation is suspended until `M1-B0` is successfully achieved.
+*   **Active Track:** `V-epics V0–V1` (Rename + System State)
+*   **Active Milestone:** `M4.5.2` (RK3568 bring-up — hardware diagnostic compiled, waiting on board connection)
+*   **Current Engineering Objective:** Stabilise `println!` and DTB parsing on RK3568 real hardware. In parallel: rename TheseusOS → Vivanta, create SystemState.
+*   **Architecture Version:** R2 (historical baseline) + V-epics (current active track)
+*   **Architecture Status:** Stable. 4 new ADRs (020–023) ratified post-audit.
 
 ---
 
@@ -40,114 +40,83 @@ The following topics are intentionally out of scope for the near and mid-term:
 
 ## Dependency Graph
 
+### Current Track — V-epics
+
 ```
-Reality Lock (M1-B Milestones)
-   M1-B0 (First Light / UART)
-      │
-      ▼
-   M1-B1 (Hardware Discovery / DTB)
-      │
-      ▼
-   M1-B2 (Minimal Kernel / MMU)
-      │
-      ▼
-   M1-B3 (MemoryObject on HW)
-      │
-      ▼
-   M1-B4 (Hardware Continuity Proof) ──► [Phase R2 Complete]
+P0  Rename + cleanup (TheseusOS → Vivanta)
+    ↓
+P1  SystemState + Volatile Identity
+    ↓
+[M4.5.2 — RK3568 hardware stabilization (pauses V-work when triggered)]
+    ↓
+P2  V2/M5 Memory Resource Manager (integrate existing MemoryObject)
+    ↓
+P3  V3 Device Graph + Minimal Driver Contract (ADR-022)
+    ↓
+P3.5  Storage driver (SPI NAND / eMMC)
+    ↓
+P4  V4 Task abstraction + Scheduler policies
+    ↓
+P5  V5 Service Framework (LoggingService first)
+    ↓
+P6  V6 Recovery Manager
+    ↓
+P7  V7 Additional hardware targets (RPi3, SDM660)
+```
 
-==================================================================
+### Historical — Phases R2–R7 (superseded by V-epics)
 
-Kernel Phases (R3-R7)
-   Phase R3: Kernel Foundation
-      ├── Track K1 (Interrupts)
-      ├── Track K2 (Round-Robin Scheduler)
-      ├── Track K3 (Capability IPC)
-      ├── Track K4 (Virtual Memory Manager)
-      └── Track K5 (Capability Manager)
-      │
-      ▼
-   Phase R4: Resource System (ResourceObject model)
-      │
-      ▼
-   Phase R5: Runtime (Userspace init)
-      │
-      ▼
-   Phase R6: Native Theseus Runtime (Placement Policies)
-      │
-      ▼
-   Phase R7: Desktop/Mobile Integration
+```
+
+Phase R2 Reality Lock ──► ✅ Completed via ACS, M3-AB, M4, M4.4, M4.5
+
+Phase R3 Kernel Foundation ──► K1 (Interrupts) ✅, K2 (Scheduler) ✅
+                                  K3–K5 deferred to V-epic model
+
+Phase R4 Resource System ──► Folded into V2/M5 (MemoryObject integration)
+
+Phase R5 Runtime ──► Deferred post-V5
+
+Phase R6 Native Runtime ──► Deferred post-V6
+
+Phase R7 Desktop/Mobile ──► Deferred post-V7
 ```
 
 ---
 
-## Phase R2 — Reality Lock (CURRENT)
+## Phase R2 — Reality Lock (✅ COMPLETED)
 
-**Goal:** Transition TheseusOS from simulation (QEMU) onto physical hardware.
+**Goal:** Transition from research prototype to engineering platform.
 
-### M1-B0 — First Light
--   **Description:** Minimal boot loader/stub execution on Xiaomi Redmi Note 7.
--   **Tasks:** Initialize SDM660 PL011 UART, write a static identifier.
--   **Deliverable:** Raw serial output: `Theseus Boot v0.1 | Arch: ARM64 | SoC: SDM660`
+R2 was completed via the following milestones, redirected from the original lavender/SDM660 target to QEMU + RK3568:
 
-### M1-B1 — Hardware Discovery
--   **Description:** Platform analysis via FDT/DTB.
--   **Tasks:** Scan DTB for memory map, CPU nodes, UART/GIC physical base addresses.
--   **Deliverable:** Verifiable Hardware Inventory printed over UART.
+- **ACS** (Architecture Cleanup Sprint) — kernel/arch/platform/target split, `extern "Rust"` boundary
+- **M3-AB** — AArch64 + ARMv7 boot on QEMU with shared BootInfo contract
+- **M3-BC** — MemoryObject lifecycle validated on QEMU
+- **M4** — Cooperative multi-threading, scheduler, IRQ, timer, thread lifecycle
+- **M4.4** — Address spaces, multi-AS model with hardware isolation
+- **M4.4.5** — Unified context switch (ADR-017)
+- **M4.5.0** — EL0 transition preparation
+- **M4.5.1** — First EL0 entry and SVC roundtrip on QEMU
+- **RK3568 Stage 1** — UART output, EL2→EL1 transition, Rust entry on hardware
 
-### M1-B2 — Minimal Kernel
--   **Description:** Early memory management.
--   **Tasks:** Set up AArch64 PageTableBuilder, enable MMU with direct maps, initialize PMM.
--   **Deliverable:** Safe execution inside virtual memory space.
-
-### M1-B3 — MemoryObject on Hardware
--   **Description:** Validate the resource-oriented memory abstraction on a physical device.
--   **Tasks:** Run the full `MemoryObject` lifecycle (Create, Allocate, Map, Share, Revoke) on hardware.
--   **Deliverable:** Execution trace confirming zero raw physical allocations in kernel logic.
-
-### M1-B4 — Hardware Continuity Proof
--   **Description:** Transfer M1-A continuity proof to physical hardware.
--   **Tasks:** Run the sequence: Genesis (generate keypair) → Normal boot (verify State Document) → Storage death simulation → Recovery via Seed.
--   **Deliverable:** Successful cryptographic recovery and boot mode transition on device.
-
-### Phase R2 Exit Criteria
--   [ ] Raw UART output operates reliably on SDM660.
--   [ ] Device Tree parsed correctly into a standard memory map.
--   [ ] MMU activated successfully using the `PageTableGuard`.
--   [ ] PMM and heap are operational.
--   [ ] MemoryObject lifecycle validated.
--   [ ] Identity continuity restored successfully after simulated storage erasure.
+The original lavender/SDM660 specific targets (M1-B0 through M1-B4) were superseded by RK3568 as primary hardware validation target.
 
 ---
 
-## Phase R3 — Kernel Foundation
+## Phase R3 — Kernel Foundation (PARTIALLY COMPLETED)
 
-**Goal:** Build a minimal microkernel-style foundation over the early boot code.
+**Goal:** Build execution foundation over early boot code.
 
-### Track K1 — Interrupt Subsystem
--   Set up exception vector tables for ARM64/AArch32.
--   Implement early GICv2/v3 interrupt dispatcher.
--   Set up timer interrupts (ARM generic timer).
+### K1 — Interrupt Subsystem ✅ COMPLETED (M4)
+- Exception vector tables, GICv3, ARM generic timer, timer IRQ.
 
-### Track K2 — Scheduler
--   Implement a minimal single-core Round-Robin thread scheduler.
--   No priorities, no affinity groups, no SMP.
+### K2 — Scheduler ✅ COMPLETED (M4)
+- Single-core round-robin, cooperative switching. True preemption deferred to physical hardware validation (RK3568).
 
-### Track K3 — IPC
--   Introduce capability-aware IPC endpoints.
--   Strict synchronous message passing between early kernel threads.
-
-### Track K4 — Virtual Memory Manager (VMM)
--   Integrate `MemoryObject` with the Virtual Memory Manager (VMM).
--   Add `VirtualMemoryObject` (VMO) mapping logic and `AddressSpace` management.
-
-### Track K5 — Capability Manager
--   Transition `MemoryCapability` to a unified `Capability` model representing memory, devices, and IPC handles.
-
-### Phase R3 Exit Criteria
--   [ ] Multi-threading operational with timer-driven context switching.
--   [ ] Synchronous IPC verified between isolated threads.
--   [ ] Page faults caught and routed through a default handler.
+### K3–K5 — DEFERRED to V-epic model
+- Capability IPC, VMM integration, Capability Manager are folded into V2/M5 (Memory Resource Manager) and V4 (Task abstraction).
+- VMM foundations (address spaces) completed in M4.4.
 
 ---
 
@@ -196,14 +165,15 @@ Kernel Phases (R3-R7)
 -   Strict rule: speculative RFCs are frozen. RFC status must remain `Experimental` until proven on target.
 
 ### Track B: Hardware Support
--   Gradual expansion of physical hardware targets:
-    `QEMU (virt)` ──► `Redmi Note 7 (lavender)` ──► `Raspberry Pi 4` ──► `x86_64 PC`
+-   Current targets:
+    `QEMU AArch64` (validation baseline) ──► `RK3568` (primary hardware target)
+-   Future expansion (post V3 Device Graph):
+    `Raspberry Pi 3B+` ──► `Qualcomm SDM660 (lavender)` ──► `x86_64` / `RISC-V`
+-   RK3568 is a **validation target**, not the architecture foundation. Vivanta must not become "RK3568 OS". If RK3568 bring-up is blocked by hardware issues, architecture work continues on QEMU.
 
 ### Track C: Tooling & Automation
--   Introduce standard tasks via `cargo xtask`:
-    -   `cargo xtask build-qemu`
-    -   `cargo xtask flash-lavender`
-    -   `cargo xtask inspect-state`
+-   Build: `./build.sh rk3568`, `./build.sh qemu-aarch64` — per-target
+-   Future: `cargo xtask` for standardised tasks (rename migration, flash, inspect-state)
 
 ### Track D: Verification
 -   Maintain Unit tests.
@@ -218,9 +188,97 @@ Kernel Phases (R3-R7)
 
 ---
 
+## V-Epic Roadmap (Active Track)
+
+V-epics replace the earlier R-phase model as the primary planning structure. M-numbers (M1–M5) are preserved alongside V-epics for historical continuity.
+
+### P0 — Rename and Cleanup
+
+| Sub-step | Description | Exit Criteria |
+|----------|-------------|---------------|
+| V0.1a | Cargo package rename (scripted, git tags) | `cargo check --workspace` + 2 build targets pass |
+| V0.1b | Documentation rename | Build clean |
+| V0.1c | Directory rename (`TheseusOS/` → `Vivanta/`) | Full rebuild clean |
+| V0.2 | Roadmap refresh (this document + PROJECT_STATE.md) | All references consistent |
+| V0.3 | `docs/vivanta/` scaffold | Stubs created, no dead links |
+
+**ADRs:** — (rename is execution, not architecture)
+
+### P1 — System State and Identity
+
+| Sub-step | Description | Exit Criteria |
+|----------|-------------|---------------|
+| V1.1 | `SystemState::from_boot_info()` + ownership structure per ADR-020 | SystemState constructed, BootInfo references escaped |
+| V1.2a | Volatile IdentityState per ADR-023 | Identity generated per boot, enum match enforced |
+| V1.2b | Persistent Identity (blocked on storage driver P3.5) | — |
+
+**ADRs:** ADR-020 (System Runtime Ownership), ADR-021 (BootInfo Escape Prevention), ADR-023 (IdentityState Model)
+
+### M4.5.2 — RK3568 Hardware Stabilisation
+
+| Objective | Fallback |
+|-----------|----------|
+| Boot kernel, receive BootInfo, execute diagnostic | If blocked by undocumented HW issue / missing firmware / board failure → continue architecture work on QEMU |
+| Goal: `println!` + DTB on RK3568 | Hardware validation remains pending. RK3568 is **validation target**, not foundation. |
+
+### P2 — V2 / M5: Memory Resource Manager
+
+| Sub-step | Description | Exit Criteria |
+|----------|-------------|---------------|
+| V2.0 | ADR-011 pre-flight: frozen component adaptation review | Change documented, regression pass on QEMU |
+| V2.1 | MemoryObject hardware adaptation (integration, not redesign — per ADR-011 amendment 2026-07-19) | MemoryObject lifecycle validated on RK3568 |
+| V2.2 | PlacementPolicy formalization (Kernel, Device, Persistent, Fast) | Enum defined, wired to MRM |
+
+**ADRs:** ADR-011 (Amendment: Frozen Component Unfreezing)
+
+### P3 — V3: Device Graph and Driver Model
+
+| Sub-step | Description | ADRs |
+|----------|-------------|------|
+| V3.0 | DeviceDescriptor metadata (not Capability — name reserved) | ADR-022 |
+| V3.1 | Device Graph (devices/topology/capabilities only, NO driver state) | ADR-020 |
+| V3.2 | Driver lifecycle contract: `trait Driver { fn init(); fn shutdown(); }` | ADR-022 |
+| P3.5 | Storage driver (SPI NAND primary, eMMC secondary) | — |
+| V3.3 | DriverManager (owns driver instances, not SystemState) | ADR-020 |
+
+### P4 — V4: Execution Model Expansion
+
+| Sub-step | Description |
+|----------|-------------|
+| V4.1 | Kernel Task object (Thread + Address Space + Resources) |
+| V4.2 | Scheduler policy abstraction (concrete RoundRobin, deferred: priority/realtime) |
+
+### P5 — V5: Service Framework
+
+| Sub-step | Description |
+|----------|-------------|
+| V5.0 | Service architecture definition (kernel-service boundary, IPC/communication) |
+| V5.1 | First service: **LoggingService** (UART, always needed, validates service boundary) |
+| Future | DownloadService (post-R7 — requires networking + storage; aria2 as replaceable backend) |
+
+### P6 — V6: Recovery Manager
+
+| Sub-step | Description |
+|----------|-------------|
+| V6.0 | Recovery architecture definition (detect/malfunction → restore → reboot) |
+| V6.1 | Volatile recovery prototype (QEMU, no storage dependency) |
+| V6.2 | Full recovery with persistent identity (blocked on V1.2b) |
+
+### P7 — V7: Additional Hardware Targets
+
+| Target | Timing |
+|--------|--------|
+| QEMU AArch64 | ✅ Baseline (always active) |
+| RK3568 | ✅ Active (primary) |
+| Raspberry Pi 3B+ | Post-V3 (Device Graph + Driver model) |
+| Qualcomm SDM660 (lavender) | Post-V3 |
+| x86_64, RISC-V | Post-V7 |
+
+---
+
 ## Design Watchlist (Architectural Lessons)
 
-### Theseus OS (Another)
+### Theseus OS (Academic Research)
 -   **Study:** Safe live component replacement, Rust typing as a safety boundary, module loading without ELFs.
 -   **Do Not Copy:** Process-less monolithic single-address-space design, custom non-standard object format.
 
@@ -263,3 +321,13 @@ Kernel Phases (R3-R7)
 ### 2026-07-12
 -   Initial release of the Master Roadmap.
 -   R2.0 and R2.1 marked as active focus.
+
+### 2026-07-19
+-   **Roadmap v1.1:** Replaced R-phase structure with V-epics (V0–V8).
+-   Current Focus updated to M4.5.x/RK3568 + V0 rename.
+-   Added V-epic dependency graph; R2 marked ✅, R3 K1/K2 ✅, K3–K5 deferred.
+-   Hardware target list updated (lavender → RK3568).
+-   RK3568 fallback policy documented.
+-   V2.1 MemoryObject redefined as "hardware adaptation" (not redesign).
+-   V5 restructured: LoggingService first, DownloadService deferred.
+-   References new ADRs 020–023.
