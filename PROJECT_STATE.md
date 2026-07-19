@@ -119,8 +119,9 @@ V-epics replace the earlier R-phase model as the primary planning structure. See
 
 | V-Epic | Priority | Status | Summary |
 |--------|----------|--------|---------|
-| V0 | P0 | 🔧 Planning | Rename TheseusOS → Vivanta, roadmap refresh, docs scaffold |
-| V1 | P1 | 🔧 Planning | SystemState (ADR-020, ADR-021), IdentityState (ADR-023) |
+| V0 | P0 | ✅ Partial | Rename TheseusOS → Vivanta (pending), roadmap refresh (✅), docs scaffold (✅) |
+| V0.1 | P0 | ✅ Complete | Runtime Identity Bootstrap — SystemState skeleton, IdentityState::Volatile, BootInfo owned copy |
+| V1 | P1 | 🔧 Planning | Continuity model — BootInfo migration, boot-time state separation |
 | V2 / M5 | P2 | 🔧 Planning | Memory Resource Manager — integrate existing MemoryObject |
 | V3 | P3 | 🔧 Planned | Device Graph + minimal Driver contract (ADR-022) |
 | V4 | P4 | 🔧 Planned | Task abstraction + Scheduler policies |
@@ -128,6 +129,50 @@ V-epics replace the earlier R-phase model as the primary planning structure. See
 | V6 | P6 | 🔧 Planned | Recovery Manager |
 | V7 | P7 | 🔧 Planned | Additional hardware targets |
 | V8 | — | 🔧 Planned | Documentation scaffold |
+
+## V0.1 — Runtime Identity Bootstrap
+
+**Status:** ✅ Complete (2026-07-19)
+
+### Deliverables
+
+- `kernel/src/state/` module: `SystemState { identity, hardware }`
+- `IdentityState::Volatile(RuntimeIdentity { boot_id, public_key })` per ADR-023
+- `HardwareState` with owned copies from `BootInfo` per ADR-021 (no `&'static` references)
+- `SystemState::from_boot_info(&BootInfo) -> Self` — construction at `kernel_main` entry
+- No global singleton — `SystemState` is local to `kernel_main`
+
+### Validated
+
+- ✅ SystemState skeleton
+- ✅ Volatile IdentityState (per-boot identity generation)
+- ✅ BootInfo ownership boundary (data copied, references not retained)
+- ✅ Owned HardwareState representation (memory_map + mmio_regions as arrays)
+- ✅ ADR-020/021/023 compliance
+- ✅ `InterruptControllerInfo` excluded from HardwareState (has `&'static str` — ADR-021)
+- ✅ Build: `target-rk3568` + `target-qemu-aarch64` — 0 warnings
+
+### Known limitation (technical debt)
+
+Old kernel init path still reads `BootInfo` directly for transient boot operations
+(PMM setup, MMU mapping, GIC init). SystemState is constructed in parallel but
+existing subsystems have not been migrated yet. Migration will happen incrementally
+in V0.2.
+
+### Pending
+
+- RK3568 runtime parity validation (binary ready, requires power cycle)
+- Persistent identity (V1.x, blocked on storage driver)
+
+### ADR compliance
+
+| ADR | Requirement | Status |
+|-----|-------------|--------|
+| ADR-020 | SystemState owns runtime-coordinated state only | ✅ No global singleton, no drivers/services |
+| ADR-020 | HardwareState immutable after construction | ✅ Copy-once at boot |
+| ADR-021 | No `&'static` references from BootInfo escape | ✅ All data copied, InterruptControllerInfo excluded |
+| ADR-023 | IdentityState as enum, not type hierarchy | ✅ Volatile(Persistent() variants |
+| ADR-023 | Monotonic transition | ✅ Only Volatile exists today |
 
 ## New ADRs (July 2026)
 
