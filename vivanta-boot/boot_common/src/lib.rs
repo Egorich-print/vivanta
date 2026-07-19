@@ -22,6 +22,32 @@ use core::cell::UnsafeCell;
 use core::fmt;
 
 // ---------------------------------------------------------------------------
+// EarlyPlatformInfo — platform-provided constants for early boot debug output.
+// Must be set by adapter_main BEFORE any println! or write_direct call.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy)]
+pub struct EarlyPlatformInfo {
+    pub uart_base: usize,
+}
+
+static mut EARLY_PLATFORM: Option<EarlyPlatformInfo> = None;
+
+pub fn set_early_platform(info: EarlyPlatformInfo) {
+    unsafe { EARLY_PLATFORM = Some(info); }
+}
+
+pub fn early_platform() -> Option<EarlyPlatformInfo> {
+    unsafe { EARLY_PLATFORM }
+}
+
+unsafe fn early_uart_write(byte: u8) {
+    if let Some(info) = EARLY_PLATFORM.as_ref() {
+        (info.uart_base as *mut u32).write_volatile(byte as u32);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // BootContext — entry information passed from bootloader to vivanta_kernel
 // ---------------------------------------------------------------------------
 
@@ -114,17 +140,14 @@ pub fn set_console(c: &'static dyn Console) {
 
 /// Bypass lock and write directly to the console (for early boot debug).
 pub fn write_direct(s: &str) {
-    unsafe {
-        let base = 0xFE66_0000 as *mut u32;
-        base.write_volatile(b'W' as u32);
-    }
+    unsafe { early_uart_write(b'W'); }
     unsafe {
         if let Some(c) = (*GLOBAL_CONSOLE.inner.get()).as_ref() {
-            (0xFE66_0000 as *mut u32).write_volatile(b'X' as u32);
+            early_uart_write(b'X');
             c.write_str(s);
-            (0xFE66_0000 as *mut u32).write_volatile(b'Y' as u32);
+            early_uart_write(b'Y');
         } else {
-            (0xFE66_0000 as *mut u32).write_volatile(b'z' as u32);
+            early_uart_write(b'z');
         }
     }
 }
@@ -133,15 +156,15 @@ pub fn with_console<F, R>(f: F) -> R
 where
     F: FnOnce(&dyn Console) -> R,
 {
-    unsafe { (0xFE66_0000 as *mut u32).write_volatile(b'1' as u32); }
+    unsafe { early_uart_write(b'1'); }
     let p = GLOBAL_CONSOLE.inner.get();
-    unsafe { (0xFE66_0000 as *mut u32).write_volatile(b'2' as u32); }
+    unsafe { early_uart_write(b'2'); }
     let opt = unsafe { (*p).as_ref() };
-    unsafe { (0xFE66_0000 as *mut u32).write_volatile(b'3' as u32); }
+    unsafe { early_uart_write(b'3'); }
     let c = opt.expect("console not initialized");
-    unsafe { (0xFE66_0000 as *mut u32).write_volatile(b'4' as u32); }
+    unsafe { early_uart_write(b'4'); }
     let result = f(*c);
-    unsafe { (0xFE66_0000 as *mut u32).write_volatile(b'5' as u32); }
+    unsafe { early_uart_write(b'5'); }
     result
 }
 

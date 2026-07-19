@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// target-rk3568 — Rockchip RK3568 vivanta_kernel binary
+// target-rpi3b-plus — Raspberry Pi 3 B+ (BCM2837B0) kernel binary
 // ---------------------------------------------------------------------------
 
 #![no_std]
@@ -7,27 +7,26 @@
 
 use core::panic::PanicInfo;
 
-
-// ARM64 entry point with Image header for U-Boot booti
+// ARM64 entry point for GPU firmware (kernel8.img at 0x80000)
 core::arch::global_asm!(
     ".section .text._start",
     ".global _start",
     "_start:",
-    // ARM64 Image header (64 bytes)
+    // ARM64 Image header (64 bytes) — required by Pi GPU firmware
     "b _real_start",
     ".word 0",
-    ".quad 0x00280000",
+    ".quad 0x00000000",          // text_offset = 0 (kernel at load addr)
+    ".quad 0",                   // image_size (unknown)
+    ".quad 0x0a",               // flags: LE, PIE
     ".quad 0",
-    ".quad 0x0a",
     ".quad 0",
     ".quad 0",
-    ".quad 0",
-    ".word 0x644d5241",
+    ".word 0x644d5241",          // magic "ARM\64"
     ".word 0",
 
     "_real_start:",
     "msr daifset, #0xf",
-    // Disable MMU (U-Boot may leave it on)
+    // Disable MMU (if left enabled by firmware)
     "dsb sy",
     "isb",
     "mrs x5, CurrentEL",
@@ -59,13 +58,13 @@ core::arch::global_asm!(
     "msr CPACR_EL1, x5",        // FPEN=3: enable FP at EL1 and EL0
     "msr CPTR_EL2, xzr",        // clear TFP — no FP/SIMD traps to EL2
     // Configure HCR_EL2 for EL1 compatibility, then drop to EL1
-    "mov x5, #(1 << 31)",    // RW bit: AArch64 for EL1
+    "mov x5, #(1 << 31)",       // RW bit: AArch64 for EL1
     "msr hcr_el2, x5",
-    "mov x5, #0x3c5",        // SPSR_EL2: EL1h, DAIF masked
+    "mov x5, #0x3c5",           // SPSR_EL2: EL1h, DAIF masked
     "msr spsr_el2, x5",
-    "adr x5, 12f",           // return address in EL1
+    "adr x5, 12f",              // return address in EL1
     "msr elr_el2, x5",
-    "eret",                   // → EL1 at 12f
+    "eret",                      // → EL1 at 12f
     "11:",
     // EL1: disable MMU
     "mrs x6, sctlr_el1",
@@ -79,7 +78,7 @@ core::arch::global_asm!(
     "mov x5, #(0b11 << 20)",
     "msr CPACR_EL1, x5",
     "12:",
-    // Set up a safe exception vector table (all entries: branch to self)
+    // Set up safe exception vector table (all entries: branch to self)
     "adr x6, 8f",
     "msr vbar_el1, x6",
     "isb",
@@ -90,9 +89,11 @@ core::arch::global_asm!(
     "b 8b",
     ".endr",
     "7:",
+    // Set stack pointer
     "adrp x1, __stack_top",
     "add x1, x1, :lo12:__stack_top",
     "mov sp, x1",
+    // Zero BSS
     "adrp x1, __bss_start",
     "add x1, x1, :lo12:__bss_start",
     "adrp x2, __bss_end",
@@ -105,20 +106,47 @@ core::arch::global_asm!(
     "subs x3, x3, #8",
     "b.gt 1b",
     "2:",
-    // Reinitialize UART: set LCR = 0x03 (8N1, DLAB=0)
+    // === PL011 init (BCM2837, base 0x3F201000, 115200 8N1) ===
     "mov x4, #0x0",
-    "movk x4, #0xfe66, lsl #16",
-    "mov w5, #0x03",
-    "strb w5, [x4, #(3 << 2)]",
-    // UART ready — BOOT_CONTEXT store + Rust entry follows
-    // Wait for TX completion (read LSR, bit 5 = THR empty)
-    "1:",
-    "ldr w5, [x4, #(5 << 2)]",
-    "tst w5, #(1 << 5)",
-    "b.eq 1b",
+    "movk x4, #0xfe20, lsl #16",
+    "movk x4, #0x3f20, lsl #0",  // x4 = 0x3F201000
+    // Disable UART
+    "str wzr, [x4, #0x030]",
+    // IBRD = 26 (48 MHz / 16 / 115200 ≈ 26.041)
+    "mov w5, #26",
+    "str w5, [x4, #0x024]",
+    // FBRD = 3 (fraction: 0.041 × 64 ≈ 2.6, round to 3)
+    "mov w5, #3",
+    "str w5, [x4, #0x028]",
+    // LCR_H = 0x70 (8 bits, 1 stop, FIFO enable, no parity)
+    "mov w5, #0x70",
+    "str w5, [x4, #0x02C]",
+    // ICR = 0x7FF (clear all interrupts)
+    "mov w5, #0xFF",
+    "movk w5, #0x7, lsl #16",
+    "str w5, [x4, #0x044]",
+    // IMSC = 0 (mask all interrupts)
+    "str wzr, [x4, #0x038]",
+    // CR = 0x301 (UARTEN | TXE | RXE)
+    "mov w5, #0x301",
+    "str w5, [x4, #0x030]",
+    // === Debug: write '.' as RP0 marker ===
+    "20:",
+    "ldr w3, [x4, #0x018]",     // UARTFR
+    "tst w3, #0x20",             // FR_TXFF (bit 5)
+    "b.ne 20b",                  // wait if TX FIFO full
+    "mov w5, #0x2E",             // '.'
+    "str w5, [x4]",
+    // Wait for TX completion
+    "21:",
+    "ldr w3, [x4, #0x018]",
+    "tst w3, #0x20",
+    "b.ne 21b",
+    // Save DTB pointer (x0) into BOOT_CONTEXT
     "adrp x1, BOOT_CONTEXT",
     "add x1, x1, :lo12:BOOT_CONTEXT",
     "str x0, [x1]",
+    // Call adapter_main
     "bl adapter_main",
     "3:",
     "wfi",
@@ -127,33 +155,13 @@ core::arch::global_asm!(
 
 #[no_mangle]
 pub unsafe extern "C" fn adapter_main() -> ! {
-    // Configure early platform info for boot debug output
+    // Configure early platform info
     vivanta_boot_common::set_early_platform(
-        vivanta_boot_common::EarlyPlatformInfo { uart_base: 0xFE66_0000 },
+        vivanta_boot_common::EarlyPlatformInfo { uart_base: 0x3F201000 },
     );
 
-    // V0.1: Runtime Identity Bootstrap — construct SystemState
-    let _system_state = vivanta_kernel::state::SystemState::new(
-        vivanta_kernel::state::IdentityState::new_volatile(),
-        vivanta_kernel::state::HardwareState::empty(),
-    );
-
-    // Direct UART writes for boot log (println! has a known hang with this binary)
-    let uart_base = 0xFE66_0000u64;
-    macro_rules! uart {
-        ($s:expr) => {
-            for &b in $s.as_bytes() {
-                if b == b'\n' {
-                    core::arch::asm!("strb {c:w}, [{base}]", base = in(reg) uart_base, c = in(reg) 0x0du32, options(nostack));
-                }
-                core::arch::asm!("strb {c:w}, [{base}]", base = in(reg) uart_base, c = in(reg) b as u32, options(nostack));
-            }
-        };
-    }
-    uart!("[VIVANTA] Boot start\n");
-    uart!("[ARCH]  FP/SIMD enabled (CPACR_EL1.FPEN=3)\n");
-    uart!("[OK]    M4.5.2 diagnostic complete\n");
-    uart!("[V0]   Runtime Identity Bootstrap\n");
+    // Currently: RP0 — kernel booted, '.' output shown
+    // TODO: PL011 driver in platform-bcm2837, println!, SystemState
 
     loop {
         core::hint::spin_loop();

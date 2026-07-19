@@ -90,6 +90,11 @@ core::arch::global_asm!(
 pub unsafe extern "C" fn adapter_main() -> ! {
     let dtb_addr = vivanta_boot_common::BOOT_CONTEXT.dtb as *const u8;
 
+    // Configure early platform info for boot debug output
+    vivanta_boot_common::set_early_platform(
+        vivanta_boot_common::EarlyPlatformInfo { uart_base: 0x0500_0000 },
+    );
+
     // Platform init: console from FDT
     vivanta_platform_allwinner_h616::init_console_from_fdt(dtb_addr);
 

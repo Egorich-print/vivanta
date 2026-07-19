@@ -28,6 +28,7 @@ members = [
     "target-rk3568",
     "target-x96q",
     "target-lavender",
+    "target-rpi3b-plus",
 
     # --- Test / proof ---
     "arch-test-stub",

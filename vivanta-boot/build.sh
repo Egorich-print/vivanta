@@ -9,6 +9,7 @@ ADAPTER="${1:-vivanta-target-qemu-aarch64}"
 case "${ADAPTER}" in
     rk3568) PACKAGE="vivanta-target-rk3568" ;;
     x96q)   PACKAGE="vivanta-target-x96q" ;;
+    rpi3bp) PACKAGE="vivanta-target-rpi3b-plus" ;;
     *)      PACKAGE="${ADAPTER}" ;;
 esac
 
@@ -49,6 +50,19 @@ case "${ADAPTER}" in
         echo "=== U-Boot commands for X96Q (Allwinner H313): ==="
         echo "  load mmc 0:1 0x40280000 vivanta-x96q.bin"
         echo "  booti 0x40280000 - \${fdt_addr_r}"
+        ;;
+
+    rpi3bp)
+        ELF="target/aarch64-unknown-none/debug/vivanta-target-rpi3b-plus"
+        BIN="kernel8.img"
+        echo "=== Converting to flat binary ==="
+        rust-objcopy -O binary "${ELF}" "${BIN}"
+        ls -lh "${BIN}"
+        file "${BIN}"
+        echo "=== RPi3 GPU firmware boot: ==="
+        echo "  1. Copy kernel8.img to SD card boot/ partition"
+        echo "  2. Insert SD card, power on"
+        echo "  3. Expected UART output: '.' (RP0 marker)"
         ;;
 
     vivanta-target-qemu-aarch64|vivanta-target-qemu-armv7a)
