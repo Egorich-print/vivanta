@@ -1,6 +1,6 @@
 # Architectural Decision Records
 
-This directory indexes ADRs for the Vivanta project (formerly Vivanta). Engineering-level ADRs (011–023) live in `vivanta-boot/docs/adr/`.
+This directory indexes ADRs for the Vivanta project (formerly TheseusOS). Engineering-level ADRs (011–023) live in `vivanta-boot/docs/adr/`.
 
 ## Active ADRs
 

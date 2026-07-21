@@ -8,7 +8,7 @@
 
 ## 1. Project Context
 
-**Vivanta** (formerly Vivanta) is an operating system research and engineering project.
+**Vivanta** (formerly TheseusOS) is an operating system research and engineering project.
 
 Vivanta is **not** a Linux clone, **not** a microkernel experiment, and **not** intended to reproduce Unix semantics.
 
