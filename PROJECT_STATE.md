@@ -1,64 +1,165 @@
 # Project State
 
-This document summarizes the durable architectural knowledge of the Vivanta project (formerly Vivanta). It is a living architectural artifact, intended to guide the project's long-term evolution.
+> **Current baseline:** V0.1
+> **Last updated:** 2026-07-21
 
-The definitive order of development, milestones, and engineering tracks is governed by the [Master Roadmap](docs/architecture/master-roadmap.md), which serves as the core engineering constitution for the project. All architectural decisions and technical sprints must align with the roadmap.
+## Quick Reference
 
-## Vision
+| Field | Value |
+|-------|-------|
+| Version | V0.1 complete |
+| Current milestone | V1.1 Runtime Identity (planning) |
+| Main dev platform | QEMU AArch64 |
+| Hardware bring-up | RK3568 Stage 1, RPi3 B+ Stage 1 |
+| Architecture status | V0 architecture stabilized |
+| Major blockers | RK3568 BootInfo assembly, RPi3 UART firmware, Storage driver |
 
-Vivanta (formerly Vivanta) is an operating system that preserves its identity and user environment across complete replacement of its hardware components. The core philosophy is minimizing friction between users and hardware evolution.
+---
 
-The project has evolved from "a universal operating system" to a more precise identity: **a continuity-preserving computing platform**. The central innovation is not a new kernel or driver model, but a formal protocol for system identity persistence across physical hardware transitions.
+## 1. Project Overview
 
-## Philosophy
+Vivanta (formerly TheseusOS) is an operating system that preserves its identity and user environment across complete replacement of its hardware components. The core philosophy is minimizing friction between users and hardware evolution.
 
-The project is guided by the "Ship of Theseus" principle: a system can survive complete replacement of its parts if its identity and history are preserved. Key tenets:
+The central innovation is not a new kernel or driver model, but a formal protocol for system identity persistence across physical hardware transitions — **cryptographic continuity**: a system proves it is the same entity across hardware changes through a verifiable chain of signed State Documents.
 
-*   **User First**: The system exists to serve the user, not the other way around.
-*   **Adaptive System**: The OS adapts to hardware; hardware does not dictate OS limitations.
-*   **Architecture Independence**: The core platform must be portable across major architectures (x86_64, ARM, RISC-V).
-*   **Minimal Friction**: The system makes technical decisions automatically; advanced users can override defaults.
-*   **Document Before Code**: Architectural decisions are documented before implementation and serve as the definitive reference.
-*   **Modularity and Composability**: The system is built from independent, composable components.
+The definitive order of development is governed by the [Master Roadmap](docs/architecture/master-roadmap.md).
 
-## Core Invariants
+## 2. Current Development Stage
 
-These are fundamental, non-negotiable properties that must hold true throughout the project's evolution:
+| Stage | Status | Notes |
+|-------|--------|-------|
+| V0 | Complete | Architecture foundation, rename TheseusOS → Vivanta |
+| V0.1 | Complete | SystemState + Identity Bootstrap |
+| V1.1 | Planning | Runtime Identity — BootInfo migration, identity transfer |
+| V1.2b | Blocked | Persistent Identity — requires storage layer |
+| V2 / M5 | Planned | Memory Resource Manager |
+| V3 | Planned | Device Graph + Driver Contract |
 
-1.  **User Environment Preservation**: User's applications, data, and settings must persist across hardware changes.
-2.  **Hardware Adaptability**: The OS must adapt to hardware; hardware should not dictate OS limitations.
-3.  **Architecture Independence**: The core platform must be portable across major architectures.
-4.  **Minimal Friction**: System automates decisions; reduces manual user configuration.
-5.  **Documentation as Source of Truth**: Architecture is documented before implementation.
-6.  **Long-Term Maintainability**: Architecture must be designed for evolution over decades.
-7.  **Identity Independence**: The Root Keypair must not depend on the component it is designed to survive replacement of.
-8.  **No Booting in Unknown State**: If identity cannot be resolved, the system halts rather than booting in an indeterminate state.
+## 3. Repository Layout
 
-## Architecture Identity
+```
+vivanta/
+├── docs/              # Documentation (roadmap, ADRs, audit, hardware)
+├── specs/             # RFCs and schemas
+├── archive/           # Historical experiments and decisions
+└── vivanta-boot/      # Active Cargo workspace
+    ├── boot_info/     # BootInfo contract types
+    ├── boot_common/   # Console, println!, FDT scanner
+    ├── arch-*/        # Architecture implementations (aarch64, armv7a, test-stub)
+    ├── kernel/        # Kernel (PMM, VMM, Scheduler, SystemState)
+    ├── platform-*/    # Platform support (qemu, rk3568, sdm660, allwinner)
+    └── target-*/      # Target binaries (qemu, rk3568, rpi3b-plus, etc.)
+```
 
-The project's resolved identity is:
+## 4. Architecture Status
 
-> **Vivanta is an operating system that preserves its identity and user environment across complete replacement of its hardware components.**
+| Aspect | Status |
+|--------|--------|
+| V0 architecture | Stabilized |
+| Execution Foundation | Complete (M4: cooperative threads, timer, GIC) |
+| Identity Bootstrap | Complete (V0.1: SystemState, IdentityState) |
+| ADR baseline | ADR-011 through ADR-023 |
+| Post-audit additions | ADR-020 through ADR-023 (accepted July 2026) |
+| RFC baseline | RFC-001 through RFC-008 accepted; RFC-009–010 pending |
+| Build-time verification | kernel links with arch-test-stub (no real ISA) |
 
-This replaces the earlier "Adaptive Computing Platform" / "Adaptive Operating Platform" framing, which was too abstract. The core concept is **cryptographic continuity**: a system proves it is the same entity across hardware changes through a verifiable chain of signed State Documents.
+## 5. Platform Status
 
-## Completed RFCs
+| Platform | Status | What works | Next step |
+|----------|--------|------------|-----------|
+| QEMU AArch64 | Working | Full boot → kernel_main → EL0 → yield | Maintenance |
+| RK3568 | Stage 1 | UART writes, SystemState, EL2→EL1 | BootInfo → kernel_main |
+| RPi3 B+ | Stage 1 | PL011 UART writes '.' marker | UART validation, DTB parse |
+| X96Q | Planned | Platform crate exists | Build + UART init |
+| Lavender (SDM660) | Early | Console init + boot banner | Deferred (RK3568 prioritized) |
+
+## 6. Current Milestone: V1.1 Runtime Identity
+
+**Goal:** Establish the runtime identity framework — make identity accessible through SystemState, prepare for persistent identity.
+
+**Done when:**
+- [ ] Runtime identity exists and is accessible through SystemState
+- [ ] Boot identity transfer from bootloader to kernel works
+- [ ] Identity available through SystemState at kernel_main entry
+- [ ] Volatile → Persistent transition enum is wired (even if Persistent is stub)
+- [ ] RK3568 adapter_main calls kernel_main with BootInfo
+
+**Unblocked:**
+- Runtime identity (Volatile)
+- SystemState integration
+- Boot identity transfer
+
+**Blocked:**
+- Persistent identity implementation requires storage layer (P3.5)
+
+**Fallback:** Continue on QEMU if hardware bring-up is blocked.
+
+## 7. Known Blockers
+
+| Blocker | Impact | Path forward |
+|---------|--------|--------------|
+| RK3568 BootInfo assembly | kernel_main not called on real hardware | Complete adapter_main boot flow |
+| RPi3 UART firmware | No serial output on real hardware | Verify firmware compatibility, test with known-good OS |
+| Storage driver (P3.5) | Persistent identity impossible | SPI NAND or eMMC driver needed |
+| Preemptive context switch | Blocked on QEMU | Validate on RK3568 hardware |
+| Thread stack leak | thread_exit() does not reclaim frames | Deferred to M5.x |
+
+## 8. Next Milestones
+
+| Milestone | Priority | Summary |
+|-----------|----------|---------|
+| V1.1 | P1 | Runtime Identity — identity accessible through SystemState |
+| V1.2b | P1 | Persistent Identity — blocked on storage driver |
+| V2 / M5 | P2 | Memory Resource Manager — integrate existing MemoryObject |
+| V3 | P3 | Device Graph + minimal Driver contract (ADR-022) |
+
+---
+
+## 9. Reference Material
+
+### 9.1 Vision, Philosophy, and Invariants
+
+**Vision:** Vivanta is an operating system that preserves its identity and user environment across complete replacement of its hardware components.
+
+**Philosophy:** The project is guided by the "Ship of Theseus" principle — a system can survive complete replacement of its parts if its identity and history are preserved.
+
+Key tenets:
+
+- **User First**: The system exists to serve the user, not the other way around.
+- **Adaptive System**: The OS adapts to hardware; hardware does not dictate OS limitations.
+- **Architecture Independence**: The core platform must be portable across major architectures (x86_64, ARM, RISC-V).
+- **Minimal Friction**: The system makes technical decisions automatically; advanced users can override defaults.
+- **Document Before Code**: Architectural decisions are documented before implementation.
+- **Modularity and Composability**: The system is built from independent, composable components.
+
+**Core Invariants:**
+
+1. **User Environment Preservation**: User's applications, data, and settings must persist across hardware changes.
+2. **Hardware Adaptability**: The OS must adapt to hardware; hardware should not dictate OS limitations.
+3. **Architecture Independence**: The core platform must be portable across major architectures.
+4. **Minimal Friction**: System automates decisions; reduces manual user configuration.
+5. **Documentation as Source of Truth**: Architecture is documented before implementation.
+6. **Long-Term Maintainability**: Architecture must be designed for evolution over decades.
+7. **Identity Independence**: The Root Keypair must not depend on the component it is designed to survive replacement of.
+8. **No Booting in Unknown State**: If identity cannot be resolved, the system halts rather than booting in an indeterminate state.
+
+### 9.2 Completed RFCs
 
 | RFC | Title | Status | Validated By |
 |-----|-------|--------|-------------|
-| RFC-001 | Identity Model | ✅ Accepted | M1-A experiment |
-| RFC-001.5 | Identity Utility Model | ✅ Accepted | M1-A experiment |
-| RFC-002 | Bootstrap Architecture | ✅ Accepted | M1-A experiment |
-| RFC-003 | Boot Protocol | ✅ Accepted | M1-A experiment |
-| RFC-004 | Recovery Seed Format | ✅ Accepted | M1-A experiment |
-| RFC-005 | State Document Format | ✅ Accepted | M1-A experiment |
-| RFC-006 | Environment Continuity Model | ✅ Accepted | M2-A experiment |
-| RFC-007 | Dynamic Device Tree and Hardware Adaptation | 📝 Draft | M1-B (pending) |
-| RFC-008 | Boot Protocol (revised) | ✅ Accepted | AArch64 + ARMv7 boot |
-| RFC-009 | Platform Capability Model | ✅ Accepted | Architecture design |
-| RFC-010 | Memory Resource Model | 🔬 Experimental | Awaiting hardware validation |
+| RFC-001 | Identity Model | Accepted | M1-A experiment |
+| RFC-001.5 | Identity Utility Model | Accepted | M1-A experiment |
+| RFC-002 | Bootstrap Architecture | Accepted | M1-A experiment |
+| RFC-003 | Boot Protocol | Accepted | M1-A experiment |
+| RFC-004 | Recovery Seed Format | Accepted | M1-A experiment |
+| RFC-005 | State Document Format | Accepted | M1-A experiment |
+| RFC-006 | Environment Continuity Model | Accepted | M2-A experiment |
+| RFC-007 | Dynamic Device Tree and Hardware Adaptation | Draft | M1-B (pending) |
+| RFC-008 | Boot Protocol (revised) | Accepted | AArch64 + ARMv7 boot |
+| RFC-009 | Platform Capability Model | Accepted | Architecture design |
+| RFC-010 | Memory Resource Model | Experimental | Awaiting hardware validation |
 
-## Terminology
+### 9.3 Terminology
 
 | Term | Definition |
 |------|-----------|
@@ -77,104 +178,7 @@ This replaces the earlier "Adaptive Computing Platform" / "Adaptive Operating Pl
 | **Environment Chain** | Ordered sequence of Environment Manifests linked by cryptographic hashes, tracking environment continuity independently of the State Chain. |
 | **Incremental Update** | Environment Manifest update that occurs between State Document transitions, tracking file changes without hardware migration. |
 
-## Current Milestones
-
-| Phase | Status | Description |
-|-------|--------|-------------|
-| R0 | ✅ Complete | Peer review, architecture audit, identity resolved |
-| RFC Chain | ✅ Complete | RFC-001 through RFC-006 defining the identity and environment protocol |
-| M1-A | ✅ Complete | Continuity Proof Experiment on QEMU — core thesis validated |
-| M2-A | ✅ Complete | Environment Continuity Experiment — user data persistence validated |
-| M3-A | ✅ Complete | Incremental Environment Continuity — tracked changes without state migration |
-| M3-B | ✅ Complete | Memory Object Foundation — resource-oriented memory model (QEMU) |
-| M3-C | ✅ Complete | Memory Object Semantics — lifecycle, clone, share, revoke |
-| M1-B | ⏸️ Deferred | Hardware bringup — Redmi Note 7 (lavender, SDM660) |
-| R2 | ✅ Complete | Reality Lock — architecture freeze, repository reorg |
-| ACS | ✅ Complete | Architecture Cleanup Sprint — kernel/arch/platform/target split, extern "Rust" contract |
-| **M4** | ✅ **Complete** | **Execution Foundation — cooperative multi-threading, timer, thread lifecycle, repository restructuring** |
-| M4.4 | ✅ Complete | Address Spaces — multi-AS model with verified hardware isolation |
-| M4.4.5 | ✅ Complete | Execution Contract Freeze — unified context switch (ADR-017) |
-| M4.5.0 | ✅ Complete | EL0 Transition Preparation — InterruptGuard, eret_to_user_stub |
-| M4.5.1 | ✅ Complete | First EL0 entry + SVC roundtrip (QEMU) |
-| M4.5.2 | 🔧 In Progress | RK3568 bring-up — println! + DTB on real hardware |
-
-### M4 — Execution Foundation
-
-M4 delivered the first working kernel-thread environment on Vivanta:
-
-- **Cooperative round-robin scheduling** with 3 threads (boot + persistent + terminating)
-- **Thread lifecycle management**: `create_kernel_thread`, `thread_exit`, `thread_trampoline`, `cleanup()`, idle thread (WFI)
-- **Timer at ~79 Hz** on QEMU (CNTP, IRQ 30, tick counting)
-- **Architecture-independent kernel**: verified by `cargo build -p target-test` (kernel + arch-test-stub, no ISA dependency)
-- **Repository restructuring**: `boot/` → `archive/boot_legacy/`, `kernel/src/memory/` → `kernel-memory-frozen/` crate
-- **5 ADRs documented**: ADR-011 through ADR-015
-
-**Known limitation**: True preemptive context switching is blocked on QEMU (writing to on-stack ExceptionFrame from IRQ prevents subsequent timer IRQs). Validation deferred to physical ARM64 hardware (RK3568). Cooperative switching works correctly.
-
-Details in `docs/milestones/M4/acceptance.md`.
-
-## V-Epic Milestones
-
-V-epics replace the earlier R-phase model as the primary planning structure. See [Master Roadmap](docs/architecture/master-roadmap.md) for full dependency graph.
-
-| V-Epic | Priority | Status | Summary |
-|--------|----------|--------|---------|
-| V0 | P0 | ✅ Partial | Rename Vivanta → Vivanta (pending), roadmap refresh (✅), docs scaffold (✅) |
-| V0.1 | P0 | ✅ Complete | Runtime Identity Bootstrap — SystemState skeleton, IdentityState::Volatile, BootInfo owned copy |
-| V1 | P1 | 🔧 Planning | Continuity model — BootInfo migration, boot-time state separation |
-| V2 / M5 | P2 | 🔧 Planning | Memory Resource Manager — integrate existing MemoryObject |
-| V3 | P3 | 🔧 Planned | Device Graph + minimal Driver contract (ADR-022) |
-| V4 | P4 | 🔧 Planned | Task abstraction + Scheduler policies |
-| V5 | P5 | 🔧 Planned | Service Framework — LoggingService first |
-| V6 | P6 | 🔧 Planned | Recovery Manager |
-| V7 | P7 | 🔧 Planned | Additional hardware targets |
-| V8 | — | 🔧 Planned | Documentation scaffold |
-
-## V0.1 — Runtime Identity Bootstrap
-
-**Status:** ✅ Complete (2026-07-19)
-
-### Deliverables
-
-- `kernel/src/state/` module: `SystemState { identity, hardware }`
-- `IdentityState::Volatile(RuntimeIdentity { boot_id, public_key })` per ADR-023
-- `HardwareState` with owned copies from `BootInfo` per ADR-021 (no `&'static` references)
-- `SystemState::from_boot_info(&BootInfo) -> Self` — construction at `kernel_main` entry
-- No global singleton — `SystemState` is local to `kernel_main`
-
-### Validated
-
-- ✅ SystemState skeleton
-- ✅ Volatile IdentityState (per-boot identity generation)
-- ✅ BootInfo ownership boundary (data copied, references not retained)
-- ✅ Owned HardwareState representation (memory_map + mmio_regions as arrays)
-- ✅ ADR-020/021/023 compliance
-- ✅ `InterruptControllerInfo` excluded from HardwareState (has `&'static str` — ADR-021)
-- ✅ Build: `target-rk3568` + `target-qemu-aarch64` — 0 warnings
-
-### Known limitation (technical debt)
-
-Old kernel init path still reads `BootInfo` directly for transient boot operations
-(PMM setup, MMU mapping, GIC init). SystemState is constructed in parallel but
-existing subsystems have not been migrated yet. Migration will happen incrementally
-in V0.2.
-
-### Pending
-
-- RK3568 runtime parity validation (binary ready, requires power cycle)
-- Persistent identity (V1.x, blocked on storage driver)
-
-### ADR compliance
-
-| ADR | Requirement | Status |
-|-----|-------------|--------|
-| ADR-020 | SystemState owns runtime-coordinated state only | ✅ No global singleton, no drivers/services |
-| ADR-020 | HardwareState immutable after construction | ✅ Copy-once at boot |
-| ADR-021 | No `&'static` references from BootInfo escape | ✅ All data copied, InterruptControllerInfo excluded |
-| ADR-023 | IdentityState as enum, not type hierarchy | ✅ Volatile(Persistent() variants |
-| ADR-023 | Monotonic transition | ✅ Only Volatile exists today |
-
-## New ADRs (July 2026)
+### 9.4 ADRs (July 2026)
 
 | ADR | Title | Status |
 |-----|-------|--------|
@@ -184,33 +188,7 @@ in V0.2.
 | ADR-023 | IdentityState Model | Accepted |
 | ADR-011 | (Amendment) Frozen Component Unfreezing | Amended |
 
-## M1 Boundary
-
-M1 is defined as a **Continuity Proof Experiment**, not an OS implementation. It validates the Vivanta Continuity Layer:
-- Identity generation and recovery
-- State Chain management
-- Boot mode engine (Genesis → Normal → Recovery)
-- Storage replacement continuity
-
-The Vivanta Continuity Layer is architecturally separate from the Operating System Layer (kernel, drivers, filesystem, applications). M1 proves the former. The latter begins after M1 is accepted.
-
-Full acceptance criteria and non-goals are documented in `docs/milestones/M1/A-continuity/acceptance.md`.
-
-Hardware bringup acceptance is documented in `docs/milestones/M1/B-hardware/acceptance.md`.
-
-## Architecture Constraints
-
-*   **Primary Systems Programming Language**: Rust. Confirmed during M1-A. Used for the entire Continuity Proof Experiment.
-*   **Initial Implementation Target**: QEMU (M1-A) — ✅ Complete. RK3568 — 🔧 In Progress (M4.5.2). Xiaomi Redmi Note 7 / lavender (M1-B) — deferred; superseded by RK3568.
-*   **State Document Format for M1**: JSON (CBOR deferred).
-*   **Recovery Seed Format**: BIP-39 12-word mnemonic.
-*   **Signature Algorithm**: Ed25519.
-*   **Hash Function**: SHA-256.
-*   **Identity Derivation**: The Root Keypair is DERIVED FROM the recovery seed, not generated independently. The seed is the single root of truth. This was the critical correction discovered during M1-A.
-
-## Validated by Experiment
-
-The following architectural claims are now experimentally validated between QEMU runs:
+### 9.5 Validated by Experiment
 
 | # | Claim | Validated In |
 |---|-------|-------------|
@@ -240,7 +218,7 @@ The following architectural claims are now experimentally validated between QEMU
 | 24 | Build-time proof: kernel links with arch-test-stub (no real ISA) | ACS |
 | 25 | boot-info crate: zero dependencies, core-only contract types | ACS |
 
-## Key Architectural Decisions
+### 9.6 Key Architectural Decisions
 
 1. Identity is cryptographic (Ed25519 keypair), not a UUID or hostname.
 2. Continuity is formal: same keypair + verified State Chain = same system.
@@ -250,15 +228,35 @@ The following architectural claims are now experimentally validated between QEMU
 6. M1 proves one thing: storage replacement without reinstallation.
 7. M1-A (QEMU) before M1-B (hardware).
 
-## Open Research Topics
+### 9.7 Architecture Constraints
 
-*   Fork detection and Divorce Statements (deferred past M1).
-*   Ownership transfer and multi-device identity (deferred past M1).
-*   Autonomous agent continuity (deferred past M1).
-*   Secure element / TPM key storage (deferred past M1).
-*   Encrypted State Documents (deferred past M1).
-*   Bootloader-level identity verification (deferred past M1).
+- **Primary Language**: Rust (`#![no_std]`). Confirmed during M1-A.
+- **Initial Target**: QEMU AArch64 — Complete. RK3568 — Stage 1. Lavender — Deferred.
+- **State Document Format**: JSON (CBOR deferred).
+- **Recovery Seed Format**: BIP-39 12-word mnemonic.
+- **Signature Algorithm**: Ed25519.
+- **Hash Function**: SHA-256.
+- **Identity Derivation**: Root Keypair is derived from the recovery seed, not generated independently. The seed is the single root of truth.
+
+### 9.8 Open Research Topics
+
+- Fork detection and Divorce Statements (deferred past M1).
+- Ownership transfer and multi-device identity (deferred past M1).
+- Autonomous agent continuity (deferred past M1).
+- Secure element / TPM key storage (deferred past M1).
+- Encrypted State Documents (deferred past M1).
+- Bootloader-level identity verification (deferred past M1).
 
 ---
 
-This document is a living architectural artifact. Future work should rely on this file as the primary source of context.
+## Document Purpose
+
+This file describes the **current state** of Vivanta. It is the primary entry point for new contributors and language models.
+
+Historical decisions and detailed specifications are stored in:
+- `docs/adr/` — Architecture Decision Records
+- `docs/milestones/` — Milestone acceptance criteria and reviews
+- `specs/rfc/` — Request for Comments
+- `archive/` — Historical experiments, decisions, and research
+
+This document should be updated at milestone boundaries, not after every commit.
