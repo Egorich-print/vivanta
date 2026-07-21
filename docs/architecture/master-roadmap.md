@@ -8,11 +8,11 @@
 
 ## Current Focus
 
-*   **Active Track:** `V-epics V0–V1` (Rename + System State)
-*   **Active Milestone:** `M4.5.2` (RK3568 bring-up — hardware diagnostic compiled, waiting on board connection)
-*   **Current Engineering Objective:** Stabilise `println!` and DTB parsing on RK3568 real hardware. In parallel: rename Vivanta → Vivanta, create SystemState.
-*   **Architecture Version:** R2 (historical baseline) + V-epics (current active track)
-*   **Architecture Status:** Stable. 4 new ADRs (020–023) ratified post-audit.
+*   **Active Track:** `V-epics V0.1–V1` (System State → Runtime Identity)
+*   **Active Milestone:** `V1.1` (Runtime Identity — planning)
+*   **Current Engineering Objective:** Migrate identity into SystemState, complete RK3568/RPi3 B+ hardware bring-up.
+*   **Architecture Version:** V0 architecture stabilized (post-audit)
+*   **Architecture Status:** ADR-011 through ADR-023 ratified.
 
 ---
 
