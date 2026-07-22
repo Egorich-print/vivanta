@@ -1,5 +1,7 @@
 #![no_std]
+extern crate alloc;
 
+pub mod identity;
 pub mod pmm;
 pub mod scheduler;
 pub mod state;
@@ -7,7 +9,8 @@ pub mod vmm;
 
 pub use vivanta_arch_api::pmm::{FrameAllocator, PhysFrame};
 
-use vivanta_boot_common::{BootInfo, println, MemoryRegionKind};
+use vivanta_boot_common::{println, MemoryRegionKind};
+use vivanta_boot_info::BootInfo;
 use vivanta_arch_api::mmu::RootPageTable;
 
 extern "C" {
@@ -37,7 +40,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let system_state = state::SystemState::from_boot_info(info);
     // After this point, BootInfo must NOT be referenced for runtime state.
     // (Existing init code still reads BootInfo for transient boot operations.)
-    system_state.boot();
 
     // ------- CPU early init (exception vectors, FP/SIMD) --------------------
     println!();

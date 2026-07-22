@@ -4,6 +4,13 @@ This directory indexes ADRs for the Vivanta project (formerly TheseusOS). Engine
 
 ## Active ADRs
 
+- [ADR-001: RFC Freeze](ADR-001-rfc-freeze.md) - Status: Draft
+- [ADR-002: State Document Versioning](ADR-002-state-versioning.md) - Status: Proposed
+- [ADR-021: System State Encapsulation](ADR-021-system-state-encapsulation.md) - Status: Accepted
+- [ADR-024: Identity Model Separation](ADR-024-identity-model-separation.md) - Status: Accepted
+
+## Active ADRs
+
 | ADR | Title | Status | Location |
 |-----|-------|--------|----------|
 | ADR-001 | RFC Freeze | Accepted | `vivanta-boot/docs/adr/` |
