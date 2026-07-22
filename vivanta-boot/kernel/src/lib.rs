@@ -34,7 +34,8 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     if let Some(dtb) = info.dtb {
         println!("  DTB at    0x{:x}", dtb);
     }
-    println!("  {} CPU(s)", info.cpu_count);
+    let hardware = system_state.hardware();
+    println!("  {} CPU(s)", hardware.cpu_count);
 
     // V0.1: Runtime Identity Bootstrap — construct SystemState from BootInfo
     let system_state = state::SystemState::from_boot_info(info);
@@ -49,7 +50,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
 
     // ------- Memory Map -----------------------------------------------------
     println!("Memory Map:");
-    for r in info.memory_map.regions() {
+    for r in hardware.memory_map.regions() {
         let end = r.start + r.size;
         let tag = match r.kind {
             MemoryRegionKind::Usable => "Usable ",
