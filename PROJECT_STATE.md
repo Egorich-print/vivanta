@@ -1,18 +1,18 @@
 # Project State
 
-> **Current baseline:** V0.1
-> **Last updated:** 2026-07-21
+> **Current baseline:** V1.1
+> **Last updated:** 2026-07-23
 
 ## Quick Reference
 
 | Field | Value |
 |-------|-------|
-| Version | V0.1 complete |
-| Current milestone | V1.1 Runtime Identity (planning) |
+| Version | V1.1 complete |
+| Current milestone | V2/M5 Memory Resource Manager (planning) |
 | Main dev platform | QEMU AArch64 |
 | Hardware bring-up | RK3568 Stage 1, RPi3 B+ Stage 1 |
-| Architecture status | V0 architecture stabilized |
-| Major blockers | RK3568 BootInfo assembly, RPi3 UART firmware, Storage driver |
+| Architecture status | V1 architecture stabilized (ADR-021/024 ratified) |
+| Major blockers | RPi3 UART firmware, Storage driver |
 
 ---
 
@@ -30,9 +30,9 @@ The definitive order of development is governed by the [Master Roadmap](docs/arc
 |-------|--------|-------|
 | V0 | Complete | Architecture foundation, rename TheseusOS → Vivanta |
 | V0.1 | Complete | SystemState + Identity Bootstrap |
-| V1.1 | Planning | Runtime Identity — BootInfo migration, identity transfer |
+| V1.1 | Complete | Runtime Identity — ADR-021/024 ratified, BootInfo escape closed |
 | V1.2b | Blocked | Persistent Identity — requires storage layer |
-| V2 / M5 | Planned | Memory Resource Manager |
+| V2 / M5 | Planning | Memory Resource Manager — integrate existing MemoryObject |
 | V3 | Planned | Device Graph + Driver Contract |
 
 ## 3. Repository Layout
@@ -58,8 +58,9 @@ vivanta/
 | V0 architecture | Stabilized |
 | Execution Foundation | Complete (M4: cooperative threads, timer, GIC) |
 | Identity Bootstrap | Complete (V0.1: SystemState, IdentityState) |
-| ADR baseline | ADR-011 through ADR-023 |
-| Post-audit additions | ADR-020 through ADR-023 (accepted July 2026) |
+| Runtime Identity | Complete (V1.1: BootInfo escape, SystemState encapsulation) |
+| ADR baseline | ADR-011 through ADR-024 |
+| Post-audit additions | ADR-020 through ADR-024 (accepted July 2026) |
 | RFC baseline | RFC-001 through RFC-008 accepted; RFC-009–010 pending |
 | Build-time verification | kernel links with arch-test-stub (no real ISA) |
 
@@ -73,28 +74,40 @@ vivanta/
 | X96Q | Planned | Platform crate exists | Build + UART init |
 | Lavender (SDM660) | Early | Console init + boot banner | Deferred (RK3568 prioritized) |
 
-## 6. Current Milestone: V1.1 Runtime Identity
+## 6. Completed Milestone: V1.1 Runtime Identity
 
 **Goal:** Establish the runtime identity framework — make identity accessible through SystemState, prepare for persistent identity.
 
-**Done when:**
-- [ ] Runtime identity exists and is accessible through SystemState
-- [ ] Boot identity transfer from bootloader to kernel works
-- [ ] Identity available through SystemState at kernel_main entry
-- [ ] Volatile → Persistent transition enum is wired (even if Persistent is stub)
-- [ ] RK3568 adapter_main calls kernel_main with BootInfo
+**Completed:** 2026-07-23
 
-**Unblocked:**
-- Runtime identity (Volatile)
-- SystemState integration
-- Boot identity transfer
+**What was done:**
+- ADR-021: System State Encapsulation — all SystemState fields private, accessed via getters
+- ADR-024: Identity Model Separation — BootIdentity, RuntimeIdentity, PersistentIdentity types
+- BootInfo escape eliminated — `kernel_main` no longer accesses `info.*` after `from_boot_info()`
+- Common boot flow for all platforms: `_start → adapter_main → FDT → BootInfo → kernel_main`
+- RK3568 brought onto standard boot flow (was using direct SystemState construction)
+- Volatile → Persistent transition enum wired (IdentityState::Runtime / Persistent)
+- `Eq` derives added to all identity types
 
-**Blocked:**
-- Persistent identity implementation requires storage layer (P3.5)
+**Exit criteria met:**
+- [x] Runtime identity exists and is accessible through SystemState
+- [x] Boot identity transfer from bootloader to kernel works
+- [x] Identity available through SystemState at kernel_main entry
+- [x] Volatile → Persistent transition enum is wired (even if Persistent is stub)
+- [x] RK3568 adapter_main calls kernel_main with BootInfo
 
-**Fallback:** Continue on QEMU if hardware bring-up is blocked.
+## 7. Current Milestone: V2/M5 Memory Resource Manager (planning)
 
-## 7. Known Blockers
+**Goal:** Integrate existing MemoryObject prototype into the kernel as a formal Memory Resource Manager per master-roadmap P2.
+
+**Depends on:**
+- ADR-011 pre-flight: frozen component adaptation review and unfreeze
+- `kernel-memory-frozen` crate contains MemoryObject, MRM, placement policy — needs adaptation
+
+**Blocked by:**
+- Nothing; QEMU validation baseline is sufficient for initial integration
+
+## 8. Known Blockers
 
 | Blocker | Impact | Path forward |
 |---------|--------|--------------|
@@ -104,18 +117,17 @@ vivanta/
 | Preemptive context switch | Blocked on QEMU | Validate on RK3568 hardware |
 | Thread stack leak | thread_exit() does not reclaim frames | Deferred to M5.x |
 
-## 8. Next Milestones
+## 9. Next Milestones
 
 | Milestone | Priority | Summary |
 |-----------|----------|---------|
-| V1.1 | P1 | Runtime Identity — identity accessible through SystemState |
+| V2 / M5 | P1 | Memory Resource Manager — integrate existing MemoryObject |
 | V1.2b | P1 | Persistent Identity — blocked on storage driver |
-| V2 / M5 | P2 | Memory Resource Manager — integrate existing MemoryObject |
 | V3 | P3 | Device Graph + minimal Driver contract (ADR-022) |
 
 ---
 
-## 9. Reference Material
+## 10. Reference Material
 
 ### 9.1 Vision, Philosophy, and Invariants
 
@@ -183,9 +195,10 @@ Key tenets:
 | ADR | Title | Status |
 |-----|-------|--------|
 | ADR-020 | System Runtime Ownership | Accepted |
-| ADR-021 | BootInfo Escape Prevention | Accepted |
+| ADR-021 | System State Encapsulation | Accepted |
 | ADR-022 | Minimal Driver Lifecycle Contract | Accepted |
 | ADR-023 | IdentityState Model | Accepted |
+| ADR-024 | Identity Model Separation | Accepted |
 | ADR-011 | (Amendment) Frozen Component Unfreezing | Amended |
 
 ### 9.5 Validated by Experiment

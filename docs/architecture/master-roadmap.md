@@ -8,11 +8,11 @@
 
 ## Current Focus
 
-*   **Active Track:** `V-epics V0.1–V1` (System State → Runtime Identity)
-*   **Active Milestone:** `V1.1` (Runtime Identity — planning)
-*   **Current Engineering Objective:** Migrate identity into SystemState, complete RK3568/RPi3 B+ hardware bring-up.
-*   **Architecture Version:** V0 architecture stabilized (post-audit)
-*   **Architecture Status:** ADR-011 through ADR-023 ratified.
+*   **Active Track:** `V-epics P2` (Memory Resource Manager)
+*   **Active Milestone:** `V2/M5` (Memory Resource Manager — planning)
+*   **Current Engineering Objective:** Integrate existing `MemoryObject` prototype from `kernel-memory-frozen` into the kernel as a formal Memory Resource Manager.
+*   **Architecture Version:** V1 architecture stabilized (ADR-021/024 ratified)
+*   **Architecture Status:** ADR-011 through ADR-024 ratified.
 
 ---
 
@@ -43,13 +43,13 @@ The following topics are intentionally out of scope for the near and mid-term:
 ### Current Track — V-epics
 
 ```
-P0  Rename + cleanup (Vivanta → Vivanta)
+P0  Rename + cleanup (TheseusOS → Vivanta) ✅
     ↓
-P1  SystemState + Volatile Identity
+P1  SystemState + Volatile Identity ✅ (V1.1)
     ↓
-[M4.5.2 — RK3568 hardware stabilization (pauses V-work when triggered)]
+[M4.5.2 — RK3568 hardware stabilization] ✅ (included in V1.1)
     ↓
-P2  V2/M5 Memory Resource Manager (integrate existing MemoryObject)
+P2  V2/M5 Memory Resource Manager (integrate existing MemoryObject) ← ACTIVE
     ↓
 P3  V3 Device Graph + Minimal Driver Contract (ADR-022)
     ↓
@@ -204,15 +204,15 @@ V-epics replace the earlier R-phase model as the primary planning structure. M-n
 
 **ADRs:** — (rename is execution, not architecture)
 
-### P1 — System State and Identity
+### P1 — System State and Identity ✅ (V1.1 completed 2026-07-23)
 
-| Sub-step | Description | Exit Criteria |
-|----------|-------------|---------------|
-| V1.1 | `SystemState::from_boot_info()` + ownership structure per ADR-020 | SystemState constructed, BootInfo references escaped |
-| V1.2a | Volatile IdentityState per ADR-023 | Identity generated per boot, enum match enforced |
-| V1.2b | Persistent Identity (blocked on storage driver P3.5) | — |
+| Sub-step | Description | Exit Criteria | Status |
+|----------|-------------|---------------|--------|
+| V1.1 | `SystemState::from_boot_info()` + ownership structure per ADR-020 | SystemState constructed, BootInfo references escaped | ✅ Complete |
+| V1.2a | Volatile IdentityState per ADR-023 | Identity generated per boot, enum match enforced | ✅ Complete (as Runtime Identity) |
+| V1.2b | Persistent Identity (blocked on storage driver P3.5) | — | ⏳ Blocked |
 
-**ADRs:** ADR-020 (System Runtime Ownership), ADR-021 (BootInfo Escape Prevention), ADR-023 (IdentityState Model)
+**ADRs:** ADR-020, ADR-021, ADR-023, ADR-024
 
 ### M4.5.2 — RK3568 Hardware Stabilisation
 
@@ -331,3 +331,9 @@ V-epics replace the earlier R-phase model as the primary planning structure. M-n
 -   V2.1 MemoryObject redefined as "hardware adaptation" (not redesign).
 -   V5 restructured: LoggingService first, DownloadService deferred.
 -   References new ADRs 020–023.
+
+### 2026-07-23
+-   **V1.1 completed:** Runtime Identity, ADR-021/024 ratified.
+-   RK3568 boot flow unified with QEMU (adapter_main → FDT → BootInfo → kernel_main).
+-   Current Focus updated to P2 V2/M5 Memory Resource Manager.
+-   ADR-024 added to references.

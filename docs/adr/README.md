@@ -1,13 +1,6 @@
 # Architectural Decision Records
 
-This directory indexes ADRs for the Vivanta project (formerly TheseusOS). Engineering-level ADRs (011–023) live in `vivanta-boot/docs/adr/`.
-
-## Active ADRs
-
-- [ADR-001: RFC Freeze](ADR-001-rfc-freeze.md) - Status: Draft
-- [ADR-002: State Document Versioning](ADR-002-state-versioning.md) - Status: Proposed
-- [ADR-021: System State Encapsulation](ADR-021-system-state-encapsulation.md) - Status: Accepted
-- [ADR-024: Identity Model Separation](ADR-024-identity-model-separation.md) - Status: Accepted
+This directory indexes ADRs for the Vivanta project (formerly TheseusOS). Engineering-level ADRs (011–024) live in `vivanta-boot/docs/adr/`.
 
 ## Active ADRs
 
@@ -23,9 +16,10 @@ This directory indexes ADRs for the Vivanta project (formerly TheseusOS). Engine
 | ADR-018 | User Entry Transition Model | Proposed | `vivanta-boot/docs/adr/` |
 | ADR-019 | User Page Permissions and EL0 Memory Model | Proposed | `vivanta-boot/docs/adr/` |
 | ADR-020 | System Runtime Ownership | Accepted | `vivanta-boot/docs/adr/` |
-| ADR-021 | BootInfo Escape Prevention | Accepted | `vivanta-boot/docs/adr/` |
+| ADR-021 | System State Encapsulation | Accepted | `vivanta-boot/docs/adr/` |
 | ADR-022 | Minimal Driver Lifecycle Contract | Accepted | `vivanta-boot/docs/adr/` |
 | ADR-023 | IdentityState Model | Accepted | `vivanta-boot/docs/adr/` |
+| ADR-024 | Identity Model Separation | Accepted | `vivanta-boot/docs/adr/` |
 
 ## Deprecated ADRs
 
