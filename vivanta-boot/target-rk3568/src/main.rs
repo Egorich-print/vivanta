@@ -7,6 +7,10 @@
 
 use core::panic::PanicInfo;
 
+use vivanta_boot_common::println;
+use vivanta_boot_info::{BootInfo, MmioRegion, MmioKind};
+
+extern crate vivanta_arch_aarch64;
 
 // ARM64 entry point with Image header for U-Boot booti
 core::arch::global_asm!(
@@ -110,12 +114,12 @@ core::arch::global_asm!(
     "movk x4, #0xfe66, lsl #16",
     "mov w5, #0x03",
     "strb w5, [x4, #(3 << 2)]",
-    // UART ready — BOOT_CONTEXT store + Rust entry follows
     // Wait for TX completion (read LSR, bit 5 = THR empty)
     "1:",
     "ldr w5, [x4, #(5 << 2)]",
     "tst w5, #(1 << 5)",
     "b.eq 1b",
+    // Store DTB address (x0 from U-Boot) into BOOT_CONTEXT
     "adrp x1, BOOT_CONTEXT",
     "add x1, x1, :lo12:BOOT_CONTEXT",
     "str x0, [x1]",
@@ -127,37 +131,48 @@ core::arch::global_asm!(
 
 #[no_mangle]
 pub unsafe extern "C" fn adapter_main() -> ! {
+    // Read DTB address from BOOT_CONTEXT (stored by ASM entry)
+    let dtb_addr = vivanta_boot_common::BOOT_CONTEXT.dtb;
+    let dtb_ptr = dtb_addr as *const u8;
+
     // Configure early platform info for boot debug output
     vivanta_boot_common::set_early_platform(
         vivanta_boot_common::EarlyPlatformInfo { uart_base: 0xFE66_0000 },
     );
 
-    // V0.1: Runtime Identity Bootstrap — construct SystemState
-    let _system_state = vivanta_kernel::state::SystemState::new(
-        vivanta_kernel::state::IdentityState::new_volatile(),
-        vivanta_kernel::state::HardwareState::empty(),
-    );
+    // Platform init: console from FDT, fallback to hardcoded NS16550
+    vivanta_platform_rk3568::init_console_from_fdt(dtb_ptr);
 
-    // Direct UART writes for boot log (println! has a known hang with this binary)
-    let uart_base = 0xFE66_0000u64;
-    macro_rules! uart {
-        ($s:expr) => {
-            for &b in $s.as_bytes() {
-                if b == b'\n' {
-                    core::arch::asm!("strb {c:w}, [{base}]", base = in(reg) uart_base, c = in(reg) 0x0du32, options(nostack));
-                }
-                core::arch::asm!("strb {c:w}, [{base}]", base = in(reg) uart_base, c = in(reg) b as u32, options(nostack));
-            }
-        };
-    }
-    uart!("[VIVANTA] Boot start\n");
-    uart!("[ARCH]  FP/SIMD enabled (CPACR_EL1.FPEN=3)\n");
-    uart!("[OK]    M4.5.2 diagnostic complete\n");
-    uart!("[V0]   Runtime Identity Bootstrap\n");
+    // FDT validation report and memory discovery
+    let (mem_map, cpu_count) = vivanta_platform_rk3568::build_memory_map(dtb_ptr);
 
-    loop {
-        core::hint::spin_loop();
-    }
+    println!();
+    println!("\u{2500}\u{2500}\u{2500}\u{2500} Vivanta Boot Adapter (RK3568) \u{2500}\u{2500}\u{2500}\u{2500}");
+    println!("  DTB at 0x{:x}", dtb_addr);
+
+    // Build MMIO regions (RK3568: UART NS16550 at 0xFE660000)
+    static MMIO_REGIONS: [MmioRegion; 1] = [
+        MmioRegion { base: 0xFE66_0000, size: 0x1000, kind: MmioKind::Device },
+    ];
+
+    // Assemble BootInfo
+    let mut mem_map_buf: core::mem::MaybeUninit<vivanta_boot_common::MemoryMap> =
+        core::mem::MaybeUninit::uninit();
+    let mut boot_info_buf: core::mem::MaybeUninit<BootInfo> =
+        core::mem::MaybeUninit::uninit();
+
+    mem_map_buf.as_mut_ptr().write(mem_map);
+    let mem_map_ref: &'static vivanta_boot_common::MemoryMap = &*mem_map_buf.as_ptr();
+
+    boot_info_buf.as_mut_ptr().write(BootInfo {
+        memory_map: mem_map_ref,
+        mmio_regions: &MMIO_REGIONS,
+        interrupt_controller: None,
+        cpu_count,
+        dtb: Some(dtb_addr),
+    });
+
+    vivanta_kernel::kernel_main(&*boot_info_buf.as_ptr());
 }
 
 #[panic_handler]

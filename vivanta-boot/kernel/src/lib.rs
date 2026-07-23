@@ -1,6 +1,22 @@
 #![no_std]
 extern crate alloc;
 
+// Stub global allocator for bare-metal — panics on any allocation.
+// A real allocator will replace it once kernel page allocator is wired to alloc.
+#[global_allocator]
+static ALLOCATOR: StubAllocator = StubAllocator;
+
+struct StubAllocator;
+
+unsafe impl core::alloc::GlobalAlloc for StubAllocator {
+    unsafe fn alloc(&self, _layout: core::alloc::Layout) -> *mut u8 {
+        panic!("kernel: no global allocator at runtime");
+    }
+    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {
+        panic!("kernel: no global allocator at runtime");
+    }
+}
+
 pub mod identity;
 pub mod pmm;
 pub mod scheduler;
