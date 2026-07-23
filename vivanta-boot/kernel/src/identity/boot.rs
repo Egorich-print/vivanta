@@ -9,7 +9,7 @@ use super::{BootSource, Uuid};
 ///
 /// Created from BootInfo and used only during initialization.
 /// This identity is ephemeral and does not persist beyond boot.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BootIdentity {
     /// Unique identifier for this boot session
     pub boot_id: Uuid,

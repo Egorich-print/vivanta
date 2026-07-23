@@ -21,7 +21,7 @@ pub use runtime::RuntimeIdentity;
 pub use uuid::Uuid;
 
 /// The current state of the system's identity
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IdentityState {
     /// System is booting, only BootIdentity is available
     Booting(BootIdentity),

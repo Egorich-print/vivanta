@@ -3,7 +3,10 @@
 // This module provides abstractions for hardware-related state,
 // including device tree, memory map, and device registry.
 
-use vivanta_boot_info::{BootInfo, MemoryMap, MemoryRegion, MmioRegion, InterruptControllerInfo};
+use vivanta_boot_info::{BootInfo, MemoryMap, MmioRegion, InterruptControllerInfo};
+
+/// Empty memory map for default HardwareState construction.
+const EMPTY_MEMORY_MAP: MemoryMap = MemoryMap::new();
 
 /// Represents the hardware state of the system.
 ///
@@ -27,16 +30,12 @@ pub struct HardwareState {
 impl HardwareState {
     /// Creates a new HardwareState with default values.
     pub fn new() -> Self {
-        // This is unsafe but we need it for the default
-        // In practice, this should only be called with valid data
-        unsafe {
-            Self {
-                dtb_ptr: 0,
-                memory_map: &*(0 as *const MemoryMap),
-                mmio_regions: &*(0 as *const [MmioRegion]),
-                cpu_count: 0,
-                interrupt_controller: None,
-            }
+        Self {
+            dtb_ptr: 0,
+            memory_map: &EMPTY_MEMORY_MAP,
+            mmio_regions: &[],
+            cpu_count: 0,
+            interrupt_controller: None,
         }
     }
     

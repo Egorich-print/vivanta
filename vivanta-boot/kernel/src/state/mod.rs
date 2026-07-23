@@ -11,6 +11,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use crate::identity::{BootIdentity, IdentityState, RuntimeIdentity, Uuid};
 
 pub mod hardware;
+pub mod identity;
 
 use self::hardware::HardwareState;
 

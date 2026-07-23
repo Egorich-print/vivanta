@@ -12,7 +12,7 @@ use super::Uuid;
 /// This identity is stored in persistent storage and represents
 /// the long-term identity of the system. It contains metadata
 /// about the system's lifecycle.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PersistentIdentity {
     /// Unique identifier for this system
     /// This ID remains constant across reboots

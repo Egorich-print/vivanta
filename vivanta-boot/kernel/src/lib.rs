@@ -31,16 +31,16 @@ pub unsafe extern "Rust" fn boot_alloc_frame(ctx: *mut ()) -> u64 {
 pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!();
     println!("\u{2500}\u{2500}\u{2500}\u{2500} Vivanta Kernel Entry \u{2500}\u{2500}\u{2500}\u{2500}");
-    if let Some(dtb) = info.dtb {
-        println!("  DTB at    0x{:x}", dtb);
-    }
-    let hardware = system_state.hardware();
-    println!("  {} CPU(s)", hardware.cpu_count);
 
-    // V0.1: Runtime Identity Bootstrap — construct SystemState from BootInfo
+    // V1.1: Runtime Identity Bootstrap — construct SystemState from BootInfo
     let system_state = state::SystemState::from_boot_info(info);
+    let hardware = system_state.hardware();
+    if hardware.dtb_ptr != 0 {
+        println!("  DTB at    0x{:x}", hardware.dtb_ptr);
+    }
+    println!("  {} CPU(s)", hardware.cpu_count);
     // After this point, BootInfo must NOT be referenced for runtime state.
-    // (Existing init code still reads BootInfo for transient boot operations.)
+    // All hardware info is accessible through system_state.hardware().
 
     // ------- CPU early init (exception vectors, FP/SIMD) --------------------
     println!();
@@ -65,7 +65,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     }
 
     // ------- Boot Memory Manager -------------------------------------------
-    let region = info
+    let region = hardware
         .memory_map
         .regions()
         .iter()
@@ -80,7 +80,8 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let mut boot = pmm::BootMemoryManager::new(region.start, region.size, bitmap_base as *mut u8);
     boot.reserve_kernel(kernel_start, kernel_end);
 
-    if let Some(dtb) = info.dtb {
+    if hardware.dtb_ptr != 0 {
+        let dtb = hardware.dtb_ptr;
         let dtb_ptr = dtb as *const u8;
         let dtb_total = unsafe { core::ptr::read_volatile(dtb_ptr.add(4) as *const u32) };
         let dtb_size = u32::from_be(dtb_total) as u64;
@@ -107,8 +108,8 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     // Identity-map the usable RAM region
     vivanta_arch_api::boot::mmu::mmu_map_ram(pt, region.start, region.start, region.size);
 
-    // Map MMIO regions from BootInfo (platform-provided)
-    for mmio in info.mmio_regions {
+    // Map MMIO regions (from HardwareState per ADR-021)
+    for mmio in hardware.mmio_regions {
         vivanta_arch_api::boot::mmu::mmu_map_range(
             pt, mmio.base, mmio.base, mmio.size, mmio.kind.is_user_accessible(),
         );
@@ -123,7 +124,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!("  L1 table at     0x{:x}", vivanta_arch_api::boot::mmu::mmu_root_addr(pt));
     println!("  RAM ident:      0x{:016x} – 0x{:016x}  ({} MiB)",
         region.start, region.start + region.size - 1, region.size >> 20);
-    for mmio in info.mmio_regions {
+    for mmio in hardware.mmio_regions {
         let kind_str = if mmio.kind.is_user_accessible() { "user" } else { "vivanta_kernel" };
         println!("  MMIO ident:     0x{:x} ({} bytes, {})", mmio.base, mmio.size, kind_str);
     }
@@ -137,7 +138,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let build_root = |label: &str, extra_va: u64, extra_pa: u64| -> RootPageTable {
         let rpt = vivanta_arch_api::boot::mmu::mmu_init(alloc_ctx_root, boot_alloc_frame);
         vivanta_arch_api::boot::mmu::mmu_map_ram(rpt, region.start, region.start, region.size);
-        for mmio in info.mmio_regions {
+        for mmio in hardware.mmio_regions {
             vivanta_arch_api::boot::mmu::mmu_map_range(
                 rpt, mmio.base, mmio.base, mmio.size, mmio.kind.is_user_accessible(),
             );
@@ -172,10 +173,10 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!("MMU enabled successfully.");
 
     // ------- GIC Discovery & Initialisation --------------------------------
-    if let Some(dtb) = info.dtb {
+    if hardware.dtb_ptr != 0 {
         println!();
         println!("Interrupt Controller:");
-        vivanta_arch_api::boot::irq::irq_init(dtb);
+        vivanta_arch_api::boot::irq::irq_init(hardware.dtb_ptr);
         vivanta_arch_api::boot::irq::irq_cpu_enable();
 
         // @@M4@@ Timer disabled for cooperative-only demo (re-enabled in M4.2)

@@ -9,7 +9,7 @@ use super::{BootIdentity, Uuid};
 ///
 /// Contains the current operational identity of the system.
 /// This identity is created when transitioning from boot to runtime.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeIdentity {
     /// Unique identifier for this runtime session
     pub id: Uuid,
