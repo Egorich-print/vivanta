@@ -6,3 +6,7 @@ target/
 *.dtb
 *.map
 *.o
+__pycache__/
+*.pyc
+images/
+.DS_Store
