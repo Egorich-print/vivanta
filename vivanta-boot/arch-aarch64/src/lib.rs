@@ -10,6 +10,8 @@ extern crate vivanta_boot_common;
 pub mod boot;
 pub mod context;
 pub mod mmu;
+pub mod early_mmu;
+pub mod paging;
 pub mod interrupts;
 pub mod timer;
 pub mod thread;

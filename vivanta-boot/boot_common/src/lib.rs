@@ -9,6 +9,8 @@
 #![no_std]
 
 pub mod ns16550;
+pub mod pl011;
+pub mod memory_discovery;
 pub mod hardware;
 pub mod fdt;
 
@@ -23,7 +25,7 @@ use core::fmt;
 
 // ---------------------------------------------------------------------------
 // EarlyPlatformInfo — platform-provided constants for early boot debug output.
-// Must be set by adapter_main BEFORE any println! or write_direct call.
+// Must be set by adapter_main before console initialization.
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy)]
@@ -39,12 +41,6 @@ pub fn set_early_platform(info: EarlyPlatformInfo) {
 
 pub fn early_platform() -> Option<EarlyPlatformInfo> {
     unsafe { EARLY_PLATFORM }
-}
-
-unsafe fn early_uart_write(byte: u8) {
-    if let Some(info) = EARLY_PLATFORM.as_ref() {
-        (info.uart_base as *mut u32).write_volatile(byte as u32);
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -133,21 +129,16 @@ static GLOBAL_CONSOLE: GlobalConsole = GlobalConsole {
 };
 
 pub fn set_console(c: &'static dyn Console) {
-    unsafe {
-        *GLOBAL_CONSOLE.inner.get() = Some(c);
+    match unsafe { (*GLOBAL_CONSOLE.inner.get()).replace(c) } {
+        None => {}
+        Some(_) => panic!("set_console: already initialized"),
     }
 }
 
-/// Bypass lock and write directly to the console (for early boot debug).
 pub fn write_direct(s: &str) {
-    unsafe { early_uart_write(b'W'); }
     unsafe {
         if let Some(c) = (*GLOBAL_CONSOLE.inner.get()).as_ref() {
-            early_uart_write(b'X');
             c.write_str(s);
-            early_uart_write(b'Y');
-        } else {
-            early_uart_write(b'z');
         }
     }
 }
@@ -156,16 +147,10 @@ pub fn with_console<F, R>(f: F) -> R
 where
     F: FnOnce(&dyn Console) -> R,
 {
-    unsafe { early_uart_write(b'1'); }
     let p = GLOBAL_CONSOLE.inner.get();
-    unsafe { early_uart_write(b'2'); }
     let opt = unsafe { (*p).as_ref() };
-    unsafe { early_uart_write(b'3'); }
     let c = opt.expect("console not initialized");
-    unsafe { early_uart_write(b'4'); }
-    let result = f(*c);
-    unsafe { early_uart_write(b'5'); }
-    result
+    f(*c)
 }
 
 // ---------------------------------------------------------------------------

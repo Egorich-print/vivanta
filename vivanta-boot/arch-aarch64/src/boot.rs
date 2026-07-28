@@ -42,6 +42,7 @@ struct BootGic {
 
 static mut BOOT_PT: Option<PageTableBuilder<CallbackAllocator>> = None;
 static mut BOOT_GIC: Option<BootGic> = None;
+static mut USER_CODE_PA: u64 = 0;
 
 #[allow(dead_code)]
 fn alloc_from_callback() -> u64 {
@@ -195,8 +196,10 @@ pub unsafe extern "Rust" fn mmu_map_user_pages(
     stack_va: u64,
 ) {
     let builder = BOOT_PT.as_mut().unwrap();
-    // Allocate and copy user code page
-    let code_pa = builder.alloc_frame().unwrap().addr;
+    // Copy user code directly to the identity-mapped PA (block base at code_va)
+    // After the block split, L3[0] is overwritten to point here with USER attrs.
+    let code_pa = code_va; // identity: PA == VA
+    USER_CODE_PA = code_pa;
     core::ptr::copy_nonoverlapping(code_src, code_pa as *mut u8, code_len);
     if code_len < 4096 {
         core::ptr::write_bytes((code_pa as *mut u8).add(code_len), 0u8, 4096 - code_len);
@@ -205,5 +208,30 @@ pub unsafe extern "Rust" fn mmu_map_user_pages(
     // Allocate and map user stack page
     let stack_pa = builder.alloc_frame().unwrap().addr;
     builder.map(stack_va, stack_pa, 4096, PageFlags::USER_READ_WRITE);
+}
+
+#[no_mangle]
+pub unsafe extern "Rust" fn flush_user_code_icache() {
+    let pa = USER_CODE_PA;
+    if pa == 0 { return; }
+    let ctr_el0: u64;
+    core::arch::asm!("mrs {}, ctr_el0", out(reg) ctr_el0);
+    let d_min_line = (ctr_el0 >> 16) & 0xF;
+    let line = (4u64) << d_min_line;
+    let mask = line - 1;
+    let start = pa & !mask;
+    let end = pa + 4096;
+    let mut addr = start;
+    while addr < end {
+        core::arch::asm!("dc cvac, {}", in(reg) addr);
+        addr += line;
+    }
+    core::arch::asm!("dsb sy");
+    addr = start;
+    while addr < end {
+        core::arch::asm!("ic ivau, {}", in(reg) addr);
+        addr += line;
+    }
+    core::arch::asm!("dsb sy; isb");
 }
 

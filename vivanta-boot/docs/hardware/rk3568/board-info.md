@@ -163,7 +163,7 @@ The kernel must boot at the exception level it's entered (EL2 or EL1).
 U-Boot on this board enters at EL2.
 
 **Critical**: U-Boot leaves the MMU enabled when jumping to the kernel via `booti`.
-The kernel must disable the MMU in its entry code before accessing any memory-mapped data:
+The kernel must disable the MMU in its entry code:
 
 ```asm
 mrs x6, sctlr_el2
@@ -176,17 +176,19 @@ dsb sy
 isb
 ```
 
-After disabling MMU at EL2, the kernel should drop to EL1:
-```asm
-mov x5, #(1 << 31)   // RW bit: AArch64 for EL1
-msr hcr_el2, x5
-mov x5, #0x3c5       // SPSR: EL1h, DAIF masked
-msr spsr_el2, x5
-adr x5, 1f
-msr elr_el2, x5
-eret                  // → EL1
-1:
-```
+**Do NOT attempt to drop to EL1** — the ERET transition requires SP_EL1 setup
+after the transition. Running at EL2 is simpler and fully functional.
+
+### ARM64 Image header requirements
+
+| Offset | Field | Required Value |
+|--------|-------|----------------|
+| 0      | Branch | `b _start + 4 + exec_start` |
+| 4      | Flags | 0 |
+| 8      | image_size | Actual binary size (use `__kernel_end - _start` in asm) |
+| 16     | text_offset | 0 |
+| 24     | phys_base | **Must match load address** (0x20500000) |
+| 56     | Magic | `0x644d5241` ("ARMd") |
 
 ### Hardware address map (verified)
 
@@ -272,56 +274,49 @@ Protocol: sends kernel binary + DTB via interactive `mm.l` U-Boot commands.
 Each word (32-bit) is sent with a 3-byte hex value + CR, synchronized on `?` prompt.
 Achieves ~280 words/second at 115200 baud.
 
-## Bring-up Status (2026-07-17)
+## Bring-up Status (2026-07-25) — Updated
 
-### Stage 1 ✅ — Kernel boots, UART outputs text
+### Stage 1 ✅ — Minimal kernel boots, UART outputs text
 
 | Step | Status | Details |
 |------|--------|---------|
-| U-Boot accepts image | ✅ | `booti` with uImage header (PIE=1, text_offset=0) |
-| Kernel entry reached | ✅ | Entry code executes at EL2 |
-| MMU disabled | ✅ | Both SCTLR_EL2 and SCTLR_EL1 cleared before memory access |
-| EL2→EL1 transition | ✅ | via `eret` with SPSR_EL2=0x3c5, HCR_EL2.RW=1 |
-| BSS zeroed | ✅ | |
-| Stack set up | ✅ | |
-| Rust code executes | ✅ | `adapter_main` reached |
-| UART outputs text | ✅ | Direct register writes via `strb` to 0xFE660000 |
-| Hardcoded memory map | ✅ | |
+| U-Boot accepts image | ✅ | `booti` with ARM64 header (magic=ARMd, phys_base=0x20500000, image_size=actual) |
+| **DTB required for booti** | ⚠️ | booti REFUSES to jump without DTB. Use minimal generated DTB at 0x0A100000 |
+| Kernel entry reached | ✅ | Stays at EL2 (no EL transition — simpler and works) |
+| MMU+Dcache disabled | ✅ | SCTLR_EL2.M/C cleared, TLBI alle2 |
+| Stack/BSS set up | ✅ | 16KB stack in linker.ld, BSS zeroed in Rust |
+| Rust code executes | ✅ | boot_entry reached, uart_marker works |
+| UART output | ✅ | "EKZ === Vivanta RK3568 (EL2) ===" confirmed |
+| **Zero dependencies** | ✅ | No external crate deps, ~320B binary |
 
-### Stage 2 🔲 — Full initialization
+### Stage 2 🔲 — Full kernel integration
 
 | Step | Status | Notes |
 |------|--------|-------|
-| `println!` macro | ❌ | Hangs — GlobalConsole lock or Write impl issue |
-| FDT console init | ❌ | Hangs on DTB memory access (cache coherency) |
-| FDT memory map | ❌ | Same DTB access issue |
+| `println!` | ❌ | Needs working console implementation |
+| FDT console init | ❌ | Hangs on FDT access if DTB missing/invalid |
+| FDT memory map | ❌ | Same issue |
 | MMU enable | 🔲 | |
 | Scheduler | 🔲 | |
-| EL0 transition | 🔲 | |
 
-### Known Issues
+### Key Findings (2026-07-25 session)
 
-1. **println! hangs** — the `GlobalConsole` implementation in `boot_common` hangs when
-   `println!()` is called. Likely a lock issue or borrow conflict with `static`
-   `GLOBAL_CONSOLE`. Workaround: use direct UART writes.
+1. **phys_base MUST be 0x20500000** — was `0x0a` (decimal 10) due to `.quad 0x0a` being confused with hex. Fixed.
+2. **image_size should be set** — U-Boot warns "Image lacks image_size field" when 0. Set to `__kernel_end - _start`.
+3. **Do NOT drop to EL1** — The EL2→EL1 transition via ERET requires SP_EL1 setup after transition. Simpler to stay at EL2.
+4. **Continuous output capture required** — `time.sleep(3)` before reading serial after booti causes lost output. Read immediately.
+5. **Drain serial buffer between upload steps** — U-Boot's response buffer can overflow during mw.l upload. Drain every 100 words.
+6. **mw.l uploader stable** — Works at ~80-160 w/s. Kernel + DTB upload takes ~4.5s total (320B + 440B).
 
-2. **DTB cache coherency** — DTB loaded via `mm.l` while MMU was on. After MMU disable,
-   the data cache has stale entries. DTB at physical address 0x0A100000 is not reliably
-   readable. Fix: clean/invalidate D-cache for the DTB region after MMU disable.
-   Workaround: hardcode UART init and memory map.
+### Updated workflow
 
-### Kernel Boot Signature (for verification)
+```bash
+# Build (debug or release)
+cargo build -p vivanta-target-rk3568
+rust-objcopy -O binary target/aarch64-unknown-none/debug/vivanta-target-rk3568 images/vivanta-rk3568.bin
 
-After `booti 0x20500000 - 0xA100000`, expected output:
-```
-Starting kernel ...
-
-─── Vivanta v0.1 ────
-  Arch:      AArch64
-  Platform:  Rockchip RK3568
-  Memory:    3824 MiB across 1 region(s)
-  CPUs:      4 core(s)
-  Status:    Stage 1 ✓
+# Upload + boot (auto-generates minimal DTB, continuous output capture)
+python3 flash_rk3568.py
 ```
 
 ## Debugging Notes (2026-07-17 Session)
@@ -332,10 +327,10 @@ For early bring-up, kernel entry code writes debug characters to UART:
 
 | Marker | Location | Meaning |
 |--------|----------|---------|
-| `K` | After BSS zeroing | Entry code alive |
-| `Z` | Before `bl adapter_main` | Rust function will be called |
-| `A` | First line of `adapter_main` | Rust code executing |
-| `B` | After `set_console()` | Console reference stored |
+| `E` | Start of `boot_entry` | Rust code alive, about to disable MMU |
+| `K` | After MMU disable | Entry code alive, EL2 mode |
+| `Z` | After BSS zeroing | BSS initialized |
+| `0'-'3` | Current exception level | `boot_entry` writes `'0'+el` marker |
 
 ### UART byte write methods
 

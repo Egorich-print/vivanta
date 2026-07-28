@@ -20,6 +20,7 @@ This directory indexes ADRs for the Vivanta project (formerly TheseusOS). Engine
 | ADR-022 | Minimal Driver Lifecycle Contract | Accepted | `vivanta-boot/docs/adr/` |
 | ADR-023 | IdentityState Model | Accepted | `vivanta-boot/docs/adr/` |
 | ADR-024 | Identity Model Separation | Accepted | `vivanta-boot/docs/adr/` |
+| ADR-025 | Memory Resource Manager Integration | Proposed | `vivanta-boot/docs/adr/` |
 
 ## Deprecated ADRs
 

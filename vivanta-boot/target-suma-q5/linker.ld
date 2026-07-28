@@ -6,13 +6,12 @@ PHDRS
 
 SECTIONS
 {
-    . = 0x40200000;
+    . = 0x01080000;
     __kernel_start = .;
 
-    .text : {
+    .text : ALIGN(16) {
         KEEP(*(.text._start))
         *(.text .text.*)
-        *(.user.text)
     } :text
 
     .rodata : ALIGN(16) {
@@ -36,6 +35,6 @@ SECTIONS
     __stack_top = .;
 
     /DISCARD/ : {
-        *(.comment .note.* .eh_frame .rela.*)
+        *(.comment .note.* .eh_frame .eh_frame_hdr .rela.*)
     }
 }

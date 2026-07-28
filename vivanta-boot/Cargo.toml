@@ -21,6 +21,8 @@ members = [
     "platform-rk3568",
     "platform-sdm660",
     "platform-allwinner-h616",
+    "platform-amlogic",
+    "platform-rpi3b",
 
     # --- Target binaries ---
     "target-qemu-aarch64",
@@ -29,6 +31,7 @@ members = [
     "target-x96q",
     "target-lavender",
     "target-rpi3b-plus",
+    "target-suma-q5",
 
     # --- Test / proof ---
     "arch-test-stub",

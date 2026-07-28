@@ -2,6 +2,8 @@
 // vivanta_kernel scheduler — Thread lifecycle, RunQueue, scheduling policy
 // ---------------------------------------------------------------------------
 
+pub mod task;
+pub mod task_manager;
 pub mod thread;
 pub mod runqueue;
 

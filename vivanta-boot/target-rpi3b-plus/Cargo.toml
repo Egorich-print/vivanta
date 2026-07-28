@@ -10,3 +10,4 @@ vivanta-boot-info = { path = "../boot-info" }
 vivanta-arch-api = { path = "../arch-api" }
 vivanta-arch-aarch64 = { path = "../arch-aarch64" }
 vivanta-kernel = { path = "../kernel" }
+vivanta-platform-rpi3b = { path = "../platform-rpi3b" }

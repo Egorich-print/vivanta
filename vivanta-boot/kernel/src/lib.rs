@@ -1,33 +1,26 @@
 #![no_std]
 extern crate alloc;
 
-// Stub global allocator for bare-metal — panics on any allocation.
-// A real allocator will replace it once kernel page allocator is wired to alloc.
+use memory::KernelHeap;
+
 #[global_allocator]
-static ALLOCATOR: StubAllocator = StubAllocator;
-
-struct StubAllocator;
-
-unsafe impl core::alloc::GlobalAlloc for StubAllocator {
-    unsafe fn alloc(&self, _layout: core::alloc::Layout) -> *mut u8 {
-        panic!("kernel: no global allocator at runtime");
-    }
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: core::alloc::Layout) {
-        panic!("kernel: no global allocator at runtime");
-    }
-}
+static ALLOCATOR: KernelHeap = KernelHeap::uninitialized();
 
 pub mod identity;
+pub mod memory;
 pub mod pmm;
 pub mod scheduler;
 pub mod state;
+pub mod syscall;
 pub mod vmm;
 
 pub use vivanta_arch_api::pmm::{FrameAllocator, PhysFrame};
 
 use vivanta_boot_common::{println, MemoryRegionKind};
+use vivanta_boot_common::memory_discovery::{self, KernelLayout};
 use vivanta_boot_info::BootInfo;
 use vivanta_arch_api::mmu::RootPageTable;
+use crate::memory::PmmBackend;
 
 extern "C" {
     static __kernel_start: u8;
@@ -49,12 +42,11 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!("\u{2500}\u{2500}\u{2500}\u{2500} Vivanta Kernel Entry \u{2500}\u{2500}\u{2500}\u{2500}");
 
     // V1.1: Runtime Identity Bootstrap — construct SystemState from BootInfo
-    let system_state = state::SystemState::from_boot_info(info);
-    let hardware = system_state.hardware();
-    if hardware.dtb_ptr != 0 {
-        println!("  DTB at    0x{:x}", hardware.dtb_ptr);
+    let mut system_state = state::SystemState::from_boot_info(info);
+    if system_state.hardware().dtb_ptr != 0 {
+        println!("  DTB at    0x{:x}", system_state.hardware().dtb_ptr);
     }
-    println!("  {} CPU(s)", hardware.cpu_count);
+    println!("  {} CPU(s)", system_state.hardware().cpu_count);
     // After this point, BootInfo must NOT be referenced for runtime state.
     // All hardware info is accessible through system_state.hardware().
 
@@ -66,7 +58,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
 
     // ------- Memory Map -----------------------------------------------------
     println!("Memory Map:");
-    for r in hardware.memory_map.regions() {
+    for r in system_state.hardware().memory_map.regions() {
         let end = r.start + r.size;
         let tag = match r.kind {
             MemoryRegionKind::Usable => "Usable ",
@@ -80,40 +72,79 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         println!("  0x{:016x} - 0x{:016x}  [{}]", r.start, end - 1, tag);
     }
 
-    // ------- Boot Memory Manager -------------------------------------------
-    let region = hardware
-        .memory_map
-        .regions()
-        .iter()
-        .find(|r| r.kind == MemoryRegionKind::Usable)
-        .expect("no usable memory region");
-
+    // ------- Physical Memory Manager + MRM ---------------------------------
     let kernel_start = unsafe { &__kernel_start as *const u8 as u64 };
     let kernel_end = unsafe { &__stack_top as *const u8 as u64 };
 
-    let bitmap_base = ((kernel_end + 0xFFF) / 0x1000) * 0x1000;
+    let dtb_addr = system_state.hardware().dtb_ptr;
+    let dtb_size = if dtb_addr != 0 {
+        let dtb_total = unsafe { core::ptr::read_volatile(dtb_addr as *const u32) };
+        u32::from_be(dtb_total) as u64
+    } else {
+        0
+    };
 
-    let mut boot = pmm::BootMemoryManager::new(region.start, region.size, bitmap_base as *mut u8);
-    boot.reserve_kernel(kernel_start, kernel_end);
+    let page_tables_start = kernel_end;
+    let page_tables_size = 0x5000;
 
-    if hardware.dtb_ptr != 0 {
-        let dtb = hardware.dtb_ptr;
-        let dtb_ptr = dtb as *const u8;
-        let dtb_total = unsafe { core::ptr::read_volatile(dtb_ptr.add(4) as *const u32) };
-        let dtb_size = u32::from_be(dtb_total) as u64;
-        boot.reserve_dtb(dtb as u64, dtb_size);
+    let layout = KernelLayout {
+        start: kernel_start,
+        end: kernel_end,
+        dtb: dtb_addr as u64,
+        dtb_size,
+        page_tables_start,
+        page_tables_size,
+    };
+    let available = memory_discovery::discover(system_state.hardware().memory_map, &layout);
+    let region = available.iter().next().expect("no available memory region");
+
+    let mut pmm = unsafe { pmm::PmmBitmap::new(region) };
+
+    let total = pmm.total_frames();
+    let pmm_reserved = pmm.reserved_count();
+    println!();
+    println!("Physical Memory Manager:");
+    println!("  Region    0x{:016x} – 0x{:016x}  ({} MiB)",
+        pmm.region_start(), pmm.region_start() + (region.end - region.start) - 1,
+        (region.end - region.start) >> 20);
+    println!("  Total {}  Reserved {}  Free {}  frames",
+        total, pmm_reserved, pmm.free_count());
+
+    pmm.run_self_test();
+    println!("  PMM self-test ok");
+
+    // Init MRM with PmmBackend (no hardware borrow alive here)
+    let mut pmm_backend = unsafe { PmmBackend::new_dram(&mut pmm as *mut dyn FrameAllocator) };
+    system_state.init_memory(&mut pmm_backend);
+
+    // Init kernel heap: allocate 64 KiB from MRM
+    {
+        let mrm = system_state.memory_manager_mut();
+        let heap_size: u64 = 65536;
+        let heap_obj = mrm
+            .allocate(&memory::AllocationRequirements::new(heap_size), 0)
+            .expect("KernelHeap: allocation failed");
+        let heap_base = heap_obj.phys_addr.expect("KernelHeap: no phys addr");
+        unsafe { core::ptr::write_bytes(heap_base as *mut u8, 0, heap_size as usize); }
+        ALLOCATOR.init(heap_base as usize, heap_size as usize);
+        println!("  KernelHeap: 64 KiB @ 0x{:x}", heap_base);
+
+        // heap smoke test
+        let v = alloc::vec![1u8, 2, 3, 4];
+        println!("  Heap smoke: vec={:?} (len={}, cap={})", &v[..], v.len(), v.capacity());
     }
 
-    boot.reserve_bitmap();
-    boot.print_stats();
-
-    let mut pmm: pmm::PmmBitmap = boot.finish();
+    let mrm = system_state.memory_manager();
+    println!("  MRM: {} backend(s) registered", mrm.backend_count());
 
     if let Some(f) = pmm.alloc_frame() {
         println!("  Allocated frame @ 0x{:x}  (ok)", f.addr);
         pmm.free_frame(f);
         println!("  Freed frame              (ok)");
     }
+
+    // Re-fetch hardware for VMM and beyond (after init_memory)
+    let hardware = system_state.hardware();
 
     // ------- VMM: Address Space Construction -------------------------------
     println!();
@@ -122,7 +153,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let pt = vivanta_arch_api::boot::mmu::mmu_init(alloc_ctx, boot_alloc_frame);
 
     // Identity-map the usable RAM region
-    vivanta_arch_api::boot::mmu::mmu_map_ram(pt, region.start, region.start, region.size);
+    vivanta_arch_api::boot::mmu::mmu_map_ram(pt, region.start, region.start, region.end - region.start);
 
     // Map MMIO regions (from HardwareState per ADR-021)
     for mmio in hardware.mmio_regions {
@@ -139,7 +170,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
 
     println!("  L1 table at     0x{:x}", vivanta_arch_api::boot::mmu::mmu_root_addr(pt));
     println!("  RAM ident:      0x{:016x} – 0x{:016x}  ({} MiB)",
-        region.start, region.start + region.size - 1, region.size >> 20);
+        region.start, region.start + (region.end - region.start) - 1, (region.end - region.start) >> 20);
     for mmio in hardware.mmio_regions {
         let kind_str = if mmio.kind.is_user_accessible() { "user" } else { "vivanta_kernel" };
         println!("  MMIO ident:     0x{:x} ({} bytes, {})", mmio.base, mmio.size, kind_str);
@@ -153,7 +184,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let alloc_ctx_root: *mut () = &mut pmm as *mut pmm::PmmBitmap as *mut ();
     let build_root = |label: &str, extra_va: u64, extra_pa: u64| -> RootPageTable {
         let rpt = vivanta_arch_api::boot::mmu::mmu_init(alloc_ctx_root, boot_alloc_frame);
-        vivanta_arch_api::boot::mmu::mmu_map_ram(rpt, region.start, region.start, region.size);
+        vivanta_arch_api::boot::mmu::mmu_map_ram(rpt, region.start, region.start, region.end - region.start);
         for mmio in hardware.mmio_regions {
             vivanta_arch_api::boot::mmu::mmu_map_range(
                 rpt, mmio.base, mmio.base, mmio.size, mmio.kind.is_user_accessible(),
@@ -186,6 +217,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!();
     println!("Enabling MMU...");
     vivanta_arch_api::boot::mmu::mmu_activate(pt);
+    vivanta_arch_api::boot::mmu::flush_user_code_icache();
     println!("MMU enabled successfully.");
 
     // ------- GIC Discovery & Initialisation --------------------------------
@@ -211,25 +243,68 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         // vivanta_arch_api::boot::user::user_enter(user_token);
     }
 
+    // ------- MemoryObject Smoke Test ----------------------------------------
+    println!();
+    println!("MemoryObject Smoke Test:");
+    let mrm = system_state.memory_manager_mut();
+    let req = memory::AllocationRequirements::new(4096);
+    let mut obj = mrm.allocate(&req, 0).expect("alloc MemoryObject");
+    let phys = obj.phys_addr.expect("phys addr");
+    println!("  Allocated  @ 0x{:x}  (size={})", phys, obj.size);
+
+    let kernel_root = vmm::kernel_address_space().root;
+    let mut pt_alloc = unsafe {
+        memory::PmmPageTableAllocator::new(&mut pmm as *mut dyn FrameAllocator)
+    };
+    let slot = obj
+        .map(phys, 4096, kernel_root, &mut pt_alloc)
+        .expect("map MemoryObject");
+    println!("  Mapped     slot={}", slot);
+
+    unsafe {
+        core::ptr::write_volatile(phys as *mut u32, 0x42);
+        let val = core::ptr::read_volatile(phys as *const u32);
+        if val == 0x42 {
+            println!("  Write/Read OK  (0x{:x})", val);
+        } else {
+            println!("  MISMATCH: got 0x{:x}, expected 0x42", val);
+        }
+        core::ptr::write_volatile((phys + 4) as *mut u32, 0xDEAD);
+        core::ptr::write_volatile((phys + 8) as *mut u32, 0xBEEF);
+        core::ptr::write_volatile((phys + 12) as *mut u32, 0xCAFE);
+    }
+    println!("  Fill 4 words OK");
+
+    obj.unmap(slot, kernel_root, &mut pt_alloc)
+        .expect("unmap MemoryObject");
+    println!("  Unmapped   slot={}", slot);
+    println!("MemoryObject test passed.");
+
     println!();
     println!("Boot complete -- creating user thread");
 
-    // M4.5.1: allocate vivanta_kernel stack for the first user thread
-    let stack_base = pmm.alloc_frame().expect("user vivanta_kernel stack frame").addr;
-    for _ in 1..4 {
-        pmm.alloc_frame().expect("user vivanta_kernel stack frame");
-    }
-    let kernel_stack_top = (stack_base as usize) + 16384;
-
+    // ------- V2/M6 Task Model: TaskManager ------------------------------------
     const CODE_VA: u64 = 0x5E00_0000;
     const STACK_VA: u64 = 0x5E01_0000;
-    let ut = scheduler::create_user_thread(
-        kernel_stack_top,
-        (STACK_VA + 4096) as usize,
-        CODE_VA as usize,
-        user_as1,
-    );
-    println!("  User thread {}, entry=0x{:x}", ut, CODE_VA);
+    let mut taskman = scheduler::task_manager::TaskManager::new();
+    let tid = taskman
+        .spawn_user(
+            CODE_VA as usize,
+            (STACK_VA + 4096) as usize,
+            user_as1,
+            &mut pmm,
+            system_state.memory_manager_mut(),
+        )
+        .expect("spawn_user");
+    println!("  Task {} created (thread, code @ 0x{:x})", tid, CODE_VA);
+    println!("  {} task(s), {} running", taskman.task_count(), taskman.running_count());
+
+    // Verify Task structure via TaskManager
+    if let Some(task) = taskman.get(tid) {
+        println!("  Task[{}]: {} object(s) owned", tid, task.owned_objects.len());
+    }
+
+    println!();
     println!("Boot thread yielding to user thread");
     println!();
 

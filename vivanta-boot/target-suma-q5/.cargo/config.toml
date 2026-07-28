@@ -1,0 +1,8 @@
+[build]
+target = "aarch64-unknown-none"
+
+[target.aarch64-unknown-none]
+rustflags = [
+    "-C", "link-arg=-Ttarget-suma-q5/linker.ld",
+    "-C", "link-arg=-zmax-page-size=0x1000",
+]

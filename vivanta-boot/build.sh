@@ -18,26 +18,41 @@ cargo build -p "${PACKAGE}"
 
 case "${ADAPTER}" in
     rk3568)
-        ELF="target/aarch64-unknown-none/debug/vivanta-target-rk3568"
-        BIN="vivanta-rk3568.bin"
-        UIMAGE="vivanta-rk3568.uImage"
+        PACKAGE="vivanta-target-rk3568"
+        ELF="target/aarch64-unknown-none/debug/${PACKAGE}"
+        BIN="images/vivanta-rk3568.bin"
+        mkdir -p images
+        echo "=== Converting to flat binary ==="
+        rust-objcopy -O binary "${ELF}" "${BIN}"
         echo "=== Converting to flat binary ==="
         rust-objcopy -O binary "${ELF}" "${BIN}"
         ls -lh "${BIN}"
-        echo "=== Creating uImage for bootm ==="
-        mkimage -A arm64 -O linux -T kernel -C none \
-            -a 0x20500000 -e 0x20500000 \
-            -d "${BIN}" "${UIMAGE}"
-        ls -lh "${UIMAGE}"
+
+        # Verify ARM64 header
+        python3 -c "
+import struct
+with open('${BIN}','rb') as f:
+    f.seek(56)
+    m = struct.unpack('<I', f.read(4))[0]
+    assert m == 0x644d5241, f'Bad magic: {m:#x}'
+    f.seek(8)
+    to = struct.unpack('<Q', f.read(8))[0]
+    assert to == 0, f'text_offset should be 0, got {to:#x}'
+    print(f'Header OK: text_offset=0, magic=ARMd')
+"
+
         echo ""
-        echo "=== Flash write via TFTP (SPI NAND at 0xF80000): ==="
-        echo "  tftp 0x20500000 ${UIMAGE}"
+        echo "=== UART upload + boot: ==="
+        echo "  python3 flash_rk3568.py"
+        echo ""
+        echo "=== Manual U-Boot commands: ==="
+        echo "  mm.l 0x20500000    (then type hex words, . to quit)"
+        echo "  booti 0x20500000 - -"
+        echo ""
+        echo "=== Flash write (SPI NAND at 0xF80000, after mm.l upload): ==="
         echo "  mtd erase spi-nand0 0xF80000 0xC00000"
         echo "  mtd write spi-nand0 0x20500000 0xF80000 \${filesize}"
         echo ""
-        echo "=== Boot: ==="
-        echo "  mtd read spi-nand0 0x20500000 0xF80000 0xC00000"
-        echo "  bootm 0x20500000"
         ;;
 
     x96q)

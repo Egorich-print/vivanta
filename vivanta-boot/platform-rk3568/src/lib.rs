@@ -9,7 +9,13 @@ use vivanta_boot_common::fdt::FdtScanner;
 use vivanta_boot_common::ns16550::Ns16550;
 use vivanta_boot_common::hardware::NS16550_FAMILY;
 
-/// Initialise console from FDT, falling back to hardcoded NS16550 at 0xFE660000.
+/// Hardcoded console init — no FDT dependency, always works.
+pub fn init_console_hardcoded() {
+    static UART: Ns16550 = Ns16550::new(0xFE66_0000 as *mut u8, 2);
+    set_console(&UART);
+}
+
+/// Initialise console from FDT, falling back to hardcoded NS16550.
 /// Returns whether console was initialised via FDT (true) or fallback (false).
 pub unsafe fn init_console_from_fdt(dtb_addr: *const u8) -> bool {
     let console_node = FdtScanner::console(dtb_addr);
@@ -28,9 +34,8 @@ pub unsafe fn init_console_from_fdt(dtb_addr: *const u8) -> bool {
         }
     }
 
-    // Fallback: hardcoded NS16550 at 0xFE660000, reg-shift=2
-    static UART: Ns16550 = Ns16550::new(0xFE66_0000 as *mut u8, 2);
-    set_console(&UART);
+    // Fallback
+    init_console_hardcoded();
     false
 }
 

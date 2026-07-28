@@ -46,6 +46,11 @@ core::arch::global_asm!(
     "ldp   x26,x27, [sp, #(26 * 8)]",
     "ldp   x28,x29, [sp, #(28 * 8)]",
     "ldr   x30,     [sp, #(30 * 8)]",
+    "dsb   sy",
+    "isb",
+    "ic    iallu",
+    "dsb   sy",
+    "isb",
     "eret",
 );
 
@@ -53,24 +58,16 @@ core::arch::global_asm!(
 // Stage 6A — Minimal EL0 bootstrap (AArch64)
 // ---------------------------------------------------------------------------
 
-use core::sync::atomic::{AtomicBool, Ordering};
 use crate::exceptions::ExceptionFrame;
 use crate::mmu::PageFlags;
 
-
-/// Set to true when the SVC handler is called from EL0.
-pub static EL0_SVC_HANDLED: AtomicBool = AtomicBool::new(false);
-
 // User code — placed in .user.text section
-// M4.5.1: two SVC calls to prove EL0→EL1→EL0 roundtrip
 core::arch::global_asm!(
     ".section .user.text, \"ax\"",
     ".global user_code_start",
     "user_code_start:",
-    "mov x0, #42",
-    "svc #0",
-    "mov x0, #43",
-    "svc #0",
+    "mov  x0, #0x42",
+    "svc  #0",
     ".global user_code_end",
     "user_code_end:",
     "b .",
@@ -133,6 +130,10 @@ impl UserBootstrap {
 // SVC handler — called from exception vector for lower_aarch64_sync
 // ---------------------------------------------------------------------------
 
+extern "Rust" {
+    fn syscall_dispatch(num: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> u64;
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn el0_sync_handler(
     frame: &mut ExceptionFrame,
@@ -140,9 +141,43 @@ pub unsafe extern "C" fn el0_sync_handler(
     esr: u64,
     _far: u64,
 ) {
-    EL0_SVC_HANDLED.store(true, Ordering::Relaxed);
-    let _svc_num = esr & 0xFFFF;
-    let val = frame.x[0];
-    vivanta_boot_common::println!("  SVC from EL0: x0={}", val);
-    frame.elr += 4;
+    let ec = (esr >> 26) & 0x3f;
+    if ec == 0b010101 {
+        let base = frame.elr & !0xFFF;
+        let w0 = unsafe { *((base + 0) as *const u32) };
+        let w1 = unsafe { *((base + 4) as *const u32) };
+        let w2 = unsafe { *((base + 8) as *const u32) };
+        let w3 = unsafe { *((base + 12) as *const u32) };
+        let w4 = unsafe { *((base -4) as *const u32) };
+        let elr_direct: u64;
+        let ttbr0: u64;
+        unsafe {
+            core::arch::asm!("mrs {}, elr_el1", out(reg) elr_direct);
+            core::arch::asm!("mrs {}, ttbr0_el1", out(reg) ttbr0);
+        }
+        let l1_idx = ((frame.elr >> 30) & 0x1FF) as usize;
+        let l2_idx = ((frame.elr >> 21) & 0x1FF) as usize;
+        let l3_idx = ((frame.elr >> 12) & 0x1FF) as usize;
+        let l1e = unsafe { *((ttbr0 + (l1_idx as u64 * 8)) as *const u64) };
+        let l2t = l1e & 0x0000_FFFF_FFFF_F000;
+        let l2e = unsafe { *((l2t + (l2_idx as u64 * 8)) as *const u64) };
+        let l3t = l2e & 0x0000_FFFF_FFFF_F000;
+        let l3e = unsafe { *((l3t + (l3_idx as u64 * 8)) as *const u64) };
+        let stack_elr = unsafe { *(frame as *const ExceptionFrame as *const u64).add(32) };
+        let elr_insn = unsafe { *((frame.elr & !3) as *const u32) };
+        vivanta_boot_common::println!("  SVC x8={} x0={} elr={:#x}(direct={:#x},stack={:#x},insn={:#x}) L3E={:#x}",
+            frame.x[8], frame.x[0], frame.elr, elr_direct, stack_elr, elr_insn, l3e);
+        vivanta_boot_common::println!("    code=[{:#x} {:#x} {:#x} {:#x}] prev=[{:#x}]",
+            w0, w1, w2, w3, w4);
+        let ret = syscall_dispatch(
+            frame.x[8],
+            frame.x[0], frame.x[1], frame.x[2],
+            frame.x[3], frame.x[4], frame.x[5],
+        );
+        frame.x[0] = ret;
+        frame.elr += 4;
+    } else {
+        vivanta_boot_common::println!("  EL0 sync: ESR={:#x} EC={} FAR={:#x} ELR={:#x}", esr, ec, _far, frame.elr);
+        frame.elr += 4;
+    }
 }

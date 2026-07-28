@@ -6,8 +6,3 @@ description = "Vivanta — Rockchip RK3568 target binary"
 
 [dependencies]
 vivanta-boot-common = { path = "../boot_common" }
-vivanta-boot-info = { path = "../boot-info" }
-vivanta-arch-api = { path = "../arch-api" }
-vivanta-arch-aarch64 = { path = "../arch-aarch64" }
-vivanta-platform-rk3568 = { path = "../platform-rk3568" }
-vivanta-kernel = { path = "../kernel" }

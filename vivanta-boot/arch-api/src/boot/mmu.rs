@@ -28,4 +28,8 @@ extern "Rust" {
     /// Map user code and stack pages in a boot-time page table.
     /// Copies user code from the vivanta_kernel's .user.text section.
     pub fn mmu_map_user_pages(pt: usize, code_va: u64, code_src: *const u8, code_len: usize, stack_va: u64);
+
+    /// Flush D-cache (to PoC) and invalidate I-cache (to PoU) for the user code page.
+    /// Must be called with MMU enabled (after mmu_activate).
+    pub fn flush_user_code_icache();
 }

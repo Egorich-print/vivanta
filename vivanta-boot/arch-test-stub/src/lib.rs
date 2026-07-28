@@ -58,6 +58,21 @@ pub unsafe extern "Rust" fn user_bootstrap(_pt: usize) -> usize { 0 }
 #[no_mangle]
 pub unsafe extern "Rust" fn mmu_map_user_pages(_pt: usize, _code_va: u64, _code_src: *const u8, _code_len: usize, _stack_va: u64) {}
 
+#[no_mangle]
+pub unsafe extern "Rust" fn flush_user_code_icache() {}
+
 // sched (boot-time init — called from kernel_main)
 #[no_mangle]
 pub unsafe extern "Rust" fn sched_init_boot() {}
+
+// runtime mmu
+use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator, RootPageTable};
+
+#[no_mangle]
+pub unsafe extern "Rust" fn activate_address_space(_root: RootPageTable) {}
+
+#[no_mangle]
+pub unsafe extern "Rust" fn mmu_map_object(_pt: RootPageTable, _vaddr: u64, _paddr: u64, _size: u64, _flags: MappingFlags, _alloc: &mut dyn PageTableAllocator) {}
+
+#[no_mangle]
+pub unsafe extern "Rust" fn mmu_unmap(_pt: RootPageTable, _vaddr: u64, _size: u64, _alloc: &mut dyn PageTableAllocator) {}

@@ -45,6 +45,14 @@ impl core::ops::BitOr for MappingFlags {
     }
 }
 
+/// Allocator for intermediate page table frames.
+///
+/// Separates the MMU page-table walker from the memory source.
+/// Implementations can wrap PMM, MemoryObject, a bootstrap allocator, etc.
+pub trait PageTableAllocator {
+    fn alloc_page_table_frame(&mut self) -> u64;
+}
+
 extern "Rust" {
     /// Activate an address space by writing its root page table into the
     /// hardware register (TTBR0_EL1 on AArch64, CR3 on x86_64, SATP on RISC‑V).
@@ -54,4 +62,27 @@ extern "Rust" {
     /// - `root` must point to a valid, fully‑constructed page table.
     /// - The caller must ensure no conflicting translation is live.
     pub fn activate_address_space(root: RootPageTable);
+
+    /// Map a physical region at a virtual address in an existing address space.
+    ///
+    /// Maps `size` bytes starting at `paddr` to `vaddr` with the given flags.
+    /// When an L2 block descriptor is encountered, `alloc` is called to obtain
+    /// a frame for the new L3 page table.
+    ///
+    /// # Safety
+    ///
+    /// - `pt` must be a valid root page table.
+    /// - The virtual range must not already be mapped.
+    /// - 4KiB-aligned regions, single 4KiB page at a time.
+    pub fn mmu_map_object(pt: RootPageTable, vaddr: u64, paddr: u64, size: u64, flags: MappingFlags, alloc: &mut dyn PageTableAllocator);
+
+    /// Unmap a virtual region from an existing address space.
+    ///
+    /// Clears the leaf descriptors and invalidates TLB entries.
+    ///
+    /// # Safety
+    ///
+    /// - `pt` must be a valid root page table.
+    /// - The virtual range must be currently mapped.
+    pub fn mmu_unmap(pt: RootPageTable, vaddr: u64, size: u64, alloc: &mut dyn PageTableAllocator);
 }

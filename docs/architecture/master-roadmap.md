@@ -9,8 +9,8 @@
 ## Current Focus
 
 *   **Active Track:** `V-epics P2` (Memory Resource Manager)
-*   **Active Milestone:** `V2/M5` (Memory Resource Manager — planning)
-*   **Current Engineering Objective:** Integrate existing `MemoryObject` prototype from `kernel-memory-frozen` into the kernel as a formal Memory Resource Manager.
+*   **Active Milestone:** `V2/M5` (Memory Resource Manager — ADR-025)
+*   **Current Engineering Objective:** Integrate existing `MemoryObject` prototype from `kernel-memory-frozen` into the kernel as a formal Memory Resource Manager per ADR-025.
 *   **Architecture Version:** V1 architecture stabilized (ADR-021/024 ratified)
 *   **Architecture Status:** ADR-011 through ADR-024 ratified.
 
@@ -51,11 +51,15 @@ P1  SystemState + Volatile Identity ✅ (V1.1)
     ↓
 P2  V2/M5 Memory Resource Manager (integrate existing MemoryObject) ← ACTIVE
     ↓
+P2  V2/M6 Resource-backed Runtime (first isolated EL0 process)
+    ↓
 P3  V3 Device Graph + Minimal Driver Contract (ADR-022)
     ↓
 P3.5  Storage driver (SPI NAND / eMMC)
     ↓
-P4  V4 Task abstraction + Scheduler policies
+P4  V4 Kernel Task model (spawn/exit/yield)
+    ↓
+P5  V5 Persistent Identity + Storage → closes ADR-024
     ↓
 P5  V5 Service Framework (LoggingService first)
     ↓
@@ -188,6 +192,46 @@ The original lavender/SDM660 specific targets (M1-B0 through M1-B4) were superse
 
 ---
 
+## M1.0 — Early MMU Foundation (✅ COMPLETED 2026-07-27)
+
+**Goal:** Establish minimal MMU infrastructure for all AArch64 targets — static identity map,
+MAIR/TCR/TTBR0 configuration, MMU enable sequence, and memory discovery.
+
+| Sub-step | Description | Status |
+|----------|-------------|--------|
+| M1.0.1 | Translation Tables — static L1+L2 page tables, descriptor constants | ✅ |
+| M1.0.2 | Identity Mapping — 4 GB, 2 MB blocks, Normal WBWA | ✅ |
+| M1.0.3 | MMU Enable — MAIR, TCR, TTBR0, SCTLR_EL1.M | ✅ |
+| M1.0.4 | Validation — println! before/after MMU, all targets build | ✅ |
+| M1.0.5 | Memory Discovery — subtract kernel/DTB/tables from BootInfo usable regions | ✅ |
+
+UART refactoring (shared `Console`/`PL011`/`println!`, `platform-rpi3b`, GPIO init) was completed
+as a prerequisite for M1.0.
+
+**New files:**
+- `arch-aarch64/src/early_mmu.rs` — static identity map, no allocator required
+- `boot_common/src/pl011.rs` — shared PL011 driver
+- `boot_common/src/memory_discovery.rs` — BootInfo → available regions
+- `platform-rpi3b/` — GPIO init for RPi3 UART
+
+## M1.1 — Physical Memory Manager (✅ COMPLETED 2026-07-27)
+
+**Goal:** Self-contained bitmap PMM decoupled from BootInfo, with self-test and statistics.
+
+| Sub-step | Description | Status |
+|----------|-------------|--------|
+| M1.1.1 | Bootstrap Bitmap — place bitmap in first AvailableRegion | ✅ |
+| M1.1.2 | Page Allocation — allocate/free/reserve single pages, is_allocated | ✅ |
+| M1.1.3 | Region Reservation — reserve_range(start, end) | ✅ |
+| M1.1.4 | Self Tests — allocate→free→re-allocate smoke test in boot seq | ✅ |
+| M1.1.5 | Statistics — total/reserved/allocated/free counters | ✅ |
+
+**Contract:**
+```
+MemoryMap → discover() → AvailableRegion[] → PmmBitmap::new(region)
+```
+PMM has zero knowledge of BootInfo, DTB, or FDT.
+
 ## V-Epic Roadmap (Active Track)
 
 V-epics replace the earlier R-phase model as the primary planning structure. M-numbers (M1–M5) are preserved alongside V-epics for historical continuity.
@@ -223,13 +267,28 @@ V-epics replace the earlier R-phase model as the primary planning structure. M-n
 
 ### P2 — V2 / M5: Memory Resource Manager
 
+| Sub-step | Description | Exit Criteria | Status |
+|----------|-------------|---------------|--------|
+| V2.0 | ADR-011 pre-flight: frozen component adaptation review | Change documented, regression pass on QEMU | ✅ |
+| V2.1 | ADR-025 MRM Integration Design — architecture decision ratified | ADR-025 proposed 2026-07-24 | ✅ |
+| V2.2 | PmmBackend + MRM in SystemState (merge BootMemoryManager) | QEMU boots, MRM stats printed | ✅ |
+| V2.3 | Runtime page table writer (arch-api + arch-aarch64) | MemoryObject::map() programs MMU | ✅ |
+| V2.4 | QEMU smoke test — allocate, map, write, read, unmap | MemoryObject lifecycle validated on QEMU | ⏳ |
+| V2.5 | PlacementPolicy formalization (Kernel, Device, Persistent, Fast) | Enum defined, wired to MRM | ✅ (policy.rs ported from frozen) |
+
+**ADRs:** ADR-011 (Amendment: Frozen Component Unfreezing), ADR-025
+
+### P2 — V2 / M6: Resource-backed Runtime
+
+The first genuine isolated EL0 process. Not just a jump — a runtime environment.
+
 | Sub-step | Description | Exit Criteria |
 |----------|-------------|---------------|
-| V2.0 | ADR-011 pre-flight: frozen component adaptation review | Change documented, regression pass on QEMU |
-| V2.1 | MemoryObject hardware adaptation (integration, not redesign — per ADR-011 amendment 2026-07-19) | MemoryObject lifecycle validated on RK3568 |
-| V2.2 | PlacementPolicy formalization (Kernel, Device, Persistent, Fast) | Enum defined, wired to MRM |
+| V2.6 | MemoryObject smoke test + L2 block splitting | Allocate→map→write→read→unmap via MRM+MMU |
+| V2.7 | KernelHeap as MRM consumer (not PMM bypass) | Heap backed by MemoryObject |
+| V2.8 | First EL0 process with allocated MemoryObjects | EL0 binary blob with MRM-allocated stack/heap |
 
-**ADRs:** ADR-011 (Amendment: Frozen Component Unfreezing)
+**Goal:** `Task { address_space, memory_objects, identity, capabilities }` — a real process, not just a thread.
 
 ### P3 — V3: Device Graph and Driver Model
 
@@ -337,3 +396,12 @@ V-epics replace the earlier R-phase model as the primary planning structure. M-n
 -   RK3568 boot flow unified with QEMU (adapter_main → FDT → BootInfo → kernel_main).
 -   Current Focus updated to P2 V2/M5 Memory Resource Manager.
 -   ADR-024 added to references.
+
+### 2026-07-24
+-   **V2/M5 Phases A–E completed:** PmmBackend created, MRM integrated into SystemState, BootMemoryManager removed.
+-   ADR-025 (Memory Resource Manager Integration) proposed — design note with 5 implementation phases.
+-   Runtime page table writer added: `mmu_map_object` / `mmu_unmap` in arch-api + aarch64 impl + test-stub stubs.
+-   `MemoryObject::map()` now programs real MMU via arch-api, not just software-recorded slots.
+-   `kernel/src/memory/` module created: 6 files (resource, capability, object, policy, manager, pmm_backend).
+-   Full workspace build passes on QEMU AArch64, RK3568, test-stub, arch-aarch64.
+-   V2/M5 substeps V2.0–V2.3 and V2.5 marked complete; V2.4 (QEMU smoke test) pending.

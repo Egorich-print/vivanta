@@ -29,6 +29,8 @@ SECTIONS
         __bss_end = .;
     } :data
 
+    __kernel_end = .;
+
     . = ALIGN(16);
     __stack_bottom = .;
     . += 16384;
@@ -36,5 +38,6 @@ SECTIONS
 
     /DISCARD/ : {
         *(.comment .note.* .eh_frame .eh_frame_hdr .rela.*)
+        *(.symtab .strtab)
     }
 }

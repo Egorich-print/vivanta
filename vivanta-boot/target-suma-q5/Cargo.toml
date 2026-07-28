@@ -1,0 +1,13 @@
+[package]
+name = "vivanta-target-suma-q5"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — Sumavision Q5 TV box (Amlogic S905L, GXL) target binary"
+
+[dependencies]
+vivanta-boot-common = { path = "../boot_common" }
+vivanta-boot-info = { path = "../boot-info" }
+vivanta-arch-api = { path = "../arch-api" }
+vivanta-arch-aarch64 = { path = "../arch-aarch64" }
+vivanta-platform-amlogic = { path = "../platform-amlogic" }
+vivanta-kernel = { path = "../kernel" }

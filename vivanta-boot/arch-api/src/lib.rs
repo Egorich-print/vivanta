@@ -25,3 +25,6 @@ pub mod pmm;
 
 /// Interrupt abstraction: RAII guard for disabled interrupts
 pub mod interrupts;
+
+/// Syscall dispatch: vivanta_kernel-provided function called from arch
+pub mod syscall;

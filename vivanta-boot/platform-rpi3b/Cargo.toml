@@ -1,0 +1,8 @@
+[package]
+name = "vivanta-platform-rpi3b"
+version = "0.1.0"
+edition = "2021"
+description = "Vivanta — Raspberry Pi 3 B+ (BCM2837B0) platform support"
+
+[dependencies]
+vivanta-boot-common = { path = "../boot_common" }

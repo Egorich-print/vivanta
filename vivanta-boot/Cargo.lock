@@ -91,6 +91,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "vivanta-platform-amlogic"
+version = "0.1.0"
+dependencies = [
+ "vivanta-boot-common",
+]
+
+[[package]]
 name = "vivanta-platform-qemu"
 version = "0.1.0"
 dependencies = [
@@ -99,6 +106,13 @@ dependencies = [
 
 [[package]]
 name = "vivanta-platform-rk3568"
+version = "0.1.0"
+dependencies = [
+ "vivanta-boot-common",
+]
+
+[[package]]
+name = "vivanta-platform-rpi3b"
 version = "0.1.0"
 dependencies = [
  "vivanta-boot-common",
@@ -159,12 +173,7 @@ dependencies = [
 name = "vivanta-target-rk3568"
 version = "0.1.0"
 dependencies = [
- "vivanta-arch-aarch64",
- "vivanta-arch-api",
  "vivanta-boot-common",
- "vivanta-boot-info",
- "vivanta-kernel",
- "vivanta-platform-rk3568",
 ]
 
 [[package]]
@@ -176,6 +185,19 @@ dependencies = [
  "vivanta-boot-common",
  "vivanta-boot-info",
  "vivanta-kernel",
+ "vivanta-platform-rpi3b",
+]
+
+[[package]]
+name = "vivanta-target-suma-q5"
+version = "0.1.0"
+dependencies = [
+ "vivanta-arch-aarch64",
+ "vivanta-arch-api",
+ "vivanta-boot-common",
+ "vivanta-boot-info",
+ "vivanta-kernel",
+ "vivanta-platform-amlogic",
 ]
 
 [[package]]
