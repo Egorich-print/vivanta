@@ -76,3 +76,6 @@ pub unsafe extern "Rust" fn mmu_map_object(_pt: RootPageTable, _vaddr: u64, _pad
 
 #[no_mangle]
 pub unsafe extern "Rust" fn mmu_unmap(_pt: RootPageTable, _vaddr: u64, _size: u64, _alloc: &mut dyn PageTableAllocator) {}
+
+#[no_mangle]
+pub unsafe extern "Rust" fn mmu_self_test() {}

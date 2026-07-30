@@ -32,4 +32,8 @@ extern "Rust" {
     /// Flush D-cache (to PoC) and invalidate I-cache (to PoU) for the user code page.
     /// Must be called with MMU enabled (after mmu_activate).
     pub fn flush_user_code_icache();
+
+    /// Run MMU smoke tests on the currently active page table.
+    /// Panics on failure.
+    pub fn mmu_self_test();
 }

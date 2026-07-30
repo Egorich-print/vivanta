@@ -1,6 +1,7 @@
 pub mod descriptor;
 pub mod walker;
 pub mod mapper;
+pub mod self_test;
 
 use descriptor::*;
 

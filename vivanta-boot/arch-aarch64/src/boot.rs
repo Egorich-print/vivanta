@@ -116,6 +116,11 @@ pub unsafe extern "Rust" fn mmu_alloc_frame(_pt: usize) -> u64 {
     builder.alloc_frame().unwrap_or(PhysFrame { addr: 0 }).addr
 }
 
+#[no_mangle]
+pub unsafe extern "Rust" fn mmu_self_test() {
+    crate::paging::self_test::run_smoke_test();
+}
+
 // ---------------------------------------------------------------------------
 // irq
 // ---------------------------------------------------------------------------

@@ -219,6 +219,8 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     vivanta_arch_api::boot::mmu::mmu_activate(pt);
     vivanta_arch_api::boot::mmu::flush_user_code_icache();
     println!("MMU enabled successfully.");
+    println!("MMU self-test:");
+    vivanta_arch_api::boot::mmu::mmu_self_test();
 
     // ------- GIC Discovery & Initialisation --------------------------------
     if hardware.dtb_ptr != 0 {
