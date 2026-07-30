@@ -3,16 +3,8 @@
 // ---------------------------------------------------------------------------
 
 use vivanta_arch_api::pmm::{FrameAllocator, PhysFrame};
-
-const ENTRY_VALID: u64 = 1 << 0;
-const ENTRY_TABLE: u64 = 1 << 1;
-const ENTRY_AF: u64 = 1 << 10;
-const ENTRY_PXN: u64 = 1 << 53;
-const ENTRY_XN: u64 = 1 << 54;
-const ADDR_MASK: u64 = 0x0000_FFFF_FFFF_F000;
-
-const ATTR_NORMAL: u64 = 0;
-const SH_INNER: u64 = 3 << 8;
+use crate::paging::descriptor::*;
+use crate::paging::walker::*;
 
 /// Page attribute flags — describes intended access semantics.
 ///
@@ -35,13 +27,13 @@ impl PageFlags {
 }
 
 fn table_desc(phys: u64) -> u64 {
-    ENTRY_VALID | ENTRY_TABLE | (phys & ADDR_MASK)
+    DESC_VALID | DESC_TABLE | (phys & ADDR_MASK)
 }
 
 fn block_or_page_desc(phys: u64, flags: PageFlags, is_page: bool) -> u64 {
-    let mut d = ENTRY_VALID | ENTRY_AF | SH_INNER | (ATTR_NORMAL << 2);
+    let mut d = DESC_VALID | DESC_AF | DESC_SH_INNER | DESC_ATTRIDX_NORMAL;
     if is_page {
-        d |= ENTRY_TABLE;
+        d |= DESC_TABLE;
     }
     if flags.user {
         d |= 1 << 6;
@@ -49,10 +41,10 @@ fn block_or_page_desc(phys: u64, flags: PageFlags, is_page: bool) -> u64 {
         d |= 2 << 6;
     }
     if !flags.privileged_executable {
-        d |= ENTRY_PXN;
+        d |= DESC_PXN;
     }
     if !flags.executable {
-        d |= ENTRY_XN;
+        d |= DESC_XN;
     }
     d | (phys & ADDR_MASK)
 }
@@ -121,8 +113,8 @@ impl<A: FrameAllocator> PageTableBuilder<A> {
 
     fn table_or_create(&mut self, table: u64, idx: usize) -> u64 {
         let entry = self.read(table, idx);
-        if entry & ENTRY_VALID != 0 {
-            if entry & ENTRY_TABLE == 0 {
+        if entry & DESC_VALID != 0 {
+            if entry & DESC_TABLE == 0 {
                 let l3_frame = self.alloc.alloc_frame().expect("cannot alloc L3 frame").addr;
                 unsafe { split_l2_block(table, idx, entry, l3_frame); }
                 return l3_frame;
@@ -183,7 +175,7 @@ pub unsafe extern "Rust" fn activate_address_space(root: vivanta_arch_api::mmu::
 use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator, RootPageTable};
 
 fn flags_to_desc_bits(flags: MappingFlags, phys: u64) -> u64 {
-    let mut d = ENTRY_VALID | ENTRY_TABLE | ENTRY_AF | SH_INNER | (ATTR_NORMAL << 2);
+    let mut d = DESC_VALID | DESC_TABLE | DESC_AF | DESC_SH_INNER | DESC_ATTRIDX_NORMAL;
 
     if flags.is_user() {
         d |= 1 << 6;
@@ -192,111 +184,13 @@ fn flags_to_desc_bits(flags: MappingFlags, phys: u64) -> u64 {
     }
 
     if !flags.is_executable() {
-        d |= ENTRY_PXN | ENTRY_XN;
+        d |= DESC_PXN | DESC_XN;
     }
 
     d | (phys & ADDR_MASK)
 }
 
-fn read_desc(addr: u64) -> u64 {
-    unsafe { core::ptr::read_volatile(addr as *const u64) }
-}
 
-fn write_desc(addr: u64, val: u64) {
-    unsafe { core::ptr::write_volatile(addr as *mut u64, val) }
-}
-
-enum WalkResult {
-    ExistingL3(u64, usize),
-    NeedsSplit {
-        l2_table_addr: u64,
-        l2_index: usize,
-        block_desc: u64,
-    },
-}
-
-fn walk_to_l3(pt_root: u64, vaddr: u64) -> WalkResult {
-    let l1_idx = ((vaddr >> 30) & 0x1FF) as usize;
-    let l2_idx = ((vaddr >> 21) & 0x1FF) as usize;
-    let l3_idx = ((vaddr >> 12) & 0x1FF) as usize;
-
-    let l1_entry = read_desc(pt_root + (l1_idx as u64) * 8);
-    if l1_entry & ENTRY_VALID == 0 {
-        panic!("mmu_map_object: L1 entry missing at idx {}", l1_idx);
-    }
-    if l1_entry & ENTRY_TABLE == 0 {
-        panic!("mmu_map_object: L1 entry is not a table at idx {}", l1_idx);
-    }
-    let l2_table = l1_entry & ADDR_MASK;
-
-    let l2_entry = read_desc(l2_table + (l2_idx as u64) * 8);
-    if l2_entry & ENTRY_VALID == 0 {
-        panic!("mmu_map_object: L2 entry missing at idx {}", l2_idx);
-    }
-    if l2_entry & ENTRY_TABLE == 0 {
-        return WalkResult::NeedsSplit {
-            l2_table_addr: l2_table,
-            l2_index: l2_idx,
-            block_desc: l2_entry,
-        };
-    }
-    let l3_table = l2_entry & ADDR_MASK;
-    WalkResult::ExistingL3(l3_table, l3_idx)
-}
-
-unsafe fn split_l2_block(l2_table_addr: u64, l2_index: usize, block_desc: u64, l3_frame_paddr: u64) {
-    let block_base = block_desc & ADDR_MASK;
-    let attrs = block_desc & !(ADDR_MASK | 0x3);
-
-    let l3_addr = l3_frame_paddr;
-
-    core::ptr::write_bytes(l3_addr as *mut u8, 0, 4096);
-
-    for i in 0..512 {
-        let page_paddr = block_base + (i as u64 * 0x1000);
-        let desc = ENTRY_VALID | ENTRY_TABLE | ENTRY_AF | attrs | page_paddr;
-        write_desc(l3_addr + (i as u64 * 8), desc);
-    }
-
-    barrier_write();
-    write_desc(l2_table_addr + (l2_index as u64) * 8, l3_addr | ENTRY_VALID | ENTRY_TABLE);
-}
-
-fn barrier_write() {
-    unsafe { core::arch::asm!("dsb ishst", options(nomem, nostack)); }
-}
-
-fn barrier_full() {
-    unsafe { core::arch::asm!("dsb ish", options(nomem, nostack)); }
-}
-
-fn barrier_insn() {
-    unsafe { core::arch::asm!("isb", options(nomem, nostack)); }
-}
-
-fn tlbi_page(va: u64) {
-    unsafe { core::arch::asm!("tlbi vaae1is, {}", in(reg) va, options(nostack)); }
-}
-
-fn tlbi_all() {
-    unsafe { core::arch::asm!("tlbi vmalle1is", options(nomem, nostack)); }
-}
-
-fn tlbi_range(vaddr: u64, size: u64) {
-    barrier_write();
-    for offset in (0..size).step_by(0x1000) {
-        tlbi_page(vaddr + offset);
-    }
-    barrier_full();
-    barrier_insn();
-}
-
-fn tlbi_all_sync() {
-    barrier_full();
-    tlbi_all();
-    barrier_full();
-    barrier_insn();
-}
 
 #[no_mangle]
 pub unsafe extern "Rust" fn mmu_map_object(

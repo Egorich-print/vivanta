@@ -58,6 +58,10 @@ impl FrameAllocator for PmmBitmap {
 
 impl PmmBitmap {
     pub unsafe fn new(region: &AvailableRegion) -> Self {
+        assert!(
+            region.start % FRAME_SIZE == 0,
+            "PMM: region start ({:#x}) must be page-aligned", region.start
+        );
         let bitmap_start = region.start as *mut u8;
         let region_size = region.end - region.start;
         let mut pmm = Self::init(bitmap_start, region.start, region_size);

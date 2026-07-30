@@ -37,11 +37,6 @@ members = [
     "arch-test-stub",
     "target-test",
 
-    # --- Legacy (pre-ACS boot adapters, frozen) ---
-    "archive/boot_legacy/aarch64/qemu_kernel",
-    "archive/boot_legacy/aarch32/qemu_virt",
-    "archive/boot_legacy/aarch64/lavender",
-    "archive/boot_legacy/platforms/rk3568",
 ]
 
 [profile.dev]

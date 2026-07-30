@@ -30,33 +30,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vivanta-boot-aarch32-qemu-virt"
-version = "0.1.0"
-dependencies = [
- "vivanta-arch-armv7a",
- "vivanta-boot-common",
- "vivanta-boot-info",
- "vivanta-kernel",
-]
-
-[[package]]
-name = "vivanta-boot-aarch64-lavender"
-version = "0.1.0"
-dependencies = [
- "vivanta-boot-common",
-]
-
-[[package]]
-name = "vivanta-boot-aarch64-qemu-kernel"
-version = "0.1.0"
-dependencies = [
- "vivanta-arch-aarch64",
- "vivanta-boot-common",
- "vivanta-boot-info",
- "vivanta-kernel",
-]
-
-[[package]]
 name = "vivanta-boot-common"
 version = "0.1.0"
 dependencies = [
@@ -123,14 +96,6 @@ name = "vivanta-platform-sdm660"
 version = "0.1.0"
 dependencies = [
  "vivanta-boot-common",
-]
-
-[[package]]
-name = "vivanta-rk3568-legacy"
-version = "0.1.0"
-dependencies = [
- "vivanta-boot-common",
- "vivanta-boot-info",
 ]
 
 [[package]]

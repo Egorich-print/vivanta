@@ -77,10 +77,10 @@ pub unsafe extern "C" fn rust_main() -> ! {
     fp_enable();
 
     // Initialise PL011 UART
-    use vivanta_platform_qemu::Pl011Uart;
-    let uart = Pl011Uart::new(0x0900_0000);
-    uart.init();
-    set_console(&uart);
+    use vivanta_boot_common::pl011::Pl011;
+    static UART: Pl011 = Pl011::new(0x0900_0000);
+    UART.init(24_000_000, 115200);
+    set_console(&UART);
 
     println!();
     println!("\u{2500}\u{2500}\u{2500}\u{2500} Vivanta Boot Adapter (ARMv7/QEMU) \u{2500}\u{2500}\u{2500}\u{2500}");

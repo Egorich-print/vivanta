@@ -76,7 +76,7 @@ pub struct MemoryProperties {
 impl MemoryProperties {
     pub const fn dram_4gb() -> Self {
         MemoryProperties {
-            capacity: 4 * 1024 * 1024 * 1024,
+            capacity: (4u64 * 1024 * 1024 * 1024) as usize,
             latency_ns: 80,
             bandwidth_mb_s: 25000,
             persistence: PersistenceType::Volatile,

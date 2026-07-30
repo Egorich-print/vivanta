@@ -1,4 +1,5 @@
 use crate::barrier;
+use crate::paging::descriptor::*;
 use crate::paging::{MappingFlags, PageTable, Permissions};
 
 const L1_ENTRIES: usize = 512;
@@ -24,9 +25,6 @@ fn phys_addr<T>(ptr: *const T) -> u64 {
 }
 
 fn l1_table_desc(l2_phys: u64) -> u64 {
-    const DESC_VALID: u64 = 1 << 0;
-    const DESC_TABLE: u64 = 1 << 1;
-    const ADDR_MASK: u64 = 0x0000_FFFF_FFFF_F000;
     DESC_VALID | DESC_TABLE | (l2_phys & ADDR_MASK)
 }
 
