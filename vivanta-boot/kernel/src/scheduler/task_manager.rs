@@ -11,16 +11,12 @@ use crate::vmm::AddressSpaceId;
 /// Each Task owns its Thread and MemoryObjects.
 /// The TaskManager ensures resources are freed when a Task exits.
 pub struct TaskManager {
-    tasks: Vec<Task>,
-    next_id: TaskId,
+    // TaskManager now delegates to global ProcessTable
 }
 
 impl TaskManager {
     pub fn new() -> Self {
-        TaskManager {
-            tasks: Vec::new(),
-            next_id: 1,
-        }
+        TaskManager {}
     }
 
     /// Spawn a new user task.
@@ -59,15 +55,20 @@ impl TaskManager {
             priority,
         );
 
-        let task_id = self.next_id;
-        self.next_id += 1;
-
-        let mut task = Task::new(task_id, thread_id, address_space);
+        let mut task = Task::new(0, thread_id, address_space); // ID will be set by ProcessTable
         if let Some(parent_id) = parent {
             task.set_parent(parent_id);
         }
         task.add_object(user_stack);
-        self.tasks.push(task);
+
+        let task_id = scheduler::pt().create(task);
+
+        // Update parent's children list
+        if let Some(parent_id) = parent {
+            if let Some(parent_task) = scheduler::pt().lookup_mut(parent_id) {
+                parent_task.add_child(task_id);
+            }
+        }
 
         Ok(task_id)
     }
@@ -86,14 +87,19 @@ impl TaskManager {
     ) -> Result<TaskId, &'static str> {
         let thread_id = scheduler::create_kernel_thread(entry, arg, alloc, address_space, priority);
 
-        let task_id = self.next_id;
-        self.next_id += 1;
-
-        let mut task = Task::new(task_id, thread_id, address_space);
+        let mut task = Task::new(0, thread_id, address_space); // ID will be set by ProcessTable
         if let Some(parent_id) = parent {
             task.set_parent(parent_id);
         }
-        self.tasks.push(task);
+
+        let task_id = scheduler::pt().create(task);
+
+        // Update parent's children list
+        if let Some(parent_id) = parent {
+            if let Some(parent_task) = scheduler::pt().lookup_mut(parent_id) {
+                parent_task.add_child(task_id);
+            }
+        }
 
         Ok(task_id)
     }
@@ -103,32 +109,41 @@ impl TaskManager {
     /// The owned MemoryObjects will be freed on the next
     /// `cleanup_zombies` call.
     pub fn kill(&mut self, task_id: TaskId) -> Result<(), &'static str> {
-        let task = self
-            .tasks
-            .iter_mut()
-            .find(|t| t.task_id == task_id)
-            .ok_or("task not found")?;
-        task.state = TaskState::Zombie;
-        Ok(())
+        if let Some(task) = scheduler::pt().lookup_mut(task_id) {
+            task.state = TaskState::Zombie;
+            Ok(())
+        } else {
+            Err("task not found")
+        }
     }
 
+    /// Count of tasks.
     pub fn task_count(&self) -> usize {
-        self.tasks.len()
+        scheduler::pt().count()
     }
 
+    /// Count of running tasks.
     pub fn running_count(&self) -> usize {
-        self.tasks.iter().filter(|t| t.state == TaskState::Running).count()
+        scheduler::pt().iter()
+            .filter(|t| t.state == TaskState::Running)
+            .count()
     }
 
-    pub fn iter(&self) -> core::slice::Iter<'_, Task> {
-        self.tasks.iter()
-    }
-
+    /// Get task by ID.
     pub fn get(&self, task_id: TaskId) -> Option<&Task> {
-        self.tasks.iter().find(|t| t.task_id == task_id)
+        scheduler::pt().lookup(task_id)
     }
 
-    pub fn get_mut(&mut self, task_id: TaskId) -> Option<&mut Task> {
-        self.tasks.iter_mut().find(|t| t.task_id == task_id)
+    /// Get all zombie tasks (for cleanup).
+    pub fn zombies(&self) -> Vec<TaskId> {
+        scheduler::pt().iter()
+            .filter(|t| t.state == TaskState::Zombie)
+            .map(|t| t.task_id)
+            .collect()
+    }
+
+    /// Remove zombie task and return it.
+    pub fn reap_zombie(&mut self, task_id: TaskId) -> Option<Task> {
+        scheduler::pt().remove(task_id)
     }
 }

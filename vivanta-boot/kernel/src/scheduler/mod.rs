@@ -6,9 +6,11 @@ pub mod task;
 pub mod task_manager;
 pub mod thread;
 pub mod runqueue;
+pub mod process_table;
 
 use thread::{Thread, ThreadState, ThreadEntry, ThreadId, Priority};
 use runqueue::{RunQueue, RunQueueError};
+use process_table::ProcessTable;
 use vivanta_arch_api::pmm::FrameAllocator;
 use crate::vmm::AddressSpaceId;
 use alloc::vec::Vec;
@@ -16,6 +18,7 @@ use alloc::vec::Vec;
 const KERNEL_STACK_SIZE: usize = 16384;
 
 static mut RUNQUEUE: Option<RunQueue> = None;
+static mut PROCESS_TABLE: Option<ProcessTable> = None;
 static mut BOOT_THREAD_ID: ThreadId = 0;
 static mut IDLE_THREAD_ID: ThreadId = 0;
 
@@ -33,6 +36,15 @@ fn rq() -> &'static mut RunQueue {
             RUNQUEUE = Some(RunQueue::new());
         }
         RUNQUEUE.as_mut().unwrap()
+    }
+}
+
+fn pt() -> &'static mut ProcessTable {
+    unsafe { 
+        if PROCESS_TABLE.is_none() {
+            PROCESS_TABLE = Some(ProcessTable::new());
+        }
+        PROCESS_TABLE.as_mut().unwrap()
     }
 }
 
