@@ -1,6 +1,6 @@
 use crate::memory::capability::MemoryCapability;
 use crate::memory::resource::{PhysAddr, ResourceId};
-use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator, RootPageTable};
+use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator};
 
 /// Adapter that wraps the kernel's `MemoryResourceManager` into a `PageTableAllocator`.
 pub struct MrmPageTableAllocator {
