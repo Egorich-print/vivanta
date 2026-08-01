@@ -138,6 +138,12 @@ pub fn kernel_address_space() -> &'static AddressSpace {
     }
 }
 
+pub fn kernel_address_space_mut() -> &'static mut AddressSpace {
+    unsafe {
+        ADDRESS_SPACES[0].as_mut().expect("KernelAddressSpace not initialised")
+    }
+}
+
 pub fn count() -> usize {
     unsafe {
         let mut n = 0;

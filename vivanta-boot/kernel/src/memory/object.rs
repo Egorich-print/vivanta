@@ -118,8 +118,14 @@ impl MemoryObject {
     // ------------------------------------------------------------------
 
     /// Map this object at a virtual address in the given address space.
-    /// Programs the live page table via `mmu_map_object`.
-    pub fn map(&mut self, vaddr: u64, size: u64, pt: RootPageTable, alloc: &mut dyn PageTableAllocator) -> Result<usize, ObjectError> {
+    /// Programs the live page table via AddressSpace.map_pages().
+    pub fn map(
+        &mut self,
+        vaddr: u64,
+        size: u64,
+        aspace: &mut crate::vmm::AddressSpace,
+        alloc: &mut dyn PageTableAllocator,
+    ) -> Result<usize, ObjectError> {
         if self.is_revoked() {
             return Err(ObjectError::Revoked);
         }
@@ -129,7 +135,8 @@ impl MemoryObject {
         let phys = self.phys_addr.ok_or(ObjectError::NoStorage)?;
 
         let flags = rights_to_flags(self.capability.rights);
-        unsafe { vivanta_arch_api::mmu::mmu_map_object(pt, vaddr, phys, size, flags, alloc); }
+        aspace.map_pages(vaddr, phys, size, flags, alloc, self.id)
+            .map_err(|_| ObjectError::MappingLimitReached)?;
 
         for i in 0..MAX_MAPPINGS {
             if self.mappings[i].is_none() {
@@ -141,18 +148,25 @@ impl MemoryObject {
         Err(ObjectError::MappingLimitReached)
     }
 
-    /// Unmap this object and clear the page table entries.
-    pub fn unmap(&mut self, slot: usize, pt: RootPageTable, alloc: &mut dyn PageTableAllocator) -> Result<(), ObjectError> {
+        /// Unmap this object and clear the page table entries.
+    pub fn unmap(
+        &mut self,
+        slot: usize,
+        aspace: &mut crate::vmm::AddressSpace,
+        alloc: &mut dyn PageTableAllocator,
+    ) -> Result<(), ObjectError> {
         if self.is_revoked() {
             return Err(ObjectError::Revoked);
         }
         let mapping = self.mappings.get(slot).and_then(|m| *m).ok_or(ObjectError::NotMapped)?;
-        unsafe { vivanta_arch_api::mmu::mmu_unmap(pt, mapping.vaddr, mapping.size, alloc); }
+        aspace.unmap_pages(mapping.vaddr, mapping.size, alloc)
+            .map_err(|_| ObjectError::NotMapped)?;
         self.mappings[slot] = None;
         if self.mappings.iter().all(|m| m.is_none()) {
             self.state = MemoryObjectState::Allocated;
         }
-        Ok(())
+        Ok(()
+)
     }
 
     pub fn mapping_count(&self) -> usize {

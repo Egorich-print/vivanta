@@ -259,13 +259,13 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let phys = obj.phys_addr.expect("phys addr");
     println!("  Allocated  @ 0x{:x}  (size={})", phys, obj.size);
 
-    let kernel_root = vmm::kernel_address_space().root;
     let pt_alloc_mrm = mrm as *mut memory::MemoryResourceManager;
     let mut pt_alloc = unsafe {
         memory::MrmPageTableAllocator::new(pt_alloc_mrm)
     };
+    let kernel_as = vmm::kernel_address_space_mut();
     let slot = obj
-        .map(phys, 4096, kernel_root, &mut pt_alloc)
+        .map(phys, 4096, kernel_as, &mut pt_alloc)
         .expect("map MemoryObject");
     println!("  Mapped     slot={}", slot);
 
@@ -283,7 +283,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     }
     println!("  Fill 4 words OK");
 
-    obj.unmap(slot, kernel_root, &mut pt_alloc)
+    obj.unmap(slot, kernel_as, &mut pt_alloc)
         .expect("unmap MemoryObject");
     println!("  Unmapped   slot={}", slot);
     println!("MemoryObject test passed.");
