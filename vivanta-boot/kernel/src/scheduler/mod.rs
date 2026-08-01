@@ -8,67 +8,45 @@ pub mod thread;
 pub mod runqueue;
 
 use thread::{Thread, ThreadState, ThreadEntry, ThreadId, Priority};
+use runqueue::{RunQueue, RunQueueError};
 use vivanta_arch_api::pmm::FrameAllocator;
 use crate::vmm::AddressSpaceId;
+use alloc::vec::Vec;
 
-const MAX_THREADS: usize = 8;
-const IDLE_SLOT: usize = MAX_THREADS - 1;
 const KERNEL_STACK_SIZE: usize = 16384;
 
-static mut NEXT_ID: u64 = 1;
-static mut RUNQUEUE: [Option<Thread>; MAX_THREADS] = [
-    None, None, None, None, None, None, None, None,
-];
+static mut RUNQUEUE: Option<RunQueue> = None;
+static mut BOOT_THREAD_ID: ThreadId = 0;
+static mut IDLE_THREAD_ID: ThreadId = 0;
 
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 static NEED_RESCHEDULE: AtomicBool = AtomicBool::new(false);
 static ATOMIC_CURRENT: AtomicUsize = AtomicUsize::new(0);
 
-fn find_next_ready(from: usize) -> usize {
-    let n = MAX_THREADS;
-    let priorities = [Priority::Realtime, Priority::High, Priority::Normal, Priority::Low];
-    
-    for priority in priorities {
-        for i in 1..n {
-            let idx = (from + i) % n;
-            if idx == IDLE_SLOT { continue; }
-            let slot = unsafe { &raw const RUNQUEUE[idx] };
-            if let Some(ref t) = unsafe { (*slot).as_ref() } {
-                if t.state == ThreadState::Ready && t.priority == priority {
-                    return idx;
-                }
-            }
+// ---------------------------------------------------------------------------
+// RunQueue accessor helpers (unsafe because static mut)
+// ---------------------------------------------------------------------------
+
+fn rq() -> &'static mut RunQueue {
+    unsafe { 
+        if RUNQUEUE.is_none() {
+            RUNQUEUE = Some(RunQueue::new());
         }
+        RUNQUEUE.as_mut().unwrap()
     }
-    
-    let idle_slot = unsafe { &raw const RUNQUEUE[IDLE_SLOT] };
-    if let Some(ref t) = unsafe { (*idle_slot).as_ref() } {
-        if t.state == ThreadState::Ready { return IDLE_SLOT; }
-    }
-    panic!("find_next_ready: no Ready thread");
 }
 
-fn runqueue_ref(idx: usize) -> &'static Thread {
-    let ptr = unsafe { &raw const RUNQUEUE[idx] };
-    unsafe { (*ptr).as_ref().expect("no thread at index") }
-}
+// ---------------------------------------------------------------------------
+// Scheduler API
+// ---------------------------------------------------------------------------
 
-fn runqueue_mut(idx: usize) -> &'static mut Thread {
-    let ptr = unsafe { &raw mut RUNQUEUE[idx] };
-    unsafe { (*ptr).as_mut().expect("no thread at index") }
+pub fn thread_set_state(id: ThreadId, new_state: ThreadState) {
+    rq().set_state(id, new_state)
+        .expect("thread_set_state failed");
 }
 
 pub fn register(thread: Thread) {
-    unsafe {
-        for i in 0..MAX_THREADS {
-            let ptr = &raw mut RUNQUEUE[i];
-            if (*ptr).is_none() {
-                *ptr = Some(thread);
-                return;
-            }
-        }
-    }
-    panic!("runqueue full");
+    rq().insert(thread).expect("runqueue full");
 }
 
 pub fn create_user_thread(
@@ -77,29 +55,28 @@ pub fn create_user_thread(
     entry: usize,
     address_space: AddressSpaceId,
     priority: Priority,
-) -> u64 {
-    unsafe {
-        let ctx = vivanta_arch_api::context::context_init(
+) -> ThreadId {
+    let ctx = unsafe {
+        vivanta_arch_api::context::context_init(
             kernel_stack_top,
             user_stack_top,
             entry,
             vivanta_arch_api::context::ExecutionLevel::User,
-        );
-        let id = NEXT_ID;
-        NEXT_ID += 1;
-        let thread = Thread {
-            id,
-            state: ThreadState::Created,
-            priority,
-            context: ctx,
-            entry: None,
-            address_space,
-            level: vivanta_arch_api::context::ExecutionLevel::User,
-        };
-        register(thread);
-        thread_set_state(id, ThreadState::Ready);
-        id
-    }
+        )
+    };
+    let id = rq().alloc_id();
+    let thread = Thread {
+        id,
+        state: ThreadState::Created,
+        priority,
+        context: ctx,
+        entry: None,
+        address_space,
+        level: vivanta_arch_api::context::ExecutionLevel::User,
+    };
+    register(thread);
+    thread_set_state(id, ThreadState::Ready);
+    id
 }
 
 pub fn create_kernel_thread(
@@ -108,86 +85,90 @@ pub fn create_kernel_thread(
     alloc: &mut impl FrameAllocator,
     address_space: AddressSpaceId,
     priority: Priority,
-) -> u64 {
-    unsafe {
-        let stack_base = alloc.alloc_frame().expect("stack frame 0").addr;
-        for _ in 1..4 {
-            alloc.alloc_frame().expect("stack frame");
-        }
-        let stack_top = (stack_base as usize) + KERNEL_STACK_SIZE;
-        let ctx = vivanta_arch_api::context::context_init(
+) -> ThreadId {
+    let stack_base = alloc.alloc_frame().expect("stack frame 0").addr;
+    for _ in 1..4 {
+        alloc.alloc_frame().expect("stack frame");
+    }
+    let stack_top = (stack_base as usize) + KERNEL_STACK_SIZE;
+    let ctx = unsafe {
+        vivanta_arch_api::context::context_init(
             stack_top,
             0,  // user_stack_top — vivanta_kernel threads don't use EL0
             thread_trampoline as *const () as usize,
             vivanta_arch_api::context::ExecutionLevel::Kernel,
-        );
-        let id = NEXT_ID;
-        NEXT_ID += 1;
-        let thread = Thread {
-            id,
-            state: ThreadState::Created,
-            priority,
-            context: ctx,
-            entry: Some(entry),
-            address_space,
-            level: vivanta_arch_api::context::ExecutionLevel::Kernel,
-        };
-        register(thread);
-        thread_set_state(id, ThreadState::Ready);
-        id
-    }
+        )
+    };
+    let id = rq().alloc_id();
+    let thread = Thread {
+        id,
+        state: ThreadState::Created,
+        priority,
+        context: ctx,
+        entry: Some(entry),
+        address_space,
+        level: vivanta_arch_api::context::ExecutionLevel::Kernel,
+    };
+    register(thread);
+    thread_set_state(id, ThreadState::Ready);
+    id
 }
+
+// ---------------------------------------------------------------------------
+// Context switch
+// ---------------------------------------------------------------------------
 
 pub fn yield_now() {
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
-    unsafe {
-        let cur = ATOMIC_CURRENT.load(Ordering::Relaxed);
-        let nxt = find_next_ready(cur);
-        if nxt == cur { return; }
-
-        let current_id = runqueue_ref(cur).id;
-        let next_id = runqueue_ref(nxt).id;
-
-        thread_set_state(current_id, ThreadState::Ready);
-        ATOMIC_CURRENT.store(nxt, Ordering::Relaxed);
-
-        // Activate the next thread's address space if different
-        let next = runqueue_ref(nxt);
-        let current = runqueue_ref(cur);
-
-        if next.address_space != current.address_space {
-            if cfg!(feature = "trace-address-space") {
-                vivanta_boot_common::println!("  [AS switch] thread {} → {}", current_id, next_id);
-            }
-            let root = crate::vmm::address_space::lookup_root(next.address_space);
-            vivanta_arch_api::mmu::activate_address_space(root);
+    
+    let current_id = unsafe { 
+        let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
+        rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
+    };
+    
+    let next_id = match rq().find_next_ready(current_id, true) {
+        Some(id) => id,
+        None => return, // No other thread to run
+    };
+    
+    if current_id == next_id {
+        return;
+    }
+    
+    // Set current thread to Ready
+    thread_set_state(current_id, ThreadState::Ready);
+    
+    // Update current index
+    let next_idx = rq().iter().position(|t| t.id == next_id).unwrap_or(0);
+    ATOMIC_CURRENT.store(next_idx, Ordering::Relaxed);
+    
+    // Activate address space if different
+    let next = rq().get(next_id).unwrap();
+    let current = rq().get(current_id).unwrap();
+    
+    if next.address_space != current.address_space {
+        if cfg!(feature = "trace-address-space") {
+            vivanta_boot_common::println!("  [AS switch] thread {} → {}", current_id, next_id);
         }
-
+        let root = crate::vmm::address_space::lookup_root(next.address_space);
+        unsafe { vivanta_arch_api::mmu::activate_address_space(root); }
+    }
+    
+    // Perform context switch
+    unsafe {
         vivanta_arch_api::context::context_switch(
-            &mut runqueue_mut(cur).context,
-            runqueue_ref(nxt).context,
+            &mut rq().get_mut(current_id).unwrap().context,
+            rq().get(next_id).unwrap().context,
         );
-
-        let now = ATOMIC_CURRENT.load(Ordering::Relaxed);
-        if now != IDLE_SLOT {
-            thread_set_state(runqueue_ref(now).id, ThreadState::Running);
+    }
+    
+    // After context switch, we are now running as 'next'
+    let now_idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
+    if let Some(t) = rq().iter().nth(now_idx) {
+        if t.id != unsafe { IDLE_THREAD_ID } {
+            thread_set_state(t.id, ThreadState::Running);
         }
     }
-}
-
-pub fn thread_set_state(id: ThreadId, new_state: ThreadState) {
-    unsafe {
-        for i in 0..MAX_THREADS {
-            let ptr = &raw mut RUNQUEUE[i];
-            if let Some(ref mut t) = (*ptr).as_mut() {
-                if t.id == id {
-                    t.state = new_state;
-                    return;
-                }
-            }
-        }
-    }
-    panic!("thread_set_state: thread {} not found", id);
 }
 
 pub fn schedule_tick() {
@@ -204,94 +185,86 @@ pub fn maybe_reschedule(_frame: usize) {
     if !NEED_RESCHEDULE.load(Ordering::Relaxed) { return; }
     NEED_RESCHEDULE.store(false, Ordering::Relaxed);
 
-    let cur = ATOMIC_CURRENT.load(Ordering::Relaxed);
-    let nxt = find_next_ready(cur);
-    if nxt == cur { return; }
-
-    let current_id = runqueue_ref(cur).id;
-    let next_id = runqueue_ref(nxt).id;
-
-    thread_set_state(current_id, ThreadState::Ready);
-    ATOMIC_CURRENT.store(nxt, Ordering::Relaxed);
-
-    let next = runqueue_ref(nxt);
-    let current = runqueue_ref(cur);
-
-    if next.address_space != current.address_space {
-        let root = crate::vmm::address_space::lookup_root(next.address_space);
-        unsafe { vivanta_arch_api::mmu::activate_address_space(root); }
-    }
-
-    unsafe {
-        vivanta_arch_api::context::context_switch(
-            &mut runqueue_mut(cur).context,
-            runqueue_ref(nxt).context,
-        );
-    }
-
-    // After context switch, we are now running as 'next'
-    let now = ATOMIC_CURRENT.load(Ordering::Relaxed);
-    if now != IDLE_SLOT {
-        thread_set_state(runqueue_ref(now).id, ThreadState::Running);
-    }
+    yield_now();
 }
 
-pub fn cleanup() {
-    unsafe {
-        for i in 0..MAX_THREADS {
-            if i == 0 || i == IDLE_SLOT { continue; }
-            let ptr = &raw mut RUNQUEUE[i];
-            if let Some(ref t) = *ptr {
-                if t.state == ThreadState::Terminated {
-                    *ptr = None;
-                }
-            }
-        }
-    }
+// ---------------------------------------------------------------------------
+// Thread lifecycle
+// ---------------------------------------------------------------------------
+
+extern "C" fn thread_trampoline(_arg: usize) {
+    let current_id = unsafe { 
+        let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
+        rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
+    };
+    let entry = rq().get(current_id)
+        .and_then(|t| t.entry)
+        .expect("trampoline: no entry");
+    thread_set_state(current_id, ThreadState::Running);
+    entry(0);
+    thread_exit();
 }
 
 pub fn thread_exit() -> ! {
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
     cleanup();
-    let cur = ATOMIC_CURRENT.load(Ordering::Relaxed);
-    let cur_id = runqueue_ref(cur).id;
-    let cur_as = runqueue_ref(cur).address_space;
-    thread_set_state(cur_id, ThreadState::Terminated);
-
-    let nxt = find_next_ready(cur);
-
-    let next = runqueue_ref(nxt);
-    let next_ctx = next.context;
-    ATOMIC_CURRENT.store(nxt, Ordering::Relaxed);
-
-    // Activate the next thread's address space if different
-    if next.address_space != cur_as {
+    
+    let current_id = unsafe { 
+        let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
+        rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
+    };
+    let current_as = rq().get(current_id).unwrap().address_space;
+    
+    thread_set_state(current_id, ThreadState::Terminated);
+    
+    // Find next thread to run
+    let next_id = match rq().find_next_ready(current_id, false) {
+        Some(id) => id,
+        None => panic!("thread_exit: no thread to run"),
+    };
+    
+    // Update current index
+    let next_idx = rq().iter().position(|t| t.id == next_id).unwrap_or(0);
+    ATOMIC_CURRENT.store(next_idx, Ordering::Relaxed);
+    
+    // Activate address space if different
+    let next = rq().get(next_id).unwrap();
+    if next.address_space != current_as {
         if cfg!(feature = "trace-address-space") {
-            vivanta_boot_common::println!("  [AS switch] thread {} → {}", cur_id, next.id);
+            vivanta_boot_common::println!("  [AS switch] thread {} → {}", current_id, next_id);
         }
         let root = crate::vmm::address_space::lookup_root(next.address_space);
         unsafe { vivanta_arch_api::mmu::activate_address_space(root); }
     }
-
+    
+    // Perform context switch
     unsafe {
         vivanta_arch_api::context::context_switch(
-            &mut runqueue_mut(cur).context,
-            next_ctx,
+            &mut rq().get_mut(current_id).unwrap().context,
+            rq().get(next_id).unwrap().context,
         );
     }
     unreachable!()
 }
 
-extern "C" fn thread_trampoline(_arg: usize) {
-    let cur = ATOMIC_CURRENT.load(Ordering::Relaxed);
-    let entry = {
-        let t = runqueue_ref(cur);
-        t.entry.expect("trampoline: no entry")
-    };
-    thread_set_state(runqueue_ref(cur).id, ThreadState::Running);
-    entry(0);
-    thread_exit();
+fn cleanup() {
+    // Remove terminated threads (except boot and idle)
+    let boot_id = unsafe { BOOT_THREAD_ID };
+    let idle_id = unsafe { IDLE_THREAD_ID };
+    
+    let to_remove: Vec<ThreadId> = rq().iter()
+        .filter(|t| t.state == ThreadState::Terminated && t.id != boot_id && t.id != idle_id)
+        .map(|t| t.id)
+        .collect();
+    
+    for id in to_remove {
+        rq().remove(id);
+    }
 }
+
+// ---------------------------------------------------------------------------
+// Initialization
+// ---------------------------------------------------------------------------
 
 static mut IDLE_STACK: [u8; KERNEL_STACK_SIZE] = [0; KERNEL_STACK_SIZE];
 
@@ -299,19 +272,23 @@ pub fn init_boot() {
     let kernel_as = crate::vmm::KERNEL_ADDRESS_SPACE_ID;
     unsafe {
         let boot_ctx = vivanta_arch_api::context::context_capture_current();
+        let boot_id = rq().alloc_id();
         
-        let ptr = &raw mut RUNQUEUE[0];
-        *ptr = Some(Thread {
-            id: 0,
+        rq().insert(Thread {
+            id: boot_id,
             state: ThreadState::Running,
             priority: Priority::Normal,
             context: boot_ctx,
             entry: None,
             address_space: kernel_as,
             level: vivanta_arch_api::context::ExecutionLevel::Kernel,
-        });
-
-        let idle_ptr = &raw mut RUNQUEUE[IDLE_SLOT];
+        }).expect("Failed to insert boot thread");
+        
+        BOOT_THREAD_ID = boot_id;
+        ATOMIC_CURRENT.store(0, Ordering::Relaxed);
+        
+        // Create idle thread
+        let idle_id = rq().alloc_id();
         let idle_top = (&mut IDLE_STACK[0] as *mut u8 as usize) + KERNEL_STACK_SIZE;
         let idle_ctx = vivanta_arch_api::context::context_init(
             idle_top,
@@ -319,17 +296,24 @@ pub fn init_boot() {
             0,
             vivanta_arch_api::context::ExecutionLevel::Kernel,
         );
-        *idle_ptr = Some(Thread {
-            id: IDLE_SLOT as u64,
+        
+        rq().insert(Thread {
+            id: idle_id,
             state: ThreadState::Ready,
             priority: Priority::Idle,
             context: idle_ctx,
             entry: None,
             address_space: kernel_as,
             level: vivanta_arch_api::context::ExecutionLevel::Kernel,
-        });
+        }).expect("Failed to insert idle thread");
+        
+        IDLE_THREAD_ID = idle_id;
     }
 }
+
+// ---------------------------------------------------------------------------
+// External entry points
+// ---------------------------------------------------------------------------
 
 /// Called from the arch timer handler via extern "Rust"
 #[no_mangle]
