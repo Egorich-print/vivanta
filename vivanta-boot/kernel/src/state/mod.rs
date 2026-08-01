@@ -4,7 +4,6 @@ use crate::identity::{BootIdentity, IdentityState, RuntimeIdentity, Uuid};
 use crate::memory::MemoryResourceManager;
 
 pub mod hardware;
-pub mod identity;
 
 use self::hardware::HardwareState;
 
