@@ -37,6 +37,9 @@ members = [
     "arch-test-stub",
     "target-test",
 
+    # --- User-space ---
+    "user/libc",
+    "user/hello",
 ]
 
 [profile.dev]

@@ -1,0 +1,12 @@
+[package]
+name = "vivanta-hello"
+version = "0.1.0"
+edition = "2021"
+description = "Hello World user program for Vivanta"
+
+[[bin]]
+name = "hello"
+path = "src/main.rs"
+
+[dependencies]
+vivanta-user-libc = { path = "../libc" }

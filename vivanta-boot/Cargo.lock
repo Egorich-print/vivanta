@@ -41,6 +41,13 @@ name = "vivanta-boot-info"
 version = "0.1.0"
 
 [[package]]
+name = "vivanta-hello"
+version = "0.1.0"
+dependencies = [
+ "vivanta-user-libc",
+]
+
+[[package]]
 name = "vivanta-kernel"
 version = "0.1.0"
 dependencies = [
@@ -187,3 +194,7 @@ dependencies = [
  "vivanta-kernel",
  "vivanta-platform-allwinner-h616",
 ]
+
+[[package]]
+name = "vivanta-user-libc"
+version = "0.1.0"

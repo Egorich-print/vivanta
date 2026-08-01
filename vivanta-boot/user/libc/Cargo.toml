@@ -1,0 +1,9 @@
+[package]
+name = "vivanta-user-libc"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal libc for Vivanta user-space"
+
+[lib]
+name = "vivanta_user_libc"
+path = "src/lib.rs"

@@ -66,11 +66,23 @@ core::arch::global_asm!(
     ".section .user.text, \"ax\"",
     ".global user_code_start",
     "user_code_start:",
-    "mov  x0, #0x42",
+    // write(1, msg, 16)
+    "mov  x8, #1",          // SYS_WRITE
+    "mov  x0, #1",          // fd = stdout
+    "adr  x1, hello_msg",   // buf = message
+    "mov  x2, #16",         // len
     "svc  #0",
+    // exit(0)
+    "mov  x8, #2",          // SYS_EXIT
+    "mov  x0, #0",          // code = 0
+    "svc  #0",
+    "b .",                  // should not reach here
+    // String data embedded in user text section
+    ".balign 4",
+    "hello_msg:",
+    ".ascii \"Hello, Vivanta!\\n\"",
     ".global user_code_end",
     "user_code_end:",
-    "b .",
 );
 
 extern "C" {
