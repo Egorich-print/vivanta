@@ -32,8 +32,12 @@ extern "C" {
 /// Allocator callback for arch boot MMU init.
 #[no_mangle]
 pub unsafe extern "Rust" fn boot_alloc_frame(ctx: *mut ()) -> u64 {
-    let pmm = &mut *(ctx as *mut pmm::PmmBitmap);
-    pmm.alloc_frame().map(|f| f.addr).unwrap_or(0)
+    let mrm = &mut *(ctx as *mut memory::MemoryResourceManager);
+    let req = memory::AllocationRequirements::new(4096);
+    // Use Owner 0 (Kernel) for boot page tables
+    mrm.allocate(&req, 0)
+        .and_then(|obj| obj.phys_addr)
+        .unwrap_or(0)
 }
 
 /// The one and only vivanta_kernel entry point.
@@ -143,14 +147,15 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         println!("  Freed frame              (ok)");
     }
 
-    // Re-fetch hardware for VMM and beyond (after init_memory)
-    let hardware = system_state.hardware();
-
     // ------- VMM: Address Space Construction -------------------------------
     println!();
     println!("Address Space Builder:");
-    let alloc_ctx: *mut () = &mut pmm as *mut pmm::PmmBitmap as *mut ();
+    let mrm_ptr = system_state.memory_manager_mut() as *mut memory::MemoryResourceManager;
+    let alloc_ctx: *mut () = mrm_ptr as *mut ();
     let pt = vivanta_arch_api::boot::mmu::mmu_init(alloc_ctx, boot_alloc_frame);
+
+    // Re-fetch hardware for VMM and beyond (after init_memory)
+    let hardware = system_state.hardware();
 
     // Identity-map the usable RAM region
     vivanta_arch_api::boot::mmu::mmu_map_ram(pt, region.start, region.start, region.end - region.start);
@@ -181,7 +186,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     vmm::address_space::init_kernel_address_space(root);
 
     // Build independent root tables for UserAS1/UserAS2
-    let alloc_ctx_root: *mut () = &mut pmm as *mut pmm::PmmBitmap as *mut ();
+    let alloc_ctx_root: *mut () = mrm_ptr as *mut ();
     let build_root = |label: &str, extra_va: u64, extra_pa: u64| -> RootPageTable {
         let rpt = vivanta_arch_api::boot::mmu::mmu_init(alloc_ctx_root, boot_alloc_frame);
         vivanta_arch_api::boot::mmu::mmu_map_ram(rpt, region.start, region.start, region.end - region.start);
@@ -255,8 +260,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!("  Allocated  @ 0x{:x}  (size={})", phys, obj.size);
 
     let kernel_root = vmm::kernel_address_space().root;
+    let pt_alloc_mrm = mrm as *mut memory::MemoryResourceManager;
     let mut pt_alloc = unsafe {
-        memory::PmmPageTableAllocator::new(&mut pmm as *mut dyn FrameAllocator)
+        memory::MrmPageTableAllocator::new(pt_alloc_mrm)
     };
     let slot = obj
         .map(phys, 4096, kernel_root, &mut pt_alloc)

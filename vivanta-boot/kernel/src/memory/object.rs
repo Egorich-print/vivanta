@@ -2,20 +2,27 @@ use crate::memory::capability::MemoryCapability;
 use crate::memory::resource::{PhysAddr, ResourceId};
 use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator, RootPageTable};
 
-/// Adapter that wraps the kernel's `FrameAllocator` into a `PageTableAllocator`.
-pub struct PmmPageTableAllocator {
-    pmm: *mut dyn vivanta_arch_api::pmm::FrameAllocator,
+/// Adapter that wraps the kernel's `MemoryResourceManager` into a `PageTableAllocator`.
+pub struct MrmPageTableAllocator {
+    mrm: *mut crate::memory::MemoryResourceManager,
 }
 
-impl PmmPageTableAllocator {
-    pub unsafe fn new(pmm: *mut dyn vivanta_arch_api::pmm::FrameAllocator) -> Self {
-        PmmPageTableAllocator { pmm }
+impl MrmPageTableAllocator {
+    pub unsafe fn new(mrm: *mut crate::memory::MemoryResourceManager) -> Self {
+        MrmPageTableAllocator { mrm }
     }
 }
 
-impl PageTableAllocator for PmmPageTableAllocator {
+impl PageTableAllocator for MrmPageTableAllocator {
     fn alloc_page_table_frame(&mut self) -> u64 {
-        unsafe { (*self.pmm).alloc_frame().expect("alloc_page_table_frame: OOM").addr }
+        use crate::memory::{AllocationRequirements, MemoryBackend};
+        let req = AllocationRequirements::new(4096);
+        unsafe {
+            (*self.mrm).allocate(&req, 0)
+                .expect("alloc_page_table_frame: OOM")
+                .phys_addr
+                .expect("alloc_page_table_frame: no phys addr")
+        }
     }
 }
 
