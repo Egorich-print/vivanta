@@ -118,6 +118,7 @@ pub unsafe extern "C" fn adapter_main(dtb_addr: usize) -> ! {
 }
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(info: &PanicInfo) -> ! {
+    println!("PANIC: {}", info);
     loop { core::hint::spin_loop(); }
 }

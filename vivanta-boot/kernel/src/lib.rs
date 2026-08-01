@@ -83,8 +83,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
 
     let dtb_addr = system_state.hardware().dtb_ptr;
     let dtb_size = if dtb_addr != 0 {
-        let dtb_total = unsafe { core::ptr::read_volatile(dtb_addr as *const u32) };
-        u32::from_be(dtb_total) as u64
+        // FDT header: magic at +0, totalsize at +4 (big-endian)
+        let totalsize = unsafe { core::ptr::read_volatile((dtb_addr + 4) as *const u32) };
+        u32::from_be(totalsize) as u64
     } else {
         0
     };
@@ -158,8 +159,13 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     // Re-fetch hardware for VMM and beyond (after init_memory)
     let hardware = system_state.hardware();
 
-    // Identity-map the usable RAM region
-    vivanta_arch_api::boot::mmu::mmu_map_ram(pt, region.start, region.start, region.end - region.start);
+    // Identity-map all usable RAM from memory map (not just available region)
+    for r in hardware.memory_map.regions() {
+        use vivanta_boot_common::MemoryRegionKind;
+        if r.kind == MemoryRegionKind::Usable {
+            vivanta_arch_api::boot::mmu::mmu_map_ram(pt, r.start, r.start, r.size);
+        }
+    }
 
     // Map MMIO regions (from HardwareState per ADR-021)
     for mmio in hardware.mmio_regions {
@@ -175,8 +181,13 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     // }
 
     println!("  L1 table at     0x{:x}", vivanta_arch_api::boot::mmu::mmu_root_addr(pt));
-    println!("  RAM ident:      0x{:016x} – 0x{:016x}  ({} MiB)",
-        region.start, region.start + (region.end - region.start) - 1, (region.end - region.start) >> 20);
+    for r in hardware.memory_map.regions() {
+        use vivanta_boot_common::MemoryRegionKind;
+        if r.kind == MemoryRegionKind::Usable {
+            println!("  RAM ident:      0x{:016x} – 0x{:016x}  ({} MiB)",
+                r.start, r.start + r.size - 1, r.size >> 20);
+        }
+    }
     for mmio in hardware.mmio_regions {
         let kind_str = if mmio.kind.is_user_accessible() { "user" } else { "vivanta_kernel" };
         println!("  MMIO ident:     0x{:x} ({} bytes, {})", mmio.base, mmio.size, kind_str);
@@ -223,6 +234,8 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!();
     println!("Enabling MMU...");
     vivanta_arch_api::boot::mmu::mmu_activate(pt);
+    // UART poke to verify we survive MMU switch
+    unsafe { core::ptr::write_volatile(0x0900_0000 as *mut u32, b'!' as u32); }
     vivanta_arch_api::boot::mmu::flush_user_code_icache();
     println!("MMU enabled successfully.");
     println!("MMU self-test:");

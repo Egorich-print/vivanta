@@ -201,9 +201,9 @@ pub unsafe extern "Rust" fn mmu_map_user_pages(
     stack_va: u64,
 ) {
     let builder = BOOT_PT.as_mut().unwrap();
-    // Copy user code directly to the identity-mapped PA (block base at code_va)
-    // After the block split, L3[0] is overwritten to point here with USER attrs.
-    let code_pa = code_va; // identity: PA == VA
+    // Allocate a real physical frame for user code (identity-mapped by early_mmu)
+    let code_frame = builder.alloc_frame().expect("mmu_map_user_pages: no frame for code");
+    let code_pa = code_frame.addr;
     USER_CODE_PA = code_pa;
     core::ptr::copy_nonoverlapping(code_src, code_pa as *mut u8, code_len);
     if code_len < 4096 {
@@ -211,7 +211,7 @@ pub unsafe extern "Rust" fn mmu_map_user_pages(
     }
     builder.map(code_va, code_pa, 4096, PageFlags::USER_READ_WRITE_EXEC);
     // Allocate and map user stack page
-    let stack_pa = builder.alloc_frame().unwrap().addr;
+    let stack_pa = builder.alloc_frame().expect("mmu_map_user_pages: no frame for stack").addr;
     builder.map(stack_va, stack_pa, 4096, PageFlags::USER_READ_WRITE);
 }
 
