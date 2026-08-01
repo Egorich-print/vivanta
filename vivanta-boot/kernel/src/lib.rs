@@ -302,6 +302,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             user_as1,
             &mut pmm,
             system_state.memory_manager_mut(),
+            scheduler::thread::Priority::Normal,
         )
         .expect("spawn_user");
     println!("  Task {} created (thread, code @ 0x{:x})", tid, CODE_VA);

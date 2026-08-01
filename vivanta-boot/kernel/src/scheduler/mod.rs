@@ -7,7 +7,7 @@ pub mod task_manager;
 pub mod thread;
 pub mod runqueue;
 
-use thread::{Thread, ThreadState, ThreadEntry, ThreadId};
+use thread::{Thread, ThreadState, ThreadEntry, ThreadId, Priority};
 use vivanta_arch_api::pmm::FrameAllocator;
 use crate::vmm::AddressSpaceId;
 
@@ -26,14 +26,21 @@ static ATOMIC_CURRENT: AtomicUsize = AtomicUsize::new(0);
 
 fn find_next_ready(from: usize) -> usize {
     let n = MAX_THREADS;
-    for i in 1..n {
-        let idx = (from + i) % n;
-        if idx == IDLE_SLOT { continue; }
-        let slot = unsafe { &raw const RUNQUEUE[idx] };
-        if let Some(ref t) = unsafe { (*slot).as_ref() } {
-            if t.state == ThreadState::Ready { return idx; }
+    let priorities = [Priority::Realtime, Priority::High, Priority::Normal, Priority::Low];
+    
+    for priority in priorities {
+        for i in 1..n {
+            let idx = (from + i) % n;
+            if idx == IDLE_SLOT { continue; }
+            let slot = unsafe { &raw const RUNQUEUE[idx] };
+            if let Some(ref t) = unsafe { (*slot).as_ref() } {
+                if t.state == ThreadState::Ready && t.priority == priority {
+                    return idx;
+                }
+            }
         }
     }
+    
     let idle_slot = unsafe { &raw const RUNQUEUE[IDLE_SLOT] };
     if let Some(ref t) = unsafe { (*idle_slot).as_ref() } {
         if t.state == ThreadState::Ready { return IDLE_SLOT; }
@@ -69,6 +76,7 @@ pub fn create_user_thread(
     user_stack_top: usize,
     entry: usize,
     address_space: AddressSpaceId,
+    priority: Priority,
 ) -> u64 {
     unsafe {
         let ctx = vivanta_arch_api::context::context_init(
@@ -82,6 +90,7 @@ pub fn create_user_thread(
         let thread = Thread {
             id,
             state: ThreadState::Created,
+            priority,
             context: ctx,
             entry: None,
             address_space,
@@ -98,6 +107,7 @@ pub fn create_kernel_thread(
     _arg: usize,
     alloc: &mut impl FrameAllocator,
     address_space: AddressSpaceId,
+    priority: Priority,
 ) -> u64 {
     unsafe {
         let stack_base = alloc.alloc_frame().expect("stack frame 0").addr;
@@ -116,6 +126,7 @@ pub fn create_kernel_thread(
         let thread = Thread {
             id,
             state: ThreadState::Created,
+            priority,
             context: ctx,
             entry: Some(entry),
             address_space,
@@ -293,6 +304,7 @@ pub fn init_boot() {
         *ptr = Some(Thread {
             id: 0,
             state: ThreadState::Running,
+            priority: Priority::Normal,
             context: boot_ctx,
             entry: None,
             address_space: kernel_as,
@@ -310,6 +322,7 @@ pub fn init_boot() {
         *idle_ptr = Some(Thread {
             id: IDLE_SLOT as u64,
             state: ThreadState::Ready,
+            priority: Priority::Idle,
             context: idle_ctx,
             entry: None,
             address_space: kernel_as,

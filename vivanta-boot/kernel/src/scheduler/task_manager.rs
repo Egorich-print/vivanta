@@ -3,6 +3,7 @@ use vivanta_arch_api::pmm::FrameAllocator;
 use crate::memory::{AllocationRequirements, MemoryResourceManager};
 use crate::scheduler;
 use crate::scheduler::task::{Task, TaskId, TaskState};
+use crate::scheduler::thread::Priority;
 use crate::vmm::AddressSpaceId;
 
 /// Manages the lifecycle of all Tasks in the system.
@@ -37,6 +38,7 @@ impl TaskManager {
         address_space: AddressSpaceId,
         alloc: &mut impl FrameAllocator,
         mrm: &mut MemoryResourceManager,
+        priority: Priority,
     ) -> Result<TaskId, &'static str> {
         let stack_base = alloc.alloc_frame().ok_or("kernel stack frame 0")?.addr;
         for _ in 1..4 {
@@ -53,6 +55,7 @@ impl TaskManager {
             user_stack_va,
             code_entry,
             address_space,
+            priority,
         );
 
         let task_id = self.next_id;
@@ -74,8 +77,9 @@ impl TaskManager {
         arg: usize,
         address_space: AddressSpaceId,
         alloc: &mut impl FrameAllocator,
+        priority: Priority,
     ) -> Result<TaskId, &'static str> {
-        let thread_id = scheduler::create_kernel_thread(entry, arg, alloc, address_space);
+        let thread_id = scheduler::create_kernel_thread(entry, arg, alloc, address_space, priority);
 
         let task_id = self.next_id;
         self.next_id += 1;
