@@ -39,6 +39,7 @@ impl TaskManager {
         alloc: &mut impl FrameAllocator,
         mrm: &mut MemoryResourceManager,
         priority: Priority,
+        parent: Option<TaskId>,
     ) -> Result<TaskId, &'static str> {
         let stack_base = alloc.alloc_frame().ok_or("kernel stack frame 0")?.addr;
         for _ in 1..4 {
@@ -62,6 +63,9 @@ impl TaskManager {
         self.next_id += 1;
 
         let mut task = Task::new(task_id, thread_id, address_space);
+        if let Some(parent_id) = parent {
+            task.set_parent(parent_id);
+        }
         task.add_object(user_stack);
         self.tasks.push(task);
 
@@ -78,13 +82,17 @@ impl TaskManager {
         address_space: AddressSpaceId,
         alloc: &mut impl FrameAllocator,
         priority: Priority,
+        parent: Option<TaskId>,
     ) -> Result<TaskId, &'static str> {
         let thread_id = scheduler::create_kernel_thread(entry, arg, alloc, address_space, priority);
 
         let task_id = self.next_id;
         self.next_id += 1;
 
-        let task = Task::new(task_id, thread_id, address_space);
+        let mut task = Task::new(task_id, thread_id, address_space);
+        if let Some(parent_id) = parent {
+            task.set_parent(parent_id);
+        }
         self.tasks.push(task);
 
         Ok(task_id)

@@ -7,7 +7,9 @@ pub type TaskId = u64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskState {
+    Created,
     Running,
+    Exited,
     Zombie,
 }
 
@@ -21,6 +23,9 @@ pub struct Task {
     pub address_space: AddressSpaceId,
     pub owned_objects: Vec<MemoryObject>,
     pub state: TaskState,
+    pub parent: Option<TaskId>,
+    pub children: Vec<TaskId>,
+    pub exit_code: Option<i32>,
 }
 
 impl Task {
@@ -30,11 +35,27 @@ impl Task {
             thread_id,
             address_space,
             owned_objects: Vec::new(),
-            state: TaskState::Running,
+            state: TaskState::Created,
+            parent: None,
+            children: Vec::new(),
+            exit_code: None,
         }
     }
 
     pub fn add_object(&mut self, obj: MemoryObject) {
         self.owned_objects.push(obj);
+    }
+
+    pub fn exit(&mut self, code: i32) {
+        self.state = TaskState::Exited;
+        self.exit_code = Some(code);
+    }
+
+    pub fn set_parent(&mut self, parent_id: TaskId) {
+        self.parent = Some(parent_id);
+    }
+
+    pub fn add_child(&mut self, child_id: TaskId) {
+        self.children.push(child_id);
     }
 }
