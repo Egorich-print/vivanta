@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 use crate::memory::MemoryObject;
 use crate::scheduler::thread::ThreadId;
 use crate::vmm::AddressSpaceId;
+use crate::signal::SignalState;
 
 pub type TaskId = u64;
 
@@ -27,6 +28,7 @@ pub struct Task {
     pub parent: Option<TaskId>,
     pub children: Vec<TaskId>,
     pub exit_code: Option<i32>,
+    pub signals: SignalState,
 }
 
 impl Task {
@@ -40,6 +42,7 @@ impl Task {
             parent: None,
             children: Vec::new(),
             exit_code: None,
+            signals: SignalState::new(),
         }
     }
 

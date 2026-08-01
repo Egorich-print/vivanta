@@ -10,6 +10,7 @@ pub mod identity;
 pub mod memory;
 pub mod pmm;
 pub mod scheduler;
+pub mod signal;
 pub mod state;
 pub mod syscall;
 pub mod vmm;
