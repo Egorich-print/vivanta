@@ -172,6 +172,28 @@ pub fn maybe_reschedule(_frame: usize) {
 
     if !NEED_RESCHEDULE.load(Ordering::Relaxed) { return; }
     NEED_RESCHEDULE.store(false, Ordering::Relaxed);
+
+    let cur = ATOMIC_CURRENT.load(Ordering::Relaxed);
+    let nxt = find_next_ready(cur);
+    if nxt == cur { return; }
+
+    let current = runqueue_mut(cur);
+    let next = runqueue_ref(nxt);
+
+    current.state = ThreadState::Ready;
+    ATOMIC_CURRENT.store(nxt, Ordering::Relaxed);
+
+    if next.address_space != current.address_space {
+        let root = crate::vmm::address_space::lookup_root(next.address_space);
+        unsafe { vivanta_arch_api::mmu::activate_address_space(root); }
+    }
+
+    unsafe {
+        vivanta_arch_api::context::context_switch(
+            &mut runqueue_mut(cur).context,
+            runqueue_ref(nxt).context,
+        );
+    }
 }
 
 pub fn cleanup() {
