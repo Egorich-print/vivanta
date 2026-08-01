@@ -63,6 +63,14 @@ impl MappingSet {
         }
     }
 
+    pub fn get(&self, slot: usize) -> Option<&Mapping> {
+        if slot < self.count {
+            self.mappings[slot].as_ref()
+        } else {
+            None
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Mapping> {
         self.mappings[..self.count].iter().filter_map(|m| m.as_ref())
     }

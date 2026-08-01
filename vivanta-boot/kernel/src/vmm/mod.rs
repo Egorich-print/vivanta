@@ -10,7 +10,7 @@ pub mod mapping;
 pub mod faults;
 
 pub use address_space::{AddressSpace, AddressSpaceFlags, AddressSpaceId,
-                        KERNEL_ADDRESS_SPACE_ID,
+                        KERNEL_ADDRESS_SPACE_ID, VmmError,
                         kernel_address_space, init_kernel_address_space, register,
                         lookup_root, count};
 pub use mapping::{Mapping, MappingSet, VirtRange, MemoryObjectId};

@@ -1,5 +1,5 @@
-use vivanta_arch_api::mmu::RootPageTable;
-use super::mapping::MappingSet;
+use vivanta_arch_api::mmu::{RootPageTable, MappingFlags, PageTableAllocator};
+use super::mapping::{Mapping, MappingSet, VirtRange};
 
 pub type AddressSpaceId = u64;
 
@@ -33,6 +33,59 @@ impl AddressSpace {
     pub fn is_kernel(&self) -> bool {
         self.flags == AddressSpaceFlags::Kernel
     }
+
+    pub fn map_pages(
+        &mut self,
+        vaddr: u64,
+        paddr: u64,
+        size: u64,
+        flags: MappingFlags,
+        alloc: &mut dyn PageTableAllocator,
+        object_id: u64,
+    ) -> Result<(), VmmError> {
+        // SAFETY: caller ensures vaddr range is unmapped
+        unsafe {
+            vivanta_arch_api::mmu::mmu_map_object(self.root, vaddr, paddr, size, flags, alloc);
+        }
+        let range = VirtRange::new(vaddr, size);
+        let mapping = Mapping::new(range, object_id, flags);
+        self.mappings.insert(mapping)
+            .ok_or(VmmError::MappingTableFull)?;
+        Ok(())
+    }
+
+    pub fn unmap_pages(
+        &mut self,
+        vaddr: u64,
+        size: u64,
+        alloc: &mut dyn PageTableAllocator,
+    ) -> Result<(), VmmError> {
+        // SAFETY: caller ensures vaddr range is mapped
+        unsafe {
+            vivanta_arch_api::mmu::mmu_unmap(self.root, vaddr, size, alloc);
+        }
+        for slot in 0..self.mappings.len() {
+            if let Some(m) = self.mappings.get(slot) {
+                if m.virt_range.base == vaddr && m.virt_range.size == size {
+                    self.mappings.remove(slot);
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn query(&self, vaddr: u64) -> Option<&Mapping> {
+        self.mappings.iter().find(|m| {
+            vaddr >= m.virt_range.base && vaddr < m.virt_range.end()
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VmmError {
+    MappingTableFull,
+    NotMapped,
 }
 
 static mut ADDRESS_SPACES: [Option<AddressSpace>; MAX_ADDRESS_SPACES] = [
