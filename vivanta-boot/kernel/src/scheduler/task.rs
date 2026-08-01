@@ -1,3 +1,4 @@
+use alloc::vec;
 use alloc::vec::Vec;
 use crate::memory::MemoryObject;
 use crate::scheduler::thread::ThreadId;
@@ -19,8 +20,8 @@ pub enum TaskState {
 /// The Task is the owner; dropping it releases its resources.
 pub struct Task {
     pub task_id: TaskId,
-    pub thread_id: ThreadId,
     pub address_space: AddressSpaceId,
+    pub threads: Vec<ThreadId>,
     pub owned_objects: Vec<MemoryObject>,
     pub state: TaskState,
     pub parent: Option<TaskId>,
@@ -32,14 +33,18 @@ impl Task {
     pub fn new(task_id: TaskId, thread_id: ThreadId, address_space: AddressSpaceId) -> Self {
         Task {
             task_id,
-            thread_id,
             address_space,
+            threads: vec![thread_id],
             owned_objects: Vec::new(),
             state: TaskState::Created,
             parent: None,
             children: Vec::new(),
             exit_code: None,
         }
+    }
+
+    pub fn add_thread(&mut self, thread_id: ThreadId) {
+        self.threads.push(thread_id);
     }
 
     pub fn add_object(&mut self, obj: MemoryObject) {
