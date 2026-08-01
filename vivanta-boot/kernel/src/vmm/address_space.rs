@@ -80,6 +80,19 @@ impl AddressSpace {
             vaddr >= m.virt_range.base && vaddr < m.virt_range.end()
         })
     }
+
+    /// Change permissions on an existing mapping.
+    ///
+    /// TODO: Requires arch-api mmu_protect() for efficient permission change.
+    /// Currently deferred — unmap + remap with new flags as workaround.
+    pub fn protect(
+        &mut self,
+        _vaddr: u64,
+        _size: u64,
+        _new_flags: MappingFlags,
+    ) -> Result<(), VmmError> {
+        todo!("protect() requires arch-api mmu_protect()")
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
