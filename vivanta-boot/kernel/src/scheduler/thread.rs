@@ -31,4 +31,5 @@ pub struct Thread {
     pub entry: Option<ThreadEntry>,
     pub address_space: AddressSpaceId,
     pub level: ExecutionLevel,
+    pub sleep_until: Option<u64>,  // Tick count when to wake up
 }

@@ -45,6 +45,60 @@ pub fn thread_set_state(id: ThreadId, new_state: ThreadState) {
         .expect("thread_set_state failed");
 }
 
+/// Put current thread to sleep for `ticks` timer ticks.
+pub fn sleep(ticks: u64) {
+    let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
+    
+    let current_id = unsafe { 
+        let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
+        rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
+    };
+    
+    // Get current tick count from timer
+    let current_tick = unsafe { 
+        vivanta_arch_api::boot::timer::ticks()
+    };
+    
+    // Set sleep_until on thread
+    if let Some(t) = rq().get_mut(current_id) {
+        t.sleep_until = Some(current_tick + ticks);
+        t.state = ThreadState::Sleeping;
+    }
+    
+    // Yield to another thread
+    yield_now();
+}
+
+/// Wake up a sleeping thread.
+pub fn wake(id: ThreadId) {
+    let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
+    
+    if let Some(t) = rq().get_mut(id) {
+        if t.state == ThreadState::Sleeping {
+            t.sleep_until = None;
+            t.state = ThreadState::Ready;
+        }
+    }
+}
+
+/// Check for sleeping threads that should be woken up.
+/// Called from scheduler_tick().
+pub fn check_sleeping_threads() {
+    let current_tick = unsafe { 
+        vivanta_arch_api::boot::timer::ticks()
+    };
+    
+    let to_wake: Vec<ThreadId> = rq().iter()
+        .filter(|t| t.state == ThreadState::Sleeping)
+        .filter(|t| t.sleep_until.map_or(false, |until| current_tick >= until))
+        .map(|t| t.id)
+        .collect();
+    
+    for id in to_wake {
+        wake(id);
+    }
+}
+
 pub fn register(thread: Thread) {
     rq().insert(thread).expect("runqueue full");
 }
@@ -73,6 +127,7 @@ pub fn create_user_thread(
         entry: None,
         address_space,
         level: vivanta_arch_api::context::ExecutionLevel::User,
+        sleep_until: None,
     };
     register(thread);
     thread_set_state(id, ThreadState::Ready);
@@ -108,6 +163,7 @@ pub fn create_kernel_thread(
         entry: Some(entry),
         address_space,
         level: vivanta_arch_api::context::ExecutionLevel::Kernel,
+        sleep_until: None,
     };
     register(thread);
     thread_set_state(id, ThreadState::Ready);
@@ -172,6 +228,7 @@ pub fn yield_now() {
 }
 
 pub fn schedule_tick() {
+    check_sleeping_threads();
     NEED_RESCHEDULE.store(true, Ordering::Relaxed);
 }
 
@@ -282,6 +339,7 @@ pub fn init_boot() {
             entry: None,
             address_space: kernel_as,
             level: vivanta_arch_api::context::ExecutionLevel::Kernel,
+            sleep_until: None,
         }).expect("Failed to insert boot thread");
         
         BOOT_THREAD_ID = boot_id;
@@ -305,6 +363,7 @@ pub fn init_boot() {
             entry: None,
             address_space: kernel_as,
             level: vivanta_arch_api::context::ExecutionLevel::Kernel,
+            sleep_until: None,
         }).expect("Failed to insert idle thread");
         
         IDLE_THREAD_ID = idle_id;
