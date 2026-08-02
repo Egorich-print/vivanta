@@ -16,14 +16,17 @@ pub struct PageFlags {
     pub executable: bool,
     pub user: bool,
     pub privileged_executable: bool,
+    pub device: bool,
 }
 
 impl PageFlags {
-    pub const READ_ONLY: Self = Self { writable: false, executable: false, user: false, privileged_executable: true };
-    pub const READ_WRITE: Self = Self { writable: true, executable: false, user: false, privileged_executable: true };
-    pub const READ_WRITE_EXEC: Self = Self { writable: true, executable: true, user: false, privileged_executable: true };
-    pub const USER_READ_WRITE: Self = Self { writable: true, executable: false, user: true, privileged_executable: false };
-    pub const USER_READ_WRITE_EXEC: Self = Self { writable: true, executable: true, user: true, privileged_executable: false };
+    pub const READ_ONLY: Self = Self { writable: false, executable: false, user: false, privileged_executable: true, device: false };
+    pub const READ_WRITE: Self = Self { writable: true, executable: false, user: false, privileged_executable: true, device: false };
+    pub const READ_WRITE_EXEC: Self = Self { writable: true, executable: true, user: false, privileged_executable: true, device: false };
+    pub const USER_READ_WRITE: Self = Self { writable: true, executable: false, user: true, privileged_executable: false, device: false };
+    pub const USER_READ_WRITE_EXEC: Self = Self { writable: true, executable: true, user: true, privileged_executable: false, device: false };
+    pub const DEVICE: Self = Self { writable: true, executable: false, user: false, privileged_executable: false, device: true };
+    pub const USER_DEVICE: Self = Self { writable: true, executable: false, user: true, privileged_executable: false, device: true };
 }
 
 fn table_desc(phys: u64) -> u64 {
@@ -31,7 +34,9 @@ fn table_desc(phys: u64) -> u64 {
 }
 
 fn block_or_page_desc(phys: u64, flags: PageFlags, is_page: bool) -> u64 {
-    let mut d = DESC_VALID | DESC_AF | DESC_SH_INNER | DESC_ATTRIDX_NORMAL;
+    let attr_idx = if flags.device { DESC_ATTRIDX_DEVICE } else { DESC_ATTRIDX_NORMAL };
+    let sh = if flags.device { DESC_SH_NON } else { DESC_SH_INNER };
+    let mut d = DESC_VALID | DESC_AF | sh | attr_idx;
     if is_page {
         d |= DESC_TABLE;
     }
@@ -141,14 +146,30 @@ impl PageTableGuard {
             | (0b00 << 14)
             | (3u64 << 32);
         asm!("msr tcr_el1, {}", in(reg) tcr);
+        core::ptr::write_volatile(0x0900_0000 as *mut u32, b'1' as u32);
+
         asm!("msr ttbr0_el1, {}", in(reg) self.root);
+        core::ptr::write_volatile(0x0900_0000 as *mut u32, b'2' as u32);
 
         asm!("dsb ish");
         asm!("isb");
+        core::ptr::write_volatile(0x0900_0000 as *mut u32, b'3' as u32);
 
-        let sctlr: u64 = (1 << 0) | (1 << 2) | (1 << 12);
+        let mut sctlr: u64;
+        asm!("mrs {}, sctlr_el1", out(reg) sctlr);
+        sctlr |= (1 << 0) | (1 << 2) | (1 << 12);
+        // Enable MMU + sync
         asm!("msr sctlr_el1, {}", in(reg) sctlr);
+        asm!("dsb sy");
         asm!("isb");
+        // Write to known RAM address (should be identity-mapped)
+        let ram_test = 0x4020_0000u64;
+        let test_val = 0xDEAD_BEEFu64;
+        core::ptr::write_volatile(ram_test as *mut u64, test_val);
+        let read_back = core::ptr::read_volatile(ram_test as *const u64);
+        // Write UART: '4' if read matches, 'X' if mismatch
+        let ch = if read_back == test_val { b'4' } else { b'X' };
+        core::ptr::write_volatile(0x0900_0000 as *mut u32, ch as u32);
     }
 
     pub fn root_addr(&self) -> u64 {
@@ -249,6 +270,86 @@ pub unsafe extern "Rust" fn mmu_unmap(
         offset += 0x1000;
     }
     tlbi_range(vaddr, size);
+}
+
+// ---------------------------------------------------------------------------
+// Debug: dump page table entries for critical addresses
+// ---------------------------------------------------------------------------
+
+/// Walk the page table at `root` for address `va` and print descriptors.
+/// Must be called BEFORE mmu_activate (uses early identity map for reads).
+pub unsafe fn dump_walk(root: u64, va: u64, label: &str) {
+    let l1_idx = ((va >> 30) & 0x1FF) as usize;
+    let l2_idx = ((va >> 21) & 0x1FF) as usize;
+    let l3_idx = ((va >> 12) & 0x1FF) as usize;
+    let page_offset = va & 0xFFF;
+
+    let l1_entry = core::ptr::read_volatile((root + (l1_idx as u64) * 8) as *const u64);
+    let l1_valid = l1_entry & DESC_VALID != 0;
+    let l1_table = l1_entry & DESC_VALID | DESC_TABLE != 0;
+    vivanta_boot_common::println!("  {} VA={:#x}: L1[{}]={:#x} valid={} table={}",
+        label, va, l1_idx, l1_entry, l1_valid, l1_entry & DESC_TABLE != 0);
+
+    if !l1_valid || l1_entry & DESC_TABLE == 0 {
+        return;
+    }
+    let l2_table = l1_entry & ADDR_MASK;
+
+    let l2_entry = core::ptr::read_volatile((l2_table + (l2_idx as u64) * 8) as *const u64);
+    let l2_valid = l2_entry & DESC_VALID != 0;
+    let l2_is_table = l2_entry & DESC_TABLE != 0;
+    vivanta_boot_common::println!("    L2[{}]={:#x} valid={} table={}", l2_idx, l2_entry, l2_valid, l2_is_table);
+
+    if !l2_valid { return; }
+
+    if !l2_is_table {
+        // L2 block — maps 2 MiB
+        let block_pa = l2_entry & ADDR_MASK_BLOCK;
+        vivanta_boot_common::println!("    -> BLOCK PA={:#x} (offset={:#x})", block_pa | page_offset, page_offset);
+        return;
+    }
+
+    let l3_table = l2_entry & ADDR_MASK;
+    let l3_entry = core::ptr::read_volatile((l3_table + (l3_idx as u64) * 8) as *const u64);
+    let l3_valid = l3_entry & DESC_VALID != 0;
+    vivanta_boot_common::println!("    L3[{}]={:#x} valid={}", l3_idx, l3_entry, l3_valid);
+
+    if l3_valid {
+        let page_pa = l3_entry & ADDR_MASK;
+        vivanta_boot_common::println!("    -> PAGE PA={:#x}", page_pa | page_offset);
+    }
+}
+
+/// Dump page table for several critical addresses.
+#[no_mangle]
+pub unsafe extern "Rust" fn dump_critical_tables(root: u64) {
+    vivanta_boot_common::println!("=== Page Table Dump (root={:#x}) ===", root);
+
+    // Current PC (roughly where we are right now)
+    let pc: u64;
+    core::arch::asm!("adr {}, .", out(reg) pc);
+    dump_walk(root, pc, "PC");
+
+    // Kernel start / end
+    extern "C" { static __kernel_start: u8; static __stack_top: u8; }
+    let ks = &__kernel_start as *const u8 as u64;
+    let ke = &__stack_top as *const u8 as u64;
+    dump_walk(root, ks, "kernel_start");
+    dump_walk(root, ke, "stack_top");
+
+    // VBAR_EL1
+    let vbar: u64;
+    core::arch::asm!("mrs {}, vbar_el1", out(reg) vbar);
+    dump_walk(root, vbar, "VBAR_EL1");
+
+    // RAM start
+    dump_walk(root, 0x4000_0000, "RAM_START");
+
+    // User code VA
+    dump_walk(root, 0x5E00_0000, "USER_CODE");
+
+    // UART
+    dump_walk(root, 0x0900_0000, "UART");
 }
 
 /// Flush D-cache (to PoC) and invalidate I-cache (to PoU) for a virtual address range.

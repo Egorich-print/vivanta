@@ -84,10 +84,11 @@ pub unsafe extern "Rust" fn mmu_init(alloc_ctx: *mut (), alloc: AllocFn) -> usiz
 #[no_mangle]
 pub unsafe extern "Rust" fn mmu_map_range(_pt: usize, vaddr: u64, paddr: u64, size: u64, user: bool) {
     let builder = BOOT_PT.as_mut().unwrap();
+    // MMIO is always device memory — not cached, not reordered
     let flags = if user {
-        PageFlags::USER_READ_WRITE
+        PageFlags::USER_DEVICE
     } else {
-        PageFlags::READ_WRITE
+        PageFlags::DEVICE
     };
     builder.map(vaddr, paddr, size, flags);
 }
@@ -102,7 +103,11 @@ pub unsafe extern "Rust" fn mmu_map_ram(_pt: usize, vaddr: u64, paddr: u64, size
 pub unsafe extern "Rust" fn mmu_activate(_pt: usize) {
     let builder = BOOT_PT.take().unwrap();
     let guard = builder.finish();
+    // UART poke before MMU switch
+    core::ptr::write_volatile(0x0900_0000 as *mut u32, b'A' as u32);
     guard.activate();
+    // UART poke after MMU switch
+    core::ptr::write_volatile(0x0900_0000 as *mut u32, b'B' as u32);
 }
 
 #[no_mangle]

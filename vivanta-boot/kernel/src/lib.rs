@@ -233,6 +233,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     // ------- Enable MMU ----------------------------------------------------
     println!();
     println!("Enabling MMU...");
+    // Debug: dump page table entries before MMU switch
+    vivanta_arch_api::boot::mmu::dump_critical_tables(pt as u64);
+    println!("  About to activate...");
     vivanta_arch_api::boot::mmu::mmu_activate(pt);
     // UART poke to verify we survive MMU switch
     unsafe { core::ptr::write_volatile(0x0900_0000 as *mut u32, b'!' as u32); }

@@ -36,4 +36,8 @@ extern "Rust" {
     /// Run MMU smoke tests on the currently active page table.
     /// Panics on failure.
     pub fn mmu_self_test();
+
+    /// Debug: dump page table entries for critical addresses.
+    /// Must be called BEFORE mmu_activate.
+    pub fn dump_critical_tables(root: u64);
 }
