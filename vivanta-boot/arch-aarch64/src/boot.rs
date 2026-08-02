@@ -7,7 +7,7 @@ use vivanta_arch_api::boot::mmu::{AllocFn, AllocCtx};
 use vivanta_arch_api::pmm::PhysFrame;
 use vivanta_boot_common::fdt::FdtScanner;
 
-use crate::mmu::{PageTableBuilder, PageFlags};
+use crate::mmu::{PageTableBuilder, PageFlags, PageTableGuard};
 use crate::interrupts::Gic;
 
 // ---------------------------------------------------------------------------
@@ -100,9 +100,10 @@ pub unsafe extern "Rust" fn mmu_map_ram(_pt: usize, vaddr: u64, paddr: u64, size
 }
 
 #[no_mangle]
-pub unsafe extern "Rust" fn mmu_activate(_pt: usize) {
-    let builder = BOOT_PT.take().unwrap();
-    let guard = builder.finish();
+pub unsafe extern "Rust" fn mmu_activate(pt: usize) {
+    // Use the root address passed as parameter (kernel page table),
+    // NOT BOOT_PT which was overwritten by UserAS1/UserAS2 builds
+    let guard = PageTableGuard { root: pt as u64 };
     // UART poke before MMU switch
     core::ptr::write_volatile(0x0900_0000 as *mut u32, b'A' as u32);
     guard.activate();

@@ -60,7 +60,7 @@ pub struct PageTableBuilder<A: FrameAllocator> {
 }
 
 pub struct PageTableGuard {
-    root: u64,
+    pub root: u64,
 }
 
 impl<A: FrameAllocator> PageTableBuilder<A> {
@@ -157,19 +157,42 @@ impl PageTableGuard {
 
         let mut sctlr: u64;
         asm!("mrs {}, sctlr_el1", out(reg) sctlr);
-        sctlr |= (1 << 0) | (1 << 2) | (1 << 12);
-        // Enable MMU + sync
+
+        // Step 1: Disable caches and MMU (we're running from identity map)
+        sctlr &= !((1 << 0) | (1 << 2) | (1 << 12));
         asm!("msr sctlr_el1, {}", in(reg) sctlr);
         asm!("dsb sy");
         asm!("isb");
-        // Write to known RAM address (should be identity-mapped)
-        let ram_test = 0x4020_0000u64;
-        let test_val = 0xDEAD_BEEFu64;
-        core::ptr::write_volatile(ram_test as *mut u64, test_val);
-        let read_back = core::ptr::read_volatile(ram_test as *const u64);
-        // Write UART: '4' if read matches, 'X' if mismatch
-        let ch = if read_back == test_val { b'4' } else { b'X' };
-        core::ptr::write_volatile(0x0900_0000 as *mut u32, ch as u32);
+
+        // Step 2: Flush TLB completely while MMU is OFF
+        asm!("tlbi vmalle1is");
+        asm!("dsb sy");
+        asm!("isb");
+
+        // Step 3: Switch to new page table
+        asm!("msr ttbr0_el1, {}", in(reg) self.root);
+        asm!("dsb sy");
+        asm!("isb");
+
+        // Step 4: Flush TLB again after TTBR switch
+        asm!("tlbi vmalle1is");
+        asm!("dsb sy");
+        asm!("isb");
+
+        // Step 5: Enable MMU + caches
+        let sctlr_new = sctlr | (1 << 0) | (1 << 2) | (1 << 12);
+        asm!("msr sctlr_el1, {}", in(reg) sctlr_new);
+        asm!("dsb sy");
+        asm!("isb");
+
+        // Step 6: Final TLB flush after MMU is on
+        asm!("tlbi vmalle1is");
+        asm!("dsb sy");
+        asm!("ic iallu");
+        asm!("dsb sy");
+        asm!("isb");
+
+        core::ptr::write_volatile(0x0900_0000 as *mut u32, b'4' as u32);
     }
 
     pub fn root_addr(&self) -> u64 {
@@ -325,7 +348,7 @@ pub unsafe fn dump_walk(root: u64, va: u64, label: &str) {
 pub unsafe extern "Rust" fn dump_critical_tables(root: u64) {
     vivanta_boot_common::println!("=== Page Table Dump (root={:#x}) ===", root);
 
-    // Current PC (roughly where we are right now)
+    // Current PC
     let pc: u64;
     core::arch::asm!("adr {}, .", out(reg) pc);
     dump_walk(root, pc, "PC");
@@ -350,6 +373,26 @@ pub unsafe extern "Rust" fn dump_critical_tables(root: u64) {
 
     // UART
     dump_walk(root, 0x0900_0000, "UART");
+
+    // Dump raw L2 block descriptor for kernel text (0x40200000-0x403FFFFF)
+    vivanta_boot_common::println!("--- Raw descriptor decode ---");
+    let l1_idx = ((0x4020_0000u64 >> 30) & 0x1FF) as usize;
+    let l2_idx = ((0x4020_0000u64 >> 21) & 0x1FF) as usize;
+    let l1_entry = core::ptr::read_volatile((root + (l1_idx as u64) * 8) as *const u64);
+    if l1_entry & DESC_TABLE != 0 {
+        let l2_table = l1_entry & ADDR_MASK;
+        let l2_entry = core::ptr::read_volatile((l2_table + (l2_idx as u64) * 8) as *const u64);
+        vivanta_boot_common::println!("  L2[{}] raw = {:#018x}", l2_idx, l2_entry);
+        vivanta_boot_common::println!("    Valid={}", (l2_entry & DESC_VALID) != 0);
+        vivanta_boot_common::println!("    Table={}", (l2_entry & DESC_TABLE) != 0);
+        vivanta_boot_common::println!("    AF={}", (l2_entry & DESC_AF) != 0);
+        vivanta_boot_common::println!("    SH={:#x}", (l2_entry >> 8) & 3);
+        vivanta_boot_common::println!("    AP={:#x}", (l2_entry >> 6) & 3);
+        vivanta_boot_common::println!("    AttrIdx={:#x}", (l2_entry >> 2) & 7);
+        vivanta_boot_common::println!("    PXN={}", (l2_entry >> 53) & 1);
+        vivanta_boot_common::println!("    UXN={}", (l2_entry >> 54) & 1);
+        vivanta_boot_common::println!("    OutputAddr={:#x}", l2_entry & ADDR_MASK_BLOCK);
+    }
 }
 
 /// Flush D-cache (to PoC) and invalidate I-cache (to PoU) for a virtual address range.

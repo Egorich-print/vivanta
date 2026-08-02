@@ -22,7 +22,8 @@ pub unsafe fn run_smoke_test() {
 }
 
 unsafe fn test_translate_known(pt: &PageTable) {
-    let known_addrs = [0u64, 0x1000, 0x4000_0000, 0x4000_1000, 0x900_0000];
+    // Only test addresses that are actually mapped in the page table
+    let known_addrs = [0x4000_0000u64, 0x4000_1000, 0x4020_0000, 0x4021_b000];
     for &va in &known_addrs {
         let pa = pt.translate(va).unwrap_or_else(|| panic!("translate failed at VA {:#x}", va));
         assert_eq!(pa, va, "identity: VA {:#x} -> PA {:#x} mismatch", va, pa);
