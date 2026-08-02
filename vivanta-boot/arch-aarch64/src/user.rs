@@ -19,10 +19,10 @@ core::arch::global_asm!(
     ".global eret_to_user_stub",
     ".balign 16",
     "eret_to_user_stub:",
-    // SP_EL1 currently = kernel_stack_top (set by context_switch_asm).
-    // Adjust SP to point to the synthetic frame base.
+    // SP_EL1 = kernel_stack_top (set by context_switch_asm)
+    // Adjust SP to point to ExceptionFrame base
     "sub   sp, sp, #(34 * 8)",
-    // Load system registers using x0 as temp, then restore x0 from frame.
+    // Load system registers from ExceptionFrame
     "ldr   x0, [sp, #(31 * 8)]",
     "msr   sp_el0, x0",
     "ldr   x0, [sp, #(32 * 8)]",
@@ -155,32 +155,7 @@ pub unsafe extern "C" fn el0_sync_handler(
 ) {
     let ec = (esr >> 26) & 0x3f;
     if ec == 0b010101 {
-        let base = frame.elr & !0xFFF;
-        let w0 = unsafe { *((base + 0) as *const u32) };
-        let w1 = unsafe { *((base + 4) as *const u32) };
-        let w2 = unsafe { *((base + 8) as *const u32) };
-        let w3 = unsafe { *((base + 12) as *const u32) };
-        let w4 = unsafe { *((base -4) as *const u32) };
-        let elr_direct: u64;
-        let ttbr0: u64;
-        unsafe {
-            core::arch::asm!("mrs {}, elr_el1", out(reg) elr_direct);
-            core::arch::asm!("mrs {}, ttbr0_el1", out(reg) ttbr0);
-        }
-        let l1_idx = ((frame.elr >> 30) & 0x1FF) as usize;
-        let l2_idx = ((frame.elr >> 21) & 0x1FF) as usize;
-        let l3_idx = ((frame.elr >> 12) & 0x1FF) as usize;
-        let l1e = unsafe { *((ttbr0 + (l1_idx as u64 * 8)) as *const u64) };
-        let l2t = l1e & 0x0000_FFFF_FFFF_F000;
-        let l2e = unsafe { *((l2t + (l2_idx as u64 * 8)) as *const u64) };
-        let l3t = l2e & 0x0000_FFFF_FFFF_F000;
-        let l3e = unsafe { *((l3t + (l3_idx as u64 * 8)) as *const u64) };
-        let stack_elr = unsafe { *(frame as *const ExceptionFrame as *const u64).add(32) };
-        let elr_insn = unsafe { *((frame.elr & !3) as *const u32) };
-        vivanta_boot_common::println!("  SVC x8={} x0={} elr={:#x}(direct={:#x},stack={:#x},insn={:#x}) L3E={:#x}",
-            frame.x[8], frame.x[0], frame.elr, elr_direct, stack_elr, elr_insn, l3e);
-        vivanta_boot_common::println!("    code=[{:#x} {:#x} {:#x} {:#x}] prev=[{:#x}]",
-            w0, w1, w2, w3, w4);
+        // SVC from EL0 — dispatch syscall
         let ret = syscall_dispatch(
             frame.x[8],
             frame.x[0], frame.x[1], frame.x[2],

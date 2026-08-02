@@ -1,8 +1,10 @@
 use vivanta_boot_common::println;
-use crate::syscall;
-use vivanta_arch_api::context::ArchContext;
 
-pub const SYS_YIELD: u64 = 0;
+pub const SYS_READ: u64 = 0;
+pub const SYS_WRITE: u64 = 1;
+pub const SYS_EXIT: u64 = 2;
+pub const SYS_YIELD: u64 = 3;
+pub const SYS_MMAP: u64 = 4;
 
 #[no_mangle]
 pub unsafe extern "Rust" fn syscall_dispatch(
@@ -10,28 +12,43 @@ pub unsafe extern "Rust" fn syscall_dispatch(
     arg0: u64,
     arg1: u64,
     arg2: u64,
-    arg3: u64,
-    arg4: u64,
-    arg5: u64,
+    _arg3: u64,
+    _arg4: u64,
+    _arg5: u64,
 ) -> u64 {
     match num {
-        0 => { // SYS_READ
-            // TODO: implement proper dispatch
+        SYS_READ => {
+            // Stub: return 0
             0
         }
-        1 => { // SYS_WRITE
-            // TODO: implement proper dispatch
-            arg2 // return count as bytes written
+        SYS_WRITE => {
+            // arg0 = fd, arg1 = buf_ptr, arg2 = count
+            let fd = arg0;
+            let buf = arg1 as *const u8;
+            let count = arg2 as usize;
+            if fd == 1 || fd == 2 {
+                // stdout/stderr: write to UART
+                for i in 0..count {
+                    let byte = *buf.add(i);
+                    // Direct PL011 UART write
+                    let uart = 0x0900_0000 as *mut u32;
+                    while core::ptr::read_volatile(uart.add(0x18 / 4)) & (1 << 5) != 0 {}
+                    core::ptr::write_volatile(uart, byte as u32);
+                }
+                count as u64
+            } else {
+                -1i64 as u64
+            }
         }
-        2 => { // SYS_EXIT
-            // TODO: implement proper exit
-            loop { core::arch::asm!("wfi") }
+        SYS_EXIT => {
+            println!("  syscall: exit({})", arg0);
+            crate::scheduler::thread_exit();
         }
-        3 => { // SYS_YIELD
+        SYS_YIELD => {
             crate::scheduler::yield_now();
             0
         }
-        4 => { // SYS_MMAP
+        SYS_MMAP => {
             -12i64 as u64 // -ENOMEM
         }
         _ => {

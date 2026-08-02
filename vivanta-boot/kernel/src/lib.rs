@@ -201,7 +201,13 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let alloc_ctx_root: *mut () = mrm_ptr as *mut ();
     let build_root = |label: &str, extra_va: u64, extra_pa: u64| -> RootPageTable {
         let rpt = vivanta_arch_api::boot::mmu::mmu_init(alloc_ctx_root, boot_alloc_frame);
-        vivanta_arch_api::boot::mmu::mmu_map_ram(rpt, region.start, region.start, region.end - region.start);
+        // Map ALL usable RAM (not just available region) — kernel code/stack must be accessible
+        for r in hardware.memory_map.regions() {
+            use vivanta_boot_common::MemoryRegionKind;
+            if r.kind == MemoryRegionKind::Usable {
+                vivanta_arch_api::boot::mmu::mmu_map_ram(rpt, r.start, r.start, r.size);
+            }
+        }
         for mmio in hardware.mmio_regions {
             vivanta_arch_api::boot::mmu::mmu_map_range(
                 rpt, mmio.base, mmio.base, mmio.size, mmio.kind.is_user_accessible(),
@@ -233,13 +239,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     // ------- Enable MMU ----------------------------------------------------
     println!();
     println!("Enabling MMU...");
-    // Debug: dump page table entries before MMU switch
-    vivanta_arch_api::boot::mmu::dump_critical_tables(pt as u64);
-    println!("  About to activate...");
     vivanta_arch_api::boot::mmu::mmu_activate(pt);
-    // UART poke to verify we survive MMU switch
-    unsafe { core::ptr::write_volatile(0x0900_0000 as *mut u32, b'!' as u32); }
-    vivanta_arch_api::boot::mmu::flush_user_code_icache();
     println!("MMU enabled successfully.");
     println!("MMU self-test:");
     vivanta_arch_api::boot::mmu::mmu_self_test();

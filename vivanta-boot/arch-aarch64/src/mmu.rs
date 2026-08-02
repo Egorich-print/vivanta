@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 use vivanta_arch_api::pmm::{FrameAllocator, PhysFrame};
+use crate::barrier;
 use crate::paging::descriptor::*;
 use crate::paging::walker::*;
 
@@ -114,6 +115,8 @@ impl<A: FrameAllocator> PageTableBuilder<A> {
 
     fn write(&self, table: u64, idx: usize, val: u64) {
         unsafe { core::ptr::write_volatile((table + idx as u64 * 8) as *mut u64, val) }
+        // Full system barrier — required for page table walker visibility
+        barrier::dsb_sy();
     }
 
     fn table_or_create(&mut self, table: u64, idx: usize) -> u64 {
@@ -137,8 +140,10 @@ impl PageTableGuard {
     pub unsafe fn activate(&self) {
         use core::arch::asm;
 
+        // 1. Set memory attributes
         asm!("msr mair_el1, {}", in(reg) 0x44_FF_u64);
 
+        // 2. Set translation control
         let tcr: u64 = (25)
             | (0b01 << 8)
             | (0b01 << 10)
@@ -146,53 +151,26 @@ impl PageTableGuard {
             | (0b00 << 14)
             | (3u64 << 32);
         asm!("msr tcr_el1, {}", in(reg) tcr);
-        core::ptr::write_volatile(0x0900_0000 as *mut u32, b'1' as u32);
 
-        asm!("msr ttbr0_el1, {}", in(reg) self.root);
-        core::ptr::write_volatile(0x0900_0000 as *mut u32, b'2' as u32);
-
-        asm!("dsb ish");
+        // 3. Flush TLB (from early identity map)
+        asm!("tlbi vmalle1is");
+        asm!("dsb sy");
         asm!("isb");
-        core::ptr::write_volatile(0x0900_0000 as *mut u32, b'3' as u32);
 
+        // 4. Set new page table
+        asm!("msr ttbr0_el1, {}", in(reg) self.root);
+        asm!("dsb sy");
+        asm!("isb");
+
+        // 5. Enable MMU + caches
         let mut sctlr: u64;
         asm!("mrs {}, sctlr_el1", out(reg) sctlr);
-
-        // Step 1: Disable caches and MMU (we're running from identity map)
-        sctlr &= !((1 << 0) | (1 << 2) | (1 << 12));
+        sctlr |= (1 << 0) | (1 << 2) | (1 << 12);
         asm!("msr sctlr_el1, {}", in(reg) sctlr);
+
+        // 6. Sync
         asm!("dsb sy");
         asm!("isb");
-
-        // Step 2: Flush TLB completely while MMU is OFF
-        asm!("tlbi vmalle1is");
-        asm!("dsb sy");
-        asm!("isb");
-
-        // Step 3: Switch to new page table
-        asm!("msr ttbr0_el1, {}", in(reg) self.root);
-        asm!("dsb sy");
-        asm!("isb");
-
-        // Step 4: Flush TLB again after TTBR switch
-        asm!("tlbi vmalle1is");
-        asm!("dsb sy");
-        asm!("isb");
-
-        // Step 5: Enable MMU + caches
-        let sctlr_new = sctlr | (1 << 0) | (1 << 2) | (1 << 12);
-        asm!("msr sctlr_el1, {}", in(reg) sctlr_new);
-        asm!("dsb sy");
-        asm!("isb");
-
-        // Step 6: Final TLB flush after MMU is on
-        asm!("tlbi vmalle1is");
-        asm!("dsb sy");
-        asm!("ic iallu");
-        asm!("dsb sy");
-        asm!("isb");
-
-        core::ptr::write_volatile(0x0900_0000 as *mut u32, b'4' as u32);
     }
 
     pub fn root_addr(&self) -> u64 {

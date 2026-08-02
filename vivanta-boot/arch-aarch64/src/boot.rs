@@ -101,14 +101,10 @@ pub unsafe extern "Rust" fn mmu_map_ram(_pt: usize, vaddr: u64, paddr: u64, size
 
 #[no_mangle]
 pub unsafe extern "Rust" fn mmu_activate(pt: usize) {
-    // Use the root address passed as parameter (kernel page table),
-    // NOT BOOT_PT which was overwritten by UserAS1/UserAS2 builds
+    // Architectural invariant: use ONLY the passed root address.
+    // Never use BOOT_PT or any other hidden state.
     let guard = PageTableGuard { root: pt as u64 };
-    // UART poke before MMU switch
-    core::ptr::write_volatile(0x0900_0000 as *mut u32, b'A' as u32);
     guard.activate();
-    // UART poke after MMU switch
-    core::ptr::write_volatile(0x0900_0000 as *mut u32, b'B' as u32);
 }
 
 #[no_mangle]
@@ -215,6 +211,16 @@ pub unsafe extern "Rust" fn mmu_map_user_pages(
     if code_len < 4096 {
         core::ptr::write_bytes((code_pa as *mut u8).add(code_len), 0u8, 4096 - code_len);
     }
+    // Clean data cache for the frame before mapping it as executable.
+    // The frame is identity-mapped in the early page table (PA == VA),
+    // so dc cvau with PA cleans the correct cache line.
+    let mut addr = code_pa;
+    let end = code_pa + 4096;
+    while addr < end {
+        core::arch::asm!("dc cvau, {}", in(reg) addr);
+        addr += 64;
+    }
+    core::arch::asm!("dsb sy");
     builder.map(code_va, code_pa, 4096, PageFlags::USER_READ_WRITE_EXEC);
     // Allocate and map user stack page
     let stack_pa = builder.alloc_frame().expect("mmu_map_user_pages: no frame for stack").addr;
