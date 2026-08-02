@@ -187,21 +187,28 @@ pub fn create_kernel_thread(
 // ---------------------------------------------------------------------------
 
 pub fn yield_now() {
+    vivanta_boot_common::println!("  yield_now: enter");
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
-    
-    let current_id = unsafe { 
+
+    let current_id = unsafe {
         let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
         rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
     };
-    
+
     let next_id = match rq().find_next_ready(current_id, true) {
         Some(id) => id,
-        None => return, // No other thread to run
+        None => {
+            vivanta_boot_common::println!("  yield_now: no next thread");
+            return;
+        }
     };
-    
+
     if current_id == next_id {
+        vivanta_boot_common::println!("  yield_now: same thread");
         return;
     }
+
+    vivanta_boot_common::println!("  yield_now: {} -> {}", current_id, next_id);
     
     // Set current thread to Ready
     thread_set_state(current_id, ThreadState::Ready);
@@ -211,14 +218,16 @@ pub fn yield_now() {
     ATOMIC_CURRENT.store(next_idx, Ordering::Relaxed);
     
     // Activate address space if different
-    let next = rq().get(next_id).unwrap();
-    let current = rq().get(current_id).unwrap();
-    
-    if next.address_space != current.address_space {
+    let next_as = rq().get(next_id).unwrap().address_space;
+    let current_as = rq().get(current_id).unwrap().address_space;
+
+    vivanta_boot_common::println!("  yield: {} -> {}, as: {} -> {}", current_id, next_id, current_as, next_as);
+
+    if next_as != current_as {
         if cfg!(feature = "trace-address-space") {
             vivanta_boot_common::println!("  [AS switch] thread {} → {}", current_id, next_id);
         }
-        let root = crate::vmm::address_space::lookup_root(next.address_space);
+        let root = crate::vmm::address_space::lookup_root(next_as);
         unsafe { vivanta_arch_api::mmu::activate_address_space(root); }
     }
     

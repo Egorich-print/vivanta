@@ -232,6 +232,10 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let root1 = build_root("UserAS1", 0, 0);
     let root2 = build_root("UserAS2", 0, 0);
 
+    // Debug: dump UserAS1 page table for UART address
+    println!("  UserAS1 UART mapping check:");
+    unsafe { vivanta_arch_api::boot::mmu::dump_critical_tables(root1.0 as u64); }
+
     let user_as1 = vmm::register(root1, vmm::AddressSpaceFlags::User);
     let _user_as2 = vmm::register(root2, vmm::AddressSpaceFlags::User);
     println!("  Address spaces: {} total", vmm::count());

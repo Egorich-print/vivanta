@@ -114,8 +114,10 @@ impl<A: FrameAllocator> PageTableBuilder<A> {
     }
 
     fn write(&self, table: u64, idx: usize, val: u64) {
-        unsafe { core::ptr::write_volatile((table + idx as u64 * 8) as *mut u64, val) }
-        // Full system barrier — required for page table walker visibility
+        let addr = table + idx as u64 * 8;
+        unsafe { core::ptr::write_volatile(addr as *mut u64, val) }
+        // Clean data cache to PoC — ensures walker sees the entry
+        unsafe { core::arch::asm!("dc civac, {}", in(reg) addr) }
         barrier::dsb_sy();
     }
 
@@ -184,8 +186,12 @@ impl PageTableGuard {
 #[no_mangle]
 pub unsafe extern "Rust" fn activate_address_space(root: vivanta_arch_api::mmu::RootPageTable) {
     let ttbr = root.0 as u64;
+    // UART poke to verify we're switching address space
+    core::ptr::write_volatile(0x0900_0000 as *mut u32, b'S' as u32);
     core::arch::asm!("msr TTBR0_EL1, {}", in(reg) ttbr);
     tlbi_all_sync();
+    core::arch::asm!("tlbi alle1is");
+    core::arch::asm!("dsb sy");
     core::arch::asm!("ic ialluis");
     core::arch::asm!("dsb sy; isb");
 }
