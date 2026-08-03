@@ -342,8 +342,8 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     // yield_now → context_switch → eret_to_user_stub → EL0 → SVC → handler → eret → EL0
     scheduler::yield_now();
     // After yield_now returns, the boot thread has been rescheduled.
-    // The user thread is in an infinite loop in EL0 (b . after second SVC).
-    println!("Boot thread resumed (user thread still looping in EL0)");
+    // The user thread ran write(1, "Hello, Vivanta!") then exit(0).
+    println!("Boot thread resumed (user thread exited cleanly)");
     loop {
         scheduler::yield_now();
     }

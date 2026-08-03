@@ -64,6 +64,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "vivanta-mmu-test"
+version = "0.1.0"
+
+[[package]]
 name = "vivanta-platform-allwinner-h616"
 version = "0.1.0"
 dependencies = [

@@ -1,11 +1,13 @@
 # Vivanta Status
 
-> Last updated: 2026-08-01
+> Last updated: 2026-08-03
 
 ## Current milestone
 
 M2 — Virtual Memory (completed)
-M3 — Process Model (in progress)
+M3 — Process Model (completed)
+M4 — First User-Space (in progress)
+M4.5 — First user-space hello world (completed 2026-08-03)
 
 ## Kernel
 
@@ -20,6 +22,7 @@ M3 — Process Model (in progress)
 - Process Model — ✅ (Task lifecycle, parent-child, process table)
 - Signals — ✅ (minimal: SIGHUP, SIGINT, SIGKILL, SIGSEGV, SIGTERM)
 - Syscalls — ✅ (SVC handler: read, write, exit, yield, mmap)
+- User threads — ✅ (Task 1 in EL0: write + exit syscalls work end-to-end)
 
 ## Architecture
 
@@ -34,6 +37,7 @@ M3 — Process Model (in progress)
 | Identity | ✅ RuntimeIdentity, BootIdentity, UUID |
 | Signals | ✅ Signal enum, SignalState |
 | Syscalls | ✅ SVC dispatch (5 syscalls) |
+| User threads | ✅ EL0 entry, write/exit syscalls, clean termination |
 
 ## Scheduler v2
 
@@ -74,6 +78,6 @@ M3 — Process Model (in progress)
 
 1. IPC primitives (message passing, shared memory)
 2. User-space libc (minimal syscall wrappers)
-3. First user-space program (hello world)
+3. First user-space program (hello world) — ✅ completed M4.5, boot-time Task 1 in EL0
 4. Storage driver
 5. Persistent Identity

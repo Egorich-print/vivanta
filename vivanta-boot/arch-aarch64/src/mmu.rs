@@ -190,8 +190,6 @@ pub unsafe extern "Rust" fn activate_address_space(root: vivanta_arch_api::mmu::
     core::ptr::write_volatile(0x0900_0000 as *mut u32, b'S' as u32);
     core::arch::asm!("msr TTBR0_EL1, {}", in(reg) ttbr);
     tlbi_all_sync();
-    core::arch::asm!("tlbi alle1is");
-    core::arch::asm!("dsb sy");
     core::arch::asm!("ic ialluis");
     core::arch::asm!("dsb sy; isb");
 }

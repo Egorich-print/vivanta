@@ -155,14 +155,15 @@ pub unsafe extern "C" fn el0_sync_handler(
 ) {
     let ec = (esr >> 26) & 0x3f;
     if ec == 0b010101 {
-        // SVC from EL0 — dispatch syscall
+        // SVC (AArch64) from EL0 — dispatch syscall.
+        // ARM: for SVC, ELR_EL1 points to the instruction AFTER the SVC
+        // (the SVC is architecturally executed), so we return it unchanged.
         let ret = syscall_dispatch(
             frame.x[8],
             frame.x[0], frame.x[1], frame.x[2],
             frame.x[3], frame.x[4], frame.x[5],
         );
         frame.x[0] = ret;
-        frame.elr += 4;
     } else {
         vivanta_boot_common::println!("  EL0 sync: ESR={:#x} EC={} FAR={:#x} ELR={:#x}", esr, ec, _far, frame.elr);
         frame.elr += 4;

@@ -36,6 +36,7 @@ members = [
     # --- Test / proof ---
     "arch-test-stub",
     "target-test",
+    "target-mmu-test",
 
     # --- User-space ---
     "user/libc",
