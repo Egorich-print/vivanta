@@ -1,86 +1,95 @@
+**[English](README.md)** · [Русский](README.ru.md)
+
+---
+
 # Vivanta
 
-An experimental operating system exploring identity continuity, resource-oriented
-memory, and a portable boot architecture.
+![Status: experimental](https://img.shields.io/badge/status-experimental-red)
+![License: GPLv3](https://img.shields.io/badge/license-GPLv3-blue)
+![Language: Rust](https://img.shields.io/badge/language-Rust-orange)
+![Platform: ARM64 / ARMv7](https://img.shields.io/badge/platform-ARM64%20%2F%20ARMv7-lightgrey)
+
+An experimental operating system exploring **identity continuity**, **resource-oriented
+memory**, and a **portable boot architecture**.
 
 Vivanta is designed from the start to run on heterogeneous hardware — ARM64 and
-ARMv7 systems, from emulated QEMU machines to real boards and smartphones
-(RK3568, Raspberry Pi 3B, and old Qualcomm phone SoCs).
+ARMv7 systems, from emulated QEMU machines to real boards and old smartphones
+(RK3568, Raspberry Pi 3B, Qualcomm phone SoCs).
 
-## Status
+## What works today
 
 | Area | State |
 |------|-------|
-| Kernel boot (QEMU aarch64) | ✅ |
-| PMM / MRM / VMM (paging) | ✅ |
+| Kernel boot (QEMU AArch64) | ✅ |
+| Physical memory manager (PMM) | ✅ |
+| Paging / VMM (address spaces, map/unmap) | ✅ |
+| Memory Resource Manager (MRM) | ✅ |
 | Scheduler (priority, preemptive, sleep/wake) | ✅ |
 | Process model (tasks, threads, process table) | ✅ |
-| Syscalls (read, write, exit, yield, mmap) | ✅ |
-| First user-space program (EL0 hello world) | ✅ milestone M4.5 |
+| Syscalls (`read`, `write`, `exit`, `yield`, `mmap`) | ✅ |
+| **First user-space program in EL0** | ✅ milestone M4.5 |
 
-See [STATUS.md](STATUS.md), [docs/OS_MATURITY.md](docs/OS_MATURITY.md), and
-[docs/architecture/master-roadmap.md](docs/architecture/master-roadmap.md).
-
-## Repository layout
-
-The boot and kernel source lives in [`vivanta-boot/`](vivanta-boot/), a Cargo
-workspace of small `vivanta-*` crates:
-
-```
-vivanta-boot/
-  arch-aarch64/       AArch64 support (MMU, exceptions, EL0 entry)
-  arch-armv7a/        ARMv7 support
-  kernel/             Scheduler, syscalls, boot flow
-  boot-info/          BootInfo contract passed by the bootloader
-  boot_common/        Platform-shared helpers
-  user/               Minimal user-space libc and programs
-  target-qemu-aarch64/ QEMU virt machine (AArch64)
-  target-qemu-armv7a/  QEMU virt machine (ARMv7)
-  target-rk3568/      Rockchip RK3568 board
-  target-rpi3b/       Raspberry Pi 3B
-  ...
-```
-
-Higher-level design documentation (ADRs, RFCs, architecture notes) is under
-[`vivanta-boot/docs/`](vivanta-boot/docs/). Project history and organization
-notes are under [`docs/`](docs/).
+Details: [STATUS.md](STATUS.md) · [OS maturity](docs/OS_MATURITY.md) ·
+[Master roadmap](docs/architecture/master-roadmap.md)
 
 ## Quick start (QEMU AArch64)
 
-Prerequisites: a Rust toolchain with `aarch64-unknown-none` and
-`armv7a-none-eabi` targets installed, and QEMU.
+Prerequisites: Rust toolchain, the `aarch64-unknown-none` target, and QEMU.
 
 ```bash
+rustup target add aarch64-unknown-none   # one-time
+
 cd vivanta-boot
-cargo build -p vivanta-target-qemu-aarch64 --target aarch64-unknown-none
+cargo build -p vivanta-target-qemu-aarch64
+
 qemu-system-aarch64 -M virt -cpu cortex-a53 -m 512M -nographic \
   -kernel target/aarch64-unknown-none/debug/vivanta-target-qemu-aarch64 \
   -serial mon:stdio
 ```
 
-The boot output ends with the first user-space program running in EL0:
+At the end of the boot log, the first user-space program runs in EL0, prints via
+the `write` syscall and exits cleanly:
 
 ```
-SHello, Vivanta!
-  syscall: exit(0)
+Hello, Vivanta!
+syscall: exit(0)
 ```
 
-## Building for other targets
+## Repository layout
 
-```bash
-# ARMv7 QEMU
-cargo build -p vivanta-target-qemu-armv7a --target armv7a-none-eabi
+The kernel source is a Cargo workspace of small `vivanta-*` crates in
+[`vivanta-boot/`](vivanta-boot/):
 
-# RK3568 board
-cargo build -p vivanta-platform-rk3568 --target aarch64-unknown-none
+```
+vivanta-boot/
+  arch-aarch64/    AArch64 support (MMU, exceptions, EL0 entry)
+  arch-armv7a/     ARMv7 support (WIP)
+  arch-api/        Architecture API contracts
+  kernel/          Scheduler, syscalls, boot flow
+  boot-info/       BootInfo contract passed by the bootloader
+  boot_common/     Platform-shared helpers
+  platform-*/      Board support crates (qemu, rk3568, rpi3b, sdm660, …)
+  target-*/        Bootable binaries (qemu-aarch64, rk3568, …)
+  user/            Minimal user-space libc and hello-world program
 ```
 
-## Testing
+Architecture design documents (ADRs, RFCs, milestone checklists) live in
+[`vivanta-boot/docs/`](vivanta-boot/docs/); project history and organizational
+notes are in [`docs/`](docs/).
 
-The workspace includes `arch-test-stub` and `target-test` crates used to run
-kernel logic self-tests on the host. See
-[`vivanta-boot/tests/`](vivanta-boot/tests/) and the
-[milestone checklists](vivanta-boot/docs/architecture/milestones/).
+## Documentation
+
+- [Master roadmap](docs/architecture/master-roadmap.md) — the authoritative
+  engineering plan (milestones M1–M5+)
+- [Architecture decision records](vivanta-boot/docs/adr/) — ADR-011 … ADR-030
+- [Milestones](vivanta-boot/docs/architecture/milestones/) — M4, M4.5 checklists
+- [Vision: network services & distributed OS](vivanta-boot/docs/rfc/network-services-vision.md)
+- [Cluster research: budget smartphones as compute nodes](docs/research/cluster_research.md)
+
+## Roadmap
+
+Short version in [ROADMAP.md](ROADMAP.md). Current focus: milestone M5 — Memory
+Resource Manager integration (ADR-025), then user-space services, IPC and drivers.
 
 ## License
 
