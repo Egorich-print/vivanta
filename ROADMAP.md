@@ -40,9 +40,9 @@ This page is a short public-facing summary.
 
 ## Long-term vision
 
-Vivanta aims to become a distributed operating system — multiple devices
-communicating securely over heterogeneous physical transports — rather than
-another Unix-compatible kernel. The [network services vision
-RFC](vivanta-boot/docs/rfc/network-services-vision.md) describes this direction.
-Budget smartphone hardware is a candidate cluster platform (see
-[docs/research/cluster_research.md](docs/research/cluster_research.md)).
+Vivanta aims to become a distributed operating system where execution state and resources are represented as architecture-agnostic objects. This enables:
+- **Identity & State Continuity** — process state and memory objects can be migrated across heterogeneous hardware (e.g., PC to mobile).
+- **Resource-Oriented Memory** — strict separation of mechanism (kernel capabilities) and policy (orchestration).
+- **Heterogeneous Compute Clustering** — utilizing budget smartphone SoCs as secure, coordinated cluster nodes.
+
+See the [network services vision](vivanta-boot/docs/rfc/network-services-vision.md) and [cluster research](docs/research/cluster_research.md) for architectural explorations.

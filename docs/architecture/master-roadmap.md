@@ -367,9 +367,9 @@ The first genuine isolated EL0 process. Not just a jump — a runtime environmen
 
 *The following goals represent long-term research directions rather than committed implementation milestones.*
 
--   **Autonomous Cryptographic Continuity:** The system automatically relocates itself to nearby available hardware when a physical machine is about to fail.
--   **Self-Evaluating Resource Topology:** The operating system continuously measures hardware parameters (coherence, power, latency) and adapts its own memory/execution layout dynamically.
--   **Hardware Independence:** The operating system shall preserve user identity, state, and execution semantics across fundamentally different processor architectures (e.g., transparently bridging ARM64 and RISC-V).
+-   **Hardware Independence:** The operating system shall preserve user identity, state, and execution semantics across fundamentally different processor architectures (e.g., transparently bridging ARM64 and RISC-V) by representing processes as architecture-agnostic object graphs (Thread, MemoryObject, Capability).
+-   **Atomic State Migration:** Support for serializing and signing the entire state of an execution context (including MemoryObjects) to allow migration across non-ECC consumer hardware with verified integrity.
+-   **Distributed Resource Topology:** The operating system continuously measures hardware parameters (coherence, power, latency) and adapts its own memory/execution layout dynamically across a pool of heterogeneous cluster nodes.
 
 ---
 
