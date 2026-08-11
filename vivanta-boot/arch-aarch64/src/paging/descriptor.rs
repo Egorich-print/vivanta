@@ -3,6 +3,40 @@
 pub const DESC_VALID: u64 = 1 << 0;
 pub const DESC_TABLE: u64 = 1 << 1;
 
+/// Type selector bits [1:0].
+///
+/// ARM VMSAv8-64: 0b00 invalid, 0b01 block (L1/L2), 0b10 table (L0-L2),
+/// 0b11 page (L3). The kernel's table descriptors currently use 0b11
+/// (DESC_VALID|DESC_TABLE) for L1/L2 because that is the encoding QEMU's
+/// cortex-a53 model boots with (see `table_desc` note in mmu.rs). The
+/// predicates below therefore treat any non-zero type as valid and distinguish
+/// blocks from the rest; they are encoding-agnostic where possible.
+pub const DESC_TYPE_MASK: u64 = 0b11;
+
+#[inline]
+pub const fn desc_is_valid(desc: u64) -> bool {
+    desc & DESC_TYPE_MASK != 0
+}
+
+/// True when the descriptor is NOT a block (i.e. it is a table or page).
+/// Used by walkers to decide "walk deeper" vs "leaf". Because the kernel's
+/// L1/L2 tables use 0b11 (reserved per spec but QEMU-working), we treat
+/// "non-block" as table/leaf-continue.
+#[inline]
+pub const fn desc_is_table(desc: u64) -> bool {
+    desc & DESC_TYPE_MASK != 0 && desc & DESC_TYPE_MASK != 0b01
+}
+
+#[inline]
+pub const fn desc_is_block(desc: u64) -> bool {
+    desc & DESC_TYPE_MASK == 0b01
+}
+
+#[inline]
+pub const fn desc_is_page(desc: u64) -> bool {
+    desc & DESC_TYPE_MASK == 0b11
+}
+
 // ── Shareability attributes (bits [9:8]) ─────────────────────────────────────
 
 pub const DESC_SH_NON: u64 = 0 << 8;

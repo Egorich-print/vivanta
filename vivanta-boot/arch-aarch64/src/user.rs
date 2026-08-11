@@ -129,7 +129,7 @@ impl UserBootstrap {
             }
         }
 
-        pt.map(CODE_VA, code_phys, 4096, PageFlags::USER_READ_WRITE_EXEC);
+        pt.map(CODE_VA, code_phys, 4096, PageFlags::USER_READ_EXEC);
 
         let stack_phys = pt.alloc_frame().expect("user stack page").addr;
         vivanta_boot_common::println!("  User stack: PA=0x{:x}, VA=0x{:x}", stack_phys, STACK_VA);
@@ -164,7 +164,7 @@ pub unsafe extern "C" fn el0_sync_handler(
     frame: &mut ExceptionFrame,
     _kind: u64,
     esr: u64,
-    _far: u64,
+    far: u64,
 ) {
     let ec = (esr >> 26) & 0x3f;
     if ec == 0b010101 {
@@ -176,13 +176,26 @@ pub unsafe extern "C" fn el0_sync_handler(
         );
         frame.x[0] = ret;
     } else {
+        // G3 fault containment: any other synchronous EL0 exception (data
+        // abort, undef, alignment, etc.) terminates the current task. We do
+        // NOT skip the faulting instruction (`elr += 4`) — that would silently
+        // mask faults. The kernel handles the fault as a task-fatal event.
         vivanta_boot_common::println!(
-            "  EL0 sync: ESR={:#x} EC={} FAR={:#x} ELR={:#x}",
+            "  EL0 fault: ESR={:#x} EC={} FAR={:#x} ELR={:#x} — terminating task",
             esr,
             ec,
-            _far,
+            far,
             frame.elr
         );
-        frame.elr += 4;
+        // Terminate the current task and switch to the next runnable thread.
+        // This function does not return (context switch to another thread).
+        user_fault_terminate();
     }
+}
+
+/// Kernel-provided hook: terminate the task that caused an EL0 fault.
+///
+/// Implemented by vivanta_kernel as `thread_exit`; never returns.
+extern "Rust" {
+    fn user_fault_terminate() -> !;
 }

@@ -315,6 +315,13 @@ extern "C" fn thread_trampoline(_arg: usize) {
     thread_exit();
 }
 
+/// Called from the arch EL0 fault handler (G3 fault containment): terminate
+/// the current task without returning to EL0.
+#[no_mangle]
+pub extern "Rust" fn user_fault_terminate() -> ! {
+    thread_exit()
+}
+
 pub fn thread_exit() -> ! {
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
     cleanup();

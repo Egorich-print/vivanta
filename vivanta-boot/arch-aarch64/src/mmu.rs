@@ -56,6 +56,14 @@ impl PageFlags {
         privileged_executable: false,
         device: false,
     };
+    /// G3 W^X: user code is READ + EXECUTE, never writable.
+    pub const USER_READ_EXEC: Self = Self {
+        writable: false,
+        executable: true,
+        user: true,
+        privileged_executable: false,
+        device: false,
+    };
     pub const DEVICE: Self = Self {
         writable: true,
         executable: false,
@@ -72,6 +80,14 @@ impl PageFlags {
     };
 }
 
+/// L1/L2 TABLE descriptor.
+///
+/// NOTE (M5.0, G3 §5.6): the VMSAv8-64 spec encodes L1/L2 table descriptors
+/// as `0b10` (DESC_TABLE with bit0 clear). QEMU's cortex-a53 model does not
+/// boot with that encoding (hang at MMU enable), but accepts `0b11`
+/// (DESC_VALID | DESC_TABLE). QEMU is the primary M5.0 runtime oracle, so the
+/// working encoding is kept; the spec-correct `0b10` must be validated on real
+/// hardware before switching. Tracked in M5.0-green-baseline §5.6.
 fn table_desc(phys: u64) -> u64 {
     DESC_VALID | DESC_TABLE | (phys & ADDR_MASK)
 }
@@ -173,8 +189,8 @@ impl<A: FrameAllocator> PageTableBuilder<A> {
 
     fn table_or_create(&mut self, table: u64, idx: usize) -> u64 {
         let entry = self.read(table, idx);
-        if entry & DESC_VALID != 0 {
-            if entry & DESC_TABLE == 0 {
+        if desc_is_valid(entry) {
+            if desc_is_block(entry) {
                 let l3_frame = self
                     .alloc
                     .alloc_frame()
@@ -203,6 +219,7 @@ impl PageTableGuard {
         use core::arch::asm;
 
         // 1. Set memory attributes
+        vivanta_boot_common::println!("    activate: root={:#x}", self.root);
         asm!("msr mair_el1, {}", in(reg) 0x44_FF_u64);
 
         // 2. Set translation control
@@ -214,11 +231,13 @@ impl PageTableGuard {
         asm!("tlbi vmalle1is");
         asm!("dsb sy");
         asm!("isb");
+        vivanta_boot_common::println!("    activate: tcr+tlbi done");
 
         // 4. Set new page table
         asm!("msr ttbr0_el1, {}", in(reg) self.root);
         asm!("dsb sy");
         asm!("isb");
+        vivanta_boot_common::println!("    activate: ttbr0 done");
 
         // 5. Enable MMU + caches
         let mut sctlr: u64;
@@ -229,6 +248,7 @@ impl PageTableGuard {
         // 6. Sync
         asm!("dsb sy");
         asm!("isb");
+        vivanta_boot_common::println!("    activate: mmu on");
     }
 
     pub fn root_addr(&self) -> u64 {

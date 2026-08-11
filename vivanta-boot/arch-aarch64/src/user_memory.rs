@@ -18,7 +18,7 @@ const AP_EL0_RO: u64 = 1 << 7;
 
 /// Check whether a leaf descriptor grants `access` from EL0.
 fn descriptor_allows(desc: u64, access: AccessType) -> bool {
-    if desc & DESC_VALID == 0 {
+    if !desc_is_valid(desc) {
         return false;
     }
     // Kernel-only pages (AP bit 6 clear) are never user-accessible.
@@ -72,4 +72,79 @@ pub extern "Rust" fn access_ok(_aspace: usize, vaddr: u64, size: u64, access: Ac
         }
     }
     true
+}
+
+/// Copy `len` bytes from user space into `dst` after validating the whole
+/// range. Interrupts are disabled for the duration so a timer IRQ cannot
+/// switch address spaces mid-copy (single-core TOCTOU prevention).
+#[no_mangle]
+pub unsafe extern "Rust" fn copy_from_user(dst: *mut u8, src: u64, len: usize) -> Result<(), ()> {
+    if len == 0 {
+        return Ok(());
+    }
+    if dst.is_null() {
+        return Err(());
+    }
+    let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
+    let root = read_ttbr0() & ADDR_MASK;
+    let pt = PageTable::new(root);
+
+    // Validate the full source range page-by-page before copying.
+    let end = src.checked_add(len as u64).ok_or(())?;
+    let mut addr = src;
+    while addr < end {
+        let page = addr & !0xFFF;
+        if !pt
+            .leaf_descriptor(page)
+            .map_or(false, |d| descriptor_allows(d, AccessType::Read))
+        {
+            return Err(());
+        }
+        match page.checked_add(0x1000) {
+            Some(next) => addr = next,
+            None => break,
+        }
+    }
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(src as *const u8, dst, len);
+    }
+    Ok(())
+}
+
+/// Copy `len` bytes from `src` into user space at `dst` after validating the
+/// whole range. Interrupts disabled for the duration (single-core TOCTOU
+/// prevention).
+#[no_mangle]
+pub unsafe extern "Rust" fn copy_to_user(dst: u64, src: *const u8, len: usize) -> Result<(), ()> {
+    if len == 0 {
+        return Ok(());
+    }
+    if src.is_null() {
+        return Err(());
+    }
+    let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
+    let root = read_ttbr0() & ADDR_MASK;
+    let pt = PageTable::new(root);
+
+    let end = dst.checked_add(len as u64).ok_or(())?;
+    let mut addr = dst;
+    while addr < end {
+        let page = addr & !0xFFF;
+        if !pt
+            .leaf_descriptor(page)
+            .map_or(false, |d| descriptor_allows(d, AccessType::Write))
+        {
+            return Err(());
+        }
+        match page.checked_add(0x1000) {
+            Some(next) => addr = next,
+            None => break,
+        }
+    }
+
+    unsafe {
+        core::ptr::copy_nonoverlapping(src, dst as *mut u8, len);
+    }
+    Ok(())
 }

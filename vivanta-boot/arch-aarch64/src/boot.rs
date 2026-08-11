@@ -247,7 +247,7 @@ pub unsafe extern "Rust" fn mmu_map_user_pages(
         addr += 64;
     }
     core::arch::asm!("dsb sy");
-    builder.map(code_va, code_pa, 4096, PageFlags::USER_READ_WRITE_EXEC);
+    builder.map(code_va, code_pa, 4096, PageFlags::USER_READ_EXEC);
     // Allocate and map user stack page
     let stack_pa = builder
         .alloc_frame()

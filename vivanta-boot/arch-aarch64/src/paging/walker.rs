@@ -25,19 +25,19 @@ pub fn walk_to_l3(pt_root: u64, vaddr: u64) -> WalkResult {
     let l3_idx = ((vaddr >> 12) & 0x1FF) as usize;
 
     let l1_entry = read_desc(pt_root + (l1_idx as u64) * 8);
-    if l1_entry & DESC_VALID == 0 {
+    if !desc_is_valid(l1_entry) {
         panic!("walk_to_l3: L1 entry missing at idx {}", l1_idx);
     }
-    if l1_entry & DESC_TABLE == 0 {
+    if !desc_is_table(l1_entry) {
         panic!("walk_to_l3: L1 entry is not a table at idx {}", l1_idx);
     }
     let l2_table = l1_entry & ADDR_MASK;
 
     let l2_entry = read_desc(l2_table + (l2_idx as u64) * 8);
-    if l2_entry & DESC_VALID == 0 {
+    if !desc_is_valid(l2_entry) {
         panic!("walk_to_l3: L2 entry missing at idx {}", l2_idx);
     }
-    if l2_entry & DESC_TABLE == 0 {
+    if desc_is_block(l2_entry) {
         return WalkResult::NeedsSplit {
             l2_table_addr: l2_table,
             l2_index: l2_idx,
@@ -75,7 +75,7 @@ pub unsafe fn split_l2_block(
     barrier_write();
     write_desc(
         l2_table_addr + (l2_index as u64) * 8,
-        l3_addr | DESC_VALID | DESC_TABLE,
+        l3_addr | DESC_VALID | DESC_TABLE, // L2 table descriptor (see table_desc note)
     );
 }
 

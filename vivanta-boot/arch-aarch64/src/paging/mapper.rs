@@ -37,10 +37,7 @@ impl PageTable {
         let l3_idx = ((va >> 12) & 0x1FF) as usize;
 
         let l1_entry = Self::descriptor_at(self.root, l1_idx);
-        assert!(
-            l1_entry & DESC_VALID != 0,
-            "PageTable::map: L1 entry missing"
-        );
+        assert!(desc_is_valid(l1_entry), "PageTable::map: L1 entry missing");
         let l2_table = l1_entry & ADDR_MASK;
 
         let aligned_2mb = (va & 0x1F_FFFF) == 0 && (pa & 0x1F_FFFF) == 0;
@@ -49,10 +46,7 @@ impl PageTable {
             Self::set_descriptor(l2_table, l2_idx, flags.to_descriptor_bits(pa, true));
         } else {
             let l2_entry = Self::descriptor_at(l2_table, l2_idx);
-            assert!(
-                l2_entry & DESC_VALID != 0,
-                "PageTable::map: L2 entry missing"
-            );
+            assert!(desc_is_valid(l2_entry), "PageTable::map: L2 entry missing");
             let l3_table = l2_entry & ADDR_MASK;
             Self::set_descriptor(l3_table, l3_idx, flags.to_descriptor_bits(pa, false));
         }
@@ -64,16 +58,16 @@ impl PageTable {
         let l3_idx = ((va >> 12) & 0x1FF) as usize;
 
         let l1_entry = Self::descriptor_at(self.root, l1_idx);
-        if l1_entry & DESC_VALID == 0 {
+        if !desc_is_valid(l1_entry) {
             return;
         }
         let l2_table = l1_entry & ADDR_MASK;
         let l2_entry = Self::descriptor_at(l2_table, l2_idx);
-        if l2_entry & DESC_VALID == 0 {
+        if !desc_is_valid(l2_entry) {
             return;
         }
 
-        if l2_entry & DESC_TABLE == 0 {
+        if desc_is_block(l2_entry) {
             Self::set_descriptor(l2_table, l2_idx, 0);
         } else {
             let l3_table = l2_entry & ADDR_MASK;
@@ -87,23 +81,23 @@ impl PageTable {
         let l3_idx = ((va >> 12) & 0x1FF) as usize;
 
         let l1_entry = Self::descriptor_at(self.root, l1_idx);
-        if l1_entry & DESC_VALID == 0 {
+        if !desc_is_valid(l1_entry) {
             return None;
         }
         let l2_table = l1_entry & ADDR_MASK;
         let l2_entry = Self::descriptor_at(l2_table, l2_idx);
-        if l2_entry & DESC_VALID == 0 {
+        if !desc_is_valid(l2_entry) {
             return None;
         }
 
-        if l2_entry & DESC_TABLE == 0 {
+        if desc_is_block(l2_entry) {
             let block_base = l2_entry & ADDR_MASK_BLOCK;
             return Some(block_base | (va & 0x1F_FFFF));
         }
 
         let l3_table = l2_entry & ADDR_MASK;
         let l3_entry = Self::descriptor_at(l3_table, l3_idx);
-        if l3_entry & DESC_VALID == 0 {
+        if !desc_is_valid(l3_entry) {
             return None;
         }
         Some((l3_entry & ADDR_MASK) | (va & 0xFFF))
@@ -120,25 +114,25 @@ impl PageTable {
         let l3_idx = ((va >> 12) & 0x1FF) as usize;
 
         let l1_entry = Self::descriptor_at(self.root, l1_idx);
-        if l1_entry & DESC_VALID == 0 {
+        if !desc_is_valid(l1_entry) {
             return None;
         }
-        if l1_entry & DESC_TABLE == 0 {
+        if desc_is_block(l1_entry) {
             return None;
         }
         let l2_table = l1_entry & ADDR_MASK;
         let l2_entry = Self::descriptor_at(l2_table, l2_idx);
-        if l2_entry & DESC_VALID == 0 {
+        if !desc_is_valid(l2_entry) {
             return None;
         }
 
-        if l2_entry & DESC_TABLE == 0 {
+        if desc_is_block(l2_entry) {
             return Some(l2_entry);
         }
 
         let l3_table = l2_entry & ADDR_MASK;
         let l3_entry = Self::descriptor_at(l3_table, l3_idx);
-        if l3_entry & DESC_VALID == 0 {
+        if !desc_is_valid(l3_entry) {
             return None;
         }
         Some(l3_entry)
@@ -155,7 +149,7 @@ impl PageTable {
                 let l2_idx = ((va >> 21) & 0x1FF) as usize;
 
                 let l1_entry = Self::descriptor_at(self.root, l1_idx);
-                assert!(l1_entry & DESC_VALID != 0, "map_region: L1 missing");
+                assert!(desc_is_valid(l1_entry), "map_region: L1 missing");
                 let l2_table = l1_entry & ADDR_MASK;
                 Self::set_descriptor(l2_table, l2_idx, flags.to_descriptor_bits(pa, true));
                 offset += 0x20_0000;
@@ -165,10 +159,10 @@ impl PageTable {
                 let l3_idx = ((va >> 12) & 0x1FF) as usize;
 
                 let l1_entry = Self::descriptor_at(self.root, l1_idx);
-                assert!(l1_entry & DESC_VALID != 0, "map_region: L1 missing");
+                assert!(desc_is_valid(l1_entry), "map_region: L1 missing");
                 let l2_table = l1_entry & ADDR_MASK;
                 let l2_entry = Self::descriptor_at(l2_table, l2_idx);
-                assert!(l2_entry & DESC_VALID != 0, "map_region: L2 missing");
+                assert!(desc_is_valid(l2_entry), "map_region: L2 missing");
                 let l3_table = l2_entry & ADDR_MASK;
                 Self::set_descriptor(l3_table, l3_idx, flags.to_descriptor_bits(pa, false));
                 offset += 0x1000;
