@@ -37,6 +37,16 @@ Reaping returned 2 user-stack frames to the PMM (free_count increased) — G6-C
 proven. G6-D (no M5.0 regressions) verified: build/clippy/fmt/test green,
 EL0 demo + EFAULT + fault containment + preemption all pass.
 
+### Known pre-existing issue found by the soak (P1, deferred)
+
+While running the 60-min soak, the kernel was observed to **lose timer
+preemption** under sustained load (tight loop or, occasionally, an
+Instruction Abort on `x30=0`). This is a **pre-existing M5.0-path defect**,
+not an M6 regression: it reproduces on the committed pre-M6 state too, and
+M6's own gates pass in short runs. Tracked in
+`docs/investigations/INV-002-preemption-irq-loss.md`. It must be resolved
+before relying on long-running multi-thread workloads.
+
 ### Notable fix found during M6
 
 The 16 KiB boot kernel stack was overflowed by `kernel_main` growth (M6 added
