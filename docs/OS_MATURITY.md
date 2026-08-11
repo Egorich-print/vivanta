@@ -2,7 +2,7 @@
 
 > **Date:** 2026-07-24
 > **Current baseline:** V2/M5 Phase A–E complete
-> **Reference:** [PROJECT_STATE.md](../PROJECT_STATE.md), [master-roadmap.md](architecture/master-roadmap.md)
+> **Reference:** [STATUS.md](../STATUS.md), [master-roadmap.md](architecture/master-roadmap.md)
 
 ---
 

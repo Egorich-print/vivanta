@@ -1,9 +1,10 @@
 // ---------------------------------------------------------------------------
 // Syscall boundary — vivanta_kernel-provided dispatch called from arch
+//
+// Syscall NUMBERS are defined in a single place: kernel/src/syscall.rs
+// (SYS_READ..SYS_MMAP). The arch EL0 handler reads the number from x8 and
+// passes it here unchanged. Do not redefine syscall numbers in this crate.
 // ---------------------------------------------------------------------------
-
-/// Syscall numbers (shared between kernel and arch).
-pub const SYS_YIELD: u64 = 0;
 
 extern "Rust" {
     /// Dispatch a syscall from EL0.

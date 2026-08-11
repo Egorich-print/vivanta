@@ -8,11 +8,15 @@
 
 ## Current Focus
 
-*   **Active Track:** `V-epics P2` (Memory Resource Manager)
-*   **Active Milestone:** `V2/M5` (Memory Resource Manager — ADR-025)
-*   **Current Engineering Objective:** Integrate existing `MemoryObject` prototype from `kernel-memory-frozen` into the kernel as a formal Memory Resource Manager per ADR-025.
-*   **Architecture Version:** V1 architecture stabilized (ADR-021/024 ratified)
-*   **Architecture Status:** ADR-011 through ADR-024 ratified.
+*   **Active Track:** `M5.0 GREEN BASELINE` (recovery milestone)
+*   **Active Milestone:** `M5.0` — see `vivanta-boot/docs/milestones/M5.0-green-baseline.md` (ratified baseline; source of truth)
+*   **Current Engineering Objective:** Restore the kernel to a provable baseline: workspace integrity (G1), physical memory ownership + reclamation (G2), user memory boundary + fault containment (G3), scheduler state + preemption correctness (G4). No new features.
+*   **Architecture Version:** V1 architecture stabilized (ADR-021/024 ratified); ADR-030 paging architecture accepted.
+*   **Architecture Status:** ADR-011 through ADR-025 ratified (engineering ADRs canonical in `vivanta-boot/docs/adr/`).
+
+> M5.0 supersedes the previous "V2/M5 Memory Resource Manager" focus. The MRM
+> integration is complete; the next engineering gate is the recovery baseline,
+> not a new subsystem.
 
 ---
 
@@ -185,7 +189,7 @@ The original lavender/SDM660 specific targets (M1-B0 through M1-B4) were superse
 -   Acknowledge that manual hardware testing on the target device is required before closing milestones.
 
 ### Track E: Documentation
--   Keep `PROJECT_STATE.md` synchronized.
+-   Keep `STATUS.md` synchronized.
 -   Keep this roadmap (`master-roadmap.md`) synchronized.
 -   Keep RFC and ADR status up to date.
 -   Always document architectural decisions before starting implementation.
@@ -243,7 +247,7 @@ V-epics replace the earlier R-phase model as the primary planning structure. M-n
 | V0.1a | Cargo package rename (scripted, git tags) | `cargo check --workspace` + 2 build targets pass |
 | V0.1b | Documentation rename | Build clean |
 | V0.1c | Directory rename (`Vivanta/` → `Vivanta/`) | Full rebuild clean |
-| V0.2 | Roadmap refresh (this document + PROJECT_STATE.md) | All references consistent |
+| V0.2 | Roadmap refresh (this document + STATUS.md) | All references consistent |
 | V0.3 | `docs/vivanta/` scaffold | Stubs created, no dead links |
 
 **ADRs:** — (rename is execution, not architecture)
@@ -376,6 +380,12 @@ The first genuine isolated EL0 process. Not just a jump — a runtime environmen
 ## Changelog
 
 *Every roadmap modification must update this section.*
+
+### 2026-08-11
+-   **M5.0 GREEN BASELINE ratified** (`vivanta-boot/docs/milestones/M5.0-green-baseline.md`).
+-   Current Focus switched from V2/M5 (MRM) to M5.0 recovery milestone.
+-   ADR registry reconciled: canonical engineering ADRs live in `vivanta-boot/docs/adr/`;
+    ADR-031…039 quarantined as distributed/AI research track (no implementation).
 
 ### 2026-07-12
 -   Initial release of the Master Roadmap.

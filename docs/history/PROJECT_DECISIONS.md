@@ -72,7 +72,7 @@ This document serves as a journal of architectural decisions made for the Vivant
 
 ## Decision: Documentation Artifacts
 
-*   **Decision**: Utilize core state files (`PROJECT_STATE.md`, `PROJECT_DECISIONS.md`, `OPEN_QUESTIONS.md`, `PROJECT_GLOSSARY.md`) as living architectural artifacts, serving as the primary source of truth and context.
+*   **Decision**: Utilize core state files (`STATUS.md`, `PROJECT_DECISIONS.md`, `OPEN_QUESTIONS.md`, `PROJECT_GLOSSARY.md`) as living architectural artifacts, serving as the primary source of truth and context.
 *   **Status**: Accepted
 *   **Rationale**: Provides a concise, efficient, and maintainable way to manage project knowledge across sessions and over the project's lifetime.
 *   **Alternatives Considered**: Relying solely on conversation history, a single monolithic state file.

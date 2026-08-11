@@ -1,83 +1,62 @@
 # Vivanta Status
 
-> Last updated: 2026-08-03
+> Last updated: 2026-08-11
 
 ## Current milestone
 
-M2 — Virtual Memory (completed)
-M3 — Process Model (completed)
-M4 — First User-Space (in progress)
-M4.5 — First user-space hello world (completed 2026-08-03)
+M5.0 — GREEN BASELINE (recovery milestone, in progress)
+Ratified spec: `vivanta-boot/docs/milestones/M5.0-green-baseline.md`
+
+> M5.0 is NOT a feature milestone. It restores the kernel to a provable
+> baseline: workspace integrity (G1), physical memory ownership + reclamation
+> (G2), user memory boundary + fault containment (G3), scheduler state +
+> preemption correctness (G4).
+
+## G1 — Workspace integrity (PASS as of 2026-08-11)
+
+- `cargo build --workspace` — PASS (clean clone)
+- `cargo clippy --workspace` — PASS (0 errors)
+- `cargo fmt --check` — PASS
+- `cargo test --workspace --target aarch64-apple-darwin` — PASS (13 unit tests
+  in boot-info / boot_common / kernel-memory-frozen; bare-metal crates are
+  `test = false` and QEMU-verified)
+- `cargo build -p vivanta-target-qemu-aarch64` — PASS
+- QEMU boot + EL0 demo — PASS (`Hello, Vivanta!` → `exit(0)`)
 
 ## Kernel
 
-- PMM (Physical Memory Manager) — ✅
+- PMM (Physical Memory Manager) — ⚠️ G2 pending (currently 1 MiB of usable RAM)
 - Early MMU (aarch64) — ✅
 - Paging API — ✅ (ADR-030: mechanism/policy split)
-- Memory Resource Manager — ✅ (all allocation through MRM)
-- Scheduler — ✅ (priority-based preemptive, dynamic RunQueue, sleep/wake)
-- VMM (AddressSpace) — ✅ (map, unmap, query; protect deferred)
-- Identity — ✅ (ADR-024: RuntimeIdentity migrated)
-- System State Encapsulation — ✅ (ADR-021)
-- Process Model — ✅ (Task lifecycle, parent-child, process table)
-- Signals — ✅ (minimal: SIGHUP, SIGINT, SIGKILL, SIGSEGV, SIGTERM)
-- Syscalls — ✅ (SVC handler: read, write, exit, yield, mmap)
-- User threads — ✅ (Task 1 in EL0: write + exit syscalls work end-to-end)
+- Memory Resource Manager — ⚠️ G2 pending (no reclamation)
+- Scheduler — ⚠️ G4 pending (index-based current, preemption unproven)
+- VMM (AddressSpace) — ⚠️ G2 pending (MappingSet capacity bug, no VA allocator)
+- Identity — ⚠️ nominal only (counter-based UUID; no crypto/Ed25519)
+- Process Model — ⚠️ lifecycle incomplete (task state never updated on exit)
+- Signals — ⚠️ enum only, no delivery path
+- Syscalls — ⚠️ G3 pending (access_ok implemented, copy primitives + fault
+  containment pending)
+- User threads — ✅ EL0 demo works end-to-end
 
-## Architecture
+## Known blockers (M5.0)
 
-| Layer | Status |
-|-------|--------|
-| PMM | ✅ PmmBitmap, self-test |
-| MRM | ✅ MemoryResourceManager, MemoryObject |
-| VMM | ✅ AddressSpace, MappingSet |
-| Paging | ✅ descriptor, walker, mapper (ADR-030) |
-| Scheduler | ✅ priority-based, dynamic RunQueue, sleep/wake |
-| Process | ✅ Task, TaskManager, ProcessTable |
-| Identity | ✅ RuntimeIdentity, BootIdentity, UUID |
-| Signals | ✅ Signal enum, SignalState |
-| Syscalls | ✅ SVC dispatch (5 syscalls) |
-| User threads | ✅ EL0 entry, write/exit syscalls, clean termination |
-
-## Scheduler v2
-
-- ThreadState: Created, Ready, Running, Blocked, Sleeping, Terminated
-- Priority: Realtime, High, Normal, Low, Idle
-- RunQueue: dynamic Vec-based, no MAX_THREADS limit
-- Sleep/wake: timer-based with check_sleeping_threads()
-- Preemptive: timer tick → NEED_RESCHEDULE → maybe_reschedule
-
-## Process Model
-
-- Task owns multiple threads (Vec<ThreadId>)
-- Task owns AddressSpace (memory isolation)
-- Task owns MemoryObjects (resource ownership)
-- Parent-child relationships (process hierarchy)
-- Process table (global registry)
-- Exit codes (zombie state for parent collection)
+- G2: full-RAM PMM, MemoryObject Drop→deallocate, contiguous allocation
+  contract, MappingSet slot reuse, boot_alloc_frame OOM semantics
+- G3: copy_from_user/copy_to_user, `elr += 4` fault masking removal, W^X
+- G4: ThreadId-based current, Running invariant, preemption proof on QEMU
 
 ## Platforms
 
 | Platform | Status |
 |----------|--------|
-| qemu-aarch64 | Active, boots to kernel_main |
-| rk3568 | Active (stuck at Stage 1) |
-| rpi3b+ | Active |
-| qemu-armv7a | Active |
-| allwinner-h616 | Stalled |
-| amlogic | Stalled |
-| sdm660 | Stalled |
+| qemu-aarch64 | Active, boots to kernel_main, EL0 demo works |
+| rk3568 | Diagnostic only (does not link vivanta-kernel) |
+| rpi3b+ | Standalone diagnostic (early_mmu identity map) |
+| qemu-armv7a | Frozen (arch-armv7a is an empty stub; removed from workspace members) |
+| allwinner-h616 / amlogic / sdm660 | Stalled / planned |
 
-## Blocked
+## Scope fence (until M5.0 PASS)
 
-- Storage driver
-- Persistent Identity model
-- protect() (requires arch-api mmu_protect)
-
-## Next
-
-1. IPC primitives (message passing, shared memory)
-2. User-space libc (minimal syscall wrappers)
-3. First user-space program (hello world) — ✅ completed M4.5, boot-time Task 1 in EL0
-4. Storage driver
-5. Persistent Identity
+IPC · storage · drivers · distributed AI (ADR-031…039) · Ed25519 · BIP-39 ·
+persistent identity · TTBR1/ASID · signal delivery · new syscalls · new
+hardware targets · new architectures
