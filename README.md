@@ -21,15 +21,23 @@ ARMv7 systems, from emulated QEMU machines to real boards and old smartphones
 | Area | State |
 |------|-------|
 | Kernel boot (QEMU AArch64) | ✅ |
-| Physical memory manager (PMM) | ✅ |
+| Physical memory manager (PMM, full usable RAM) | ✅ |
 | Paging / VMM (address spaces, map/unmap) | ✅ |
-| Memory Resource Manager (MRM) | ✅ |
+| Memory Resource Manager (MRM) with reclamation | ✅ |
 | Scheduler (priority, preemptive, sleep/wake) | ✅ |
 | Process model (tasks, threads, process table) | ✅ |
 | Syscalls (`read`, `write`, `exit`, `yield`, `mmap`) | ✅ |
-| **First user-space program in EL0** | ✅ milestone M4.5 |
+| First user-space program in EL0 | ✅ |
+| User memory boundary (access_ok, copy, -EFAULT) | ✅ |
+| EL0 fault containment | ✅ |
+| Timer-driven preemption (100 Hz, two live threads) | ✅ |
 
-Details: [STATUS.md](STATUS.md) · [OS maturity](docs/OS_MATURITY.md) ·
+> **M5.0 GREEN BASELINE — PASS** (2026-08-11). QEMU-correct baseline: all four
+> gates verified on a clean clone. Honest status is "QEMU-correct", not
+> "hardware-correct" — one deferred ARM MMU descriptor-encoding issue requires
+> validation on physical hardware.
+
+Details: [STATUS.md](STATUS.md) · [M5.0 baseline](vivanta-boot/docs/milestones/M5.0-green-baseline.md) ·
 [Master roadmap](docs/architecture/master-roadmap.md)
 
 ## Quick start (QEMU AArch64)
@@ -63,14 +71,14 @@ The kernel source is a Cargo workspace of small `vivanta-*` crates in
 ```
 vivanta-boot/
   arch-aarch64/    AArch64 support (MMU, exceptions, EL0 entry)
-  arch-armv7a/     ARMv7 support (WIP)
+  arch-armv7a/     ARMv7 support (frozen, WIP)
   arch-api/        Architecture API contracts
   kernel/          Scheduler, syscalls, boot flow
   boot-info/       BootInfo contract passed by the bootloader
   boot_common/     Platform-shared helpers
   platform-*/      Board support crates (qemu, rk3568, rpi3b, sdm660, …)
   target-*/        Bootable binaries (qemu-aarch64, rk3568, …)
-  user/            Minimal user-space libc and hello-world program
+  tools/           Reliability/soak test scripts
 ```
 
 Architecture design documents (ADRs, RFCs, milestone checklists) live in
@@ -79,17 +87,18 @@ notes are in [`docs/`](docs/).
 
 ## Documentation
 
-- [Master roadmap](docs/architecture/master-roadmap.md) — the authoritative
-  engineering plan (milestones M1–M5+)
+- [Master roadmap](docs/architecture/master-roadmap.md) — engineering plan
+- [M5.0 GREEN BASELINE](vivanta-boot/docs/milestones/M5.0-green-baseline.md) — ratified recovery baseline (source of truth)
 - [Architecture decision records](vivanta-boot/docs/adr/) — ADR-011 … ADR-030
-- [Milestones](vivanta-boot/docs/architecture/milestones/) — M4, M4.5 checklists
 - [Vision: network services & distributed OS](vivanta-boot/docs/rfc/network-services-vision.md)
 - [Cluster research: budget smartphones as compute nodes](docs/research/cluster_research.md)
 
 ## Roadmap
 
-Short version in [ROADMAP.md](ROADMAP.md). Current focus: milestone M5 — Memory
-Resource Manager integration (ADR-025), then user-space services, IPC and drivers.
+Short version in [ROADMAP.md](ROADMAP.md). M5.0 (recovery baseline) is
+**PASS/CLOSED**. Next milestone (M6) is being defined from actual repository
+state, not the pre-M5 roadmap. See
+[`vivanta-boot/docs/milestones/`](vivanta-boot/docs/milestones/).
 
 ## License
 
