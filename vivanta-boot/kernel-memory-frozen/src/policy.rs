@@ -2,9 +2,7 @@
 // Policy engine — evaluates backend properties against allocation requirements
 // ---------------------------------------------------------------------------
 
-use crate::resource::{
-    BandwidthClass, LatencyClass, MemoryProperties, PersistenceType,
-};
+use crate::resource::{BandwidthClass, LatencyClass, MemoryProperties, PersistenceType};
 
 /// High-level placement preference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,21 +70,30 @@ fn score_dimensions(props: &MemoryProperties) -> DimensionScores {
         BandwidthClass::Low => 10,
     };
     let gib = (props.capacity / (1024 * 1024 * 1024)).max(1);
-    let capacity = if gib >= 64 { 100 } else if gib >= 8 { 80 } else if gib >= 1 { 50 } else { 10 };
+    let capacity = if gib >= 64 {
+        100
+    } else if gib >= 8 {
+        80
+    } else if gib >= 1 {
+        50
+    } else {
+        10
+    };
     let persistence = match props.persistence {
         PersistenceType::Persistent => 100,
         PersistenceType::Volatile => 0,
     };
-    DimensionScores { latency, bandwidth, capacity, persistence }
+    DimensionScores {
+        latency,
+        bandwidth,
+        capacity,
+        persistence,
+    }
 }
 
 /// Weighted sum of dimension scores.
 fn weighted_score(dim: &DimensionScores, w: &[u32; 4]) -> u32 {
-    (dim.latency * w[0]
-        + dim.bandwidth * w[1]
-        + dim.capacity * w[2]
-        + dim.persistence * w[3])
-        / 100
+    (dim.latency * w[0] + dim.bandwidth * w[1] + dim.capacity * w[2] + dim.persistence * w[3]) / 100
 }
 
 /// Compute a single [0..100] score for a backend given the requirements.

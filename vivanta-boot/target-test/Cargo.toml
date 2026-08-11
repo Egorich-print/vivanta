@@ -10,3 +10,10 @@ vivanta-boot-common = { path = "../boot_common" }
 vivanta-arch-api = { path = "../arch-api" }
 vivanta-arch-test-stub = { path = "../arch-test-stub" }
 vivanta-kernel = { path = "../kernel" }
+
+# Bare-metal firmware binary (no_main + linker script): no host libtest.
+# Verified via QEMU boot.
+[[bin]]
+name = "target_test"
+path = "src/main.rs"
+test = false

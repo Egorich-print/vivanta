@@ -1,5 +1,5 @@
-use vivanta_arch_api::context::{ArchContext, ExecutionLevel};
 use crate::vmm::AddressSpaceId;
+use vivanta_arch_api::context::{ArchContext, ExecutionLevel};
 
 pub type ThreadId = u64;
 pub type ThreadEntry = extern "C" fn(usize);
@@ -31,5 +31,5 @@ pub struct Thread {
     pub entry: Option<ThreadEntry>,
     pub address_space: AddressSpaceId,
     pub level: ExecutionLevel,
-    pub sleep_until: Option<u64>,  // Tick count when to wake up
+    pub sleep_until: Option<u64>, // Tick count when to wake up
 }

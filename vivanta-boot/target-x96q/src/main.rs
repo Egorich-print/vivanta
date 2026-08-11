@@ -16,7 +16,7 @@
 use core::panic::PanicInfo;
 
 use vivanta_boot_common::println;
-use vivanta_boot_info::{BootInfo, MmioRegion, MmioKind, InterruptControllerInfo};
+use vivanta_boot_info::{BootInfo, InterruptControllerInfo, MmioKind, MmioRegion};
 
 // Force link arch-aarch64 for extern "Rust" symbol resolution
 extern crate vivanta_arch_aarch64;
@@ -29,15 +29,14 @@ core::arch::global_asm!(
     // ARM64 Image header (64 bytes) — U-Boot booti compatible
     "b _real_start",
     ".word 0",
-    ".quad 0x00280000",             // text_offset
-    ".quad 0",                      // image_size (0 = unknown, U-Boot reads ELF segments)
-    ".quad 0x0a",                   // flags: LE, P-DEP
+    ".quad 0x00280000", // text_offset
+    ".quad 0",          // image_size (0 = unknown, U-Boot reads ELF segments)
+    ".quad 0x0a",       // flags: LE, P-DEP
     ".quad 0",
     ".quad 0",
     ".quad 0",
-    ".word 0x644d5241",             // magic = "ARMd"
+    ".word 0x644d5241", // magic = "ARMd"
     ".word 0",
-
     "_real_start:",
     // Mask all interrupts
     "msr daifset, #0xf",
@@ -91,9 +90,9 @@ pub unsafe extern "C" fn adapter_main() -> ! {
     let dtb_addr = vivanta_boot_common::BOOT_CONTEXT.dtb as *const u8;
 
     // Configure early platform info for boot debug output
-    vivanta_boot_common::set_early_platform(
-        vivanta_boot_common::EarlyPlatformInfo { uart_base: 0x0500_0000 },
-    );
+    vivanta_boot_common::set_early_platform(vivanta_boot_common::EarlyPlatformInfo {
+        uart_base: 0x0500_0000,
+    });
 
     // Platform init: console from FDT
     vivanta_platform_allwinner_h616::init_console_from_fdt(dtb_addr);
@@ -112,7 +111,11 @@ pub unsafe extern "C" fn adapter_main() -> ! {
         .filter(|r| r.kind == vivanta_boot_common::MemoryRegionKind::Usable)
         .map(|r| r.size >> 20)
         .sum::<u64>();
-    println!("  Memory:    {} MiB across {} region(s)", total_mib, mem_map.regions().len());
+    println!(
+        "  Memory:    {} MiB across {} region(s)",
+        total_mib,
+        mem_map.regions().len()
+    );
     println!("  CPUs:      {} core(s)", cpu_count);
     println!("  DTB:       0x{:x}", dtb_addr as usize);
     println!();
@@ -121,8 +124,16 @@ pub unsafe extern "C" fn adapter_main() -> ! {
     //   UART0:  0x05000000 (user-accessible for early console)
     //   GIC-400: 0x03000000 (distributor), 0x03010000 (CPU interface)
     static MMIO_REGIONS: [MmioRegion; 2] = [
-        MmioRegion { base: 0x0500_0000, size: 0x1000, kind: MmioKind::UserDevice },
-        MmioRegion { base: 0x0300_0000, size: 0x2_0000, kind: MmioKind::Device },
+        MmioRegion {
+            base: 0x0500_0000,
+            size: 0x1000,
+            kind: MmioKind::UserDevice,
+        },
+        MmioRegion {
+            base: 0x0300_0000,
+            size: 0x2_0000,
+            kind: MmioKind::Device,
+        },
     ];
 
     // Interrupt controller: GIC-400 (GICv2)
@@ -137,8 +148,7 @@ pub unsafe extern "C" fn adapter_main() -> ! {
     // Assemble BootInfo and pass to vivanta_kernel
     let mut mem_map_buf: core::mem::MaybeUninit<vivanta_boot_common::MemoryMap> =
         core::mem::MaybeUninit::uninit();
-    let mut boot_info_buf: core::mem::MaybeUninit<BootInfo> =
-        core::mem::MaybeUninit::uninit();
+    let mut boot_info_buf: core::mem::MaybeUninit<BootInfo> = core::mem::MaybeUninit::uninit();
 
     mem_map_buf.as_mut_ptr().write(mem_map);
     let mem_map_ref: &'static vivanta_boot_common::MemoryMap = &*mem_map_buf.as_ptr();
@@ -159,5 +169,7 @@ pub unsafe extern "C" fn adapter_main() -> ! {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop { core::hint::spin_loop(); }
+    loop {
+        core::hint::spin_loop();
+    }
 }

@@ -15,6 +15,7 @@
 // After eret, SP_EL1 settles at kernel_stack_top - 272.
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "none")]
 core::arch::global_asm!(
     ".global eret_to_user_stub",
     ".balign 16",
@@ -62,21 +63,22 @@ use crate::exceptions::ExceptionFrame;
 use crate::mmu::PageFlags;
 
 // User code — placed in .user.text section
+#[cfg(target_os = "none")]
 core::arch::global_asm!(
     ".section .user.text, \"ax\"",
     ".global user_code_start",
     "user_code_start:",
     // write(1, msg, 16)
-    "mov  x8, #1",          // SYS_WRITE
-    "mov  x0, #1",          // fd = stdout
-    "adr  x1, hello_msg",   // buf = message
-    "mov  x2, #16",         // len
+    "mov  x8, #1",        // SYS_WRITE
+    "mov  x0, #1",        // fd = stdout
+    "adr  x1, hello_msg", // buf = message
+    "mov  x2, #16",       // len
     "svc  #0",
     // exit(0)
-    "mov  x8, #2",          // SYS_EXIT
-    "mov  x0, #0",          // code = 0
+    "mov  x8, #2", // SYS_EXIT
+    "mov  x0, #0", // code = 0
     "svc  #0",
-    "b .",                  // should not reach here
+    "b .", // should not reach here
     // String data embedded in user text section
     ".balign 4",
     "hello_msg:",
@@ -133,9 +135,12 @@ impl UserBootstrap {
         vivanta_boot_common::println!("  User stack: PA=0x{:x}, VA=0x{:x}", stack_phys, STACK_VA);
         pt.map(STACK_VA, stack_phys, 4096, PageFlags::USER_READ_WRITE);
 
-        UserBootstrap { code_va: CODE_VA, stack_va: STACK_VA, entry: CODE_VA }
+        UserBootstrap {
+            code_va: CODE_VA,
+            stack_va: STACK_VA,
+            entry: CODE_VA,
+        }
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +148,15 @@ impl UserBootstrap {
 // ---------------------------------------------------------------------------
 
 extern "Rust" {
-    fn syscall_dispatch(num: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> u64;
+    fn syscall_dispatch(
+        num: u64,
+        arg0: u64,
+        arg1: u64,
+        arg2: u64,
+        arg3: u64,
+        arg4: u64,
+        arg5: u64,
+    ) -> u64;
 }
 
 #[no_mangle]
@@ -159,13 +172,17 @@ pub unsafe extern "C" fn el0_sync_handler(
         // ARM: for SVC, ELR_EL1 points to the instruction AFTER the SVC
         // (the SVC is architecturally executed), so we return it unchanged.
         let ret = syscall_dispatch(
-            frame.x[8],
-            frame.x[0], frame.x[1], frame.x[2],
-            frame.x[3], frame.x[4], frame.x[5],
+            frame.x[8], frame.x[0], frame.x[1], frame.x[2], frame.x[3], frame.x[4], frame.x[5],
         );
         frame.x[0] = ret;
     } else {
-        vivanta_boot_common::println!("  EL0 sync: ESR={:#x} EC={} FAR={:#x} ELR={:#x}", esr, ec, _far, frame.elr);
+        vivanta_boot_common::println!(
+            "  EL0 sync: ESR={:#x} EC={} FAR={:#x} ELR={:#x}",
+            esr,
+            ec,
+            _far,
+            frame.elr
+        );
         frame.elr += 4;
     }
 }

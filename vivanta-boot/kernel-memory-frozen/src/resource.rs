@@ -16,19 +16,19 @@ pub enum AllocError {
 /// Classification of memory latency.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LatencyClass {
-    Near,     // e.g. on-package HBM, LLC
-    Main,     // e.g. DDR4/5
-    Far,      // e.g. CXL-attached, NUMA remote
-    Storage,  // e.g. SSD, persistent memory
+    Near,    // e.g. on-package HBM, LLC
+    Main,    // e.g. DDR4/5
+    Far,     // e.g. CXL-attached, NUMA remote
+    Storage, // e.g. SSD, persistent memory
 }
 
 /// Classification of memory bandwidth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BandwidthClass {
-    Extreme,  // e.g. HBM (>500 GB/s)
-    High,     // e.g. DDR5 (>50 GB/s)
-    Medium,   // e.g. DDR4, CXL (>10 GB/s)
-    Low,      // e.g. SSD
+    Extreme, // e.g. HBM (>500 GB/s)
+    High,    // e.g. DDR5 (>50 GB/s)
+    Medium,  // e.g. DDR4, CXL (>10 GB/s)
+    Low,     // e.g. SSD
 }
 
 /// Persistence type.

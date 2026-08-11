@@ -11,5 +11,13 @@ extern "Rust" {
     /// `num` is the syscall number (x8 in the Linux convention).
     /// `arg0`–`arg5` are the argument registers (x0–x5).
     /// Returns the value to place in x0 on return to EL0.
-    pub fn syscall_dispatch(num: u64, arg0: u64, arg1: u64, arg2: u64, arg3: u64, arg4: u64, arg5: u64) -> u64;
+    pub fn syscall_dispatch(
+        num: u64,
+        arg0: u64,
+        arg1: u64,
+        arg2: u64,
+        arg3: u64,
+        arg4: u64,
+        arg5: u64,
+    ) -> u64;
 }

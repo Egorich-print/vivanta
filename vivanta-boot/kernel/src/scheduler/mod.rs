@@ -2,18 +2,18 @@
 // vivanta_kernel scheduler — Thread lifecycle, RunQueue, scheduling policy
 // ---------------------------------------------------------------------------
 
+pub mod process_table;
+pub mod runqueue;
 pub mod task;
 pub mod task_manager;
 pub mod thread;
-pub mod runqueue;
-pub mod process_table;
 
-use thread::{Thread, ThreadState, ThreadEntry, ThreadId, Priority};
-use runqueue::{RunQueue, RunQueueError};
-use process_table::ProcessTable;
-use vivanta_arch_api::pmm::FrameAllocator;
 use crate::vmm::AddressSpaceId;
 use alloc::vec::Vec;
+use process_table::ProcessTable;
+use runqueue::RunQueue;
+use thread::{Priority, Thread, ThreadEntry, ThreadId, ThreadState};
+use vivanta_arch_api::pmm::FrameAllocator;
 
 const KERNEL_STACK_SIZE: usize = 16384;
 
@@ -27,11 +27,14 @@ static NEED_RESCHEDULE: AtomicBool = AtomicBool::new(false);
 static ATOMIC_CURRENT: AtomicUsize = AtomicUsize::new(0);
 
 // ---------------------------------------------------------------------------
-// RunQueue accessor helpers (unsafe because static mut)
+pub fn thread_set_state(id: ThreadId, new_state: ThreadState) {
+    rq().set_state(id, new_state)
+        .expect("thread_set_state failed");
+}
 // ---------------------------------------------------------------------------
 
 fn rq() -> &'static mut RunQueue {
-    unsafe { 
+    unsafe {
         if RUNQUEUE.is_none() {
             RUNQUEUE = Some(RunQueue::new());
         }
@@ -40,7 +43,7 @@ fn rq() -> &'static mut RunQueue {
 }
 
 fn pt() -> &'static mut ProcessTable {
-    unsafe { 
+    unsafe {
         if PROCESS_TABLE.is_none() {
             PROCESS_TABLE = Some(ProcessTable::new());
         }
@@ -52,31 +55,33 @@ fn pt() -> &'static mut ProcessTable {
 // Scheduler API
 // ---------------------------------------------------------------------------
 
-pub fn thread_set_state(id: ThreadId, new_state: ThreadState) {
-    rq().set_state(id, new_state)
-        .expect("thread_set_state failed");
+/// Get the `AddressSpaceId` of the currently running thread.
+pub fn current_thread_address_space() -> AddressSpaceId {
+    let current_id = {
+        let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
+        rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
+    };
+    rq().get(current_id).map(|t| t.address_space).unwrap_or(0)
 }
 
 /// Put current thread to sleep for `ticks` timer ticks.
 pub fn sleep(ticks: u64) {
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
-    
-    let current_id = unsafe { 
+
+    let current_id = {
         let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
         rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
     };
-    
+
     // Get current tick count from timer
-    let current_tick = unsafe { 
-        vivanta_arch_api::boot::timer::ticks()
-    };
-    
+    let current_tick = unsafe { vivanta_arch_api::boot::timer::ticks() };
+
     // Set sleep_until on thread
     if let Some(t) = rq().get_mut(current_id) {
         t.sleep_until = Some(current_tick + ticks);
         t.state = ThreadState::Sleeping;
     }
-    
+
     // Yield to another thread
     yield_now();
 }
@@ -84,7 +89,7 @@ pub fn sleep(ticks: u64) {
 /// Wake up a sleeping thread.
 pub fn wake(id: ThreadId) {
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
-    
+
     if let Some(t) = rq().get_mut(id) {
         if t.state == ThreadState::Sleeping {
             t.sleep_until = None;
@@ -96,16 +101,15 @@ pub fn wake(id: ThreadId) {
 /// Check for sleeping threads that should be woken up.
 /// Called from scheduler_tick().
 pub fn check_sleeping_threads() {
-    let current_tick = unsafe { 
-        vivanta_arch_api::boot::timer::ticks()
-    };
-    
-    let to_wake: Vec<ThreadId> = rq().iter()
+    let current_tick = unsafe { vivanta_arch_api::boot::timer::ticks() };
+
+    let to_wake: Vec<ThreadId> = rq()
+        .iter()
         .filter(|t| t.state == ThreadState::Sleeping)
         .filter(|t| t.sleep_until.map_or(false, |until| current_tick >= until))
         .map(|t| t.id)
         .collect();
-    
+
     for id in to_wake {
         wake(id);
     }
@@ -161,7 +165,7 @@ pub fn create_kernel_thread(
     let ctx = unsafe {
         vivanta_arch_api::context::context_init(
             stack_top,
-            0,  // user_stack_top — vivanta_kernel threads don't use EL0
+            0, // user_stack_top — vivanta_kernel threads don't use EL0
             thread_trampoline as *const () as usize,
             vivanta_arch_api::context::ExecutionLevel::Kernel,
         )
@@ -190,7 +194,7 @@ pub fn yield_now() {
     vivanta_boot_common::println!("  yield_now: enter");
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
 
-    let current_id = unsafe {
+    let current_id = {
         let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
         rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
     };
@@ -209,28 +213,36 @@ pub fn yield_now() {
     }
 
     vivanta_boot_common::println!("  yield_now: {} -> {}", current_id, next_id);
-    
+
     // Set current thread to Ready
     thread_set_state(current_id, ThreadState::Ready);
-    
+
     // Update current index
     let next_idx = rq().iter().position(|t| t.id == next_id).unwrap_or(0);
     ATOMIC_CURRENT.store(next_idx, Ordering::Relaxed);
-    
+
     // Activate address space if different
     let next_as = rq().get(next_id).unwrap().address_space;
     let current_as = rq().get(current_id).unwrap().address_space;
 
-    vivanta_boot_common::println!("  yield: {} -> {}, as: {} -> {}", current_id, next_id, current_as, next_as);
+    vivanta_boot_common::println!(
+        "  yield: {} -> {}, as: {} -> {}",
+        current_id,
+        next_id,
+        current_as,
+        next_as
+    );
 
     if next_as != current_as {
         if cfg!(feature = "trace-address-space") {
             vivanta_boot_common::println!("  [AS switch] thread {} → {}", current_id, next_id);
         }
         let root = crate::vmm::address_space::lookup_root(next_as);
-        unsafe { vivanta_arch_api::mmu::activate_address_space(root); }
+        unsafe {
+            vivanta_arch_api::mmu::activate_address_space(root);
+        }
     }
-    
+
     // Perform context switch
     unsafe {
         vivanta_arch_api::context::context_switch(
@@ -238,7 +250,7 @@ pub fn yield_now() {
             rq().get(next_id).unwrap().context,
         );
     }
-    
+
     // After context switch, we are now running as 'next'
     let now_idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
     if let Some(t) = rq().iter().nth(now_idx) {
@@ -260,7 +272,9 @@ pub fn maybe_reschedule(_frame: usize) {
     // mechanism used by yield_now(). The frame parameter provides access
     // to exception state for inspection only, not for copying.
 
-    if !NEED_RESCHEDULE.load(Ordering::Relaxed) { return; }
+    if !NEED_RESCHEDULE.load(Ordering::Relaxed) {
+        return;
+    }
     NEED_RESCHEDULE.store(false, Ordering::Relaxed);
 
     yield_now();
@@ -271,11 +285,12 @@ pub fn maybe_reschedule(_frame: usize) {
 // ---------------------------------------------------------------------------
 
 extern "C" fn thread_trampoline(_arg: usize) {
-    let current_id = unsafe { 
+    let current_id = {
         let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
         rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
     };
-    let entry = rq().get(current_id)
+    let entry = rq()
+        .get(current_id)
         .and_then(|t| t.entry)
         .expect("trampoline: no entry");
     thread_set_state(current_id, ThreadState::Running);
@@ -286,25 +301,25 @@ extern "C" fn thread_trampoline(_arg: usize) {
 pub fn thread_exit() -> ! {
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
     cleanup();
-    
-    let current_id = unsafe { 
+
+    let current_id = {
         let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
         rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
     };
     let current_as = rq().get(current_id).unwrap().address_space;
-    
+
     thread_set_state(current_id, ThreadState::Terminated);
-    
+
     // Find next thread to run
     let next_id = match rq().find_next_ready(current_id, false) {
         Some(id) => id,
         None => panic!("thread_exit: no thread to run"),
     };
-    
+
     // Update current index
     let next_idx = rq().iter().position(|t| t.id == next_id).unwrap_or(0);
     ATOMIC_CURRENT.store(next_idx, Ordering::Relaxed);
-    
+
     // Activate address space if different
     let next = rq().get(next_id).unwrap();
     if next.address_space != current_as {
@@ -312,9 +327,11 @@ pub fn thread_exit() -> ! {
             vivanta_boot_common::println!("  [AS switch] thread {} → {}", current_id, next_id);
         }
         let root = crate::vmm::address_space::lookup_root(next.address_space);
-        unsafe { vivanta_arch_api::mmu::activate_address_space(root); }
+        unsafe {
+            vivanta_arch_api::mmu::activate_address_space(root);
+        }
     }
-    
+
     // Perform context switch
     unsafe {
         vivanta_arch_api::context::context_switch(
@@ -329,12 +346,13 @@ fn cleanup() {
     // Remove terminated threads (except boot and idle)
     let boot_id = unsafe { BOOT_THREAD_ID };
     let idle_id = unsafe { IDLE_THREAD_ID };
-    
-    let to_remove: Vec<ThreadId> = rq().iter()
+
+    let to_remove: Vec<ThreadId> = rq()
+        .iter()
         .filter(|t| t.state == ThreadState::Terminated && t.id != boot_id && t.id != idle_id)
         .map(|t| t.id)
         .collect();
-    
+
     for id in to_remove {
         rq().remove(id);
     }
@@ -351,7 +369,7 @@ pub fn init_boot() {
     unsafe {
         let boot_ctx = vivanta_arch_api::context::context_capture_current();
         let boot_id = rq().alloc_id();
-        
+
         rq().insert(Thread {
             id: boot_id,
             state: ThreadState::Running,
@@ -361,21 +379,22 @@ pub fn init_boot() {
             address_space: kernel_as,
             level: vivanta_arch_api::context::ExecutionLevel::Kernel,
             sleep_until: None,
-        }).expect("Failed to insert boot thread");
-        
+        })
+        .expect("Failed to insert boot thread");
+
         BOOT_THREAD_ID = boot_id;
         ATOMIC_CURRENT.store(0, Ordering::Relaxed);
-        
+
         // Create idle thread
         let idle_id = rq().alloc_id();
         let idle_top = (&mut IDLE_STACK[0] as *mut u8 as usize) + KERNEL_STACK_SIZE;
         let idle_ctx = vivanta_arch_api::context::context_init(
             idle_top,
-            0,  // user_stack_top — idle thread never enters EL0
+            0, // user_stack_top — idle thread never enters EL0
             0,
             vivanta_arch_api::context::ExecutionLevel::Kernel,
         );
-        
+
         rq().insert(Thread {
             id: idle_id,
             state: ThreadState::Ready,
@@ -385,8 +404,9 @@ pub fn init_boot() {
             address_space: kernel_as,
             level: vivanta_arch_api::context::ExecutionLevel::Kernel,
             sleep_until: None,
-        }).expect("Failed to insert idle thread");
-        
+        })
+        .expect("Failed to insert idle thread");
+
         IDLE_THREAD_ID = idle_id;
     }
 }

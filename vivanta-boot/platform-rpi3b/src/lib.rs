@@ -25,6 +25,8 @@ pub fn init_uart_gpio() {
 
 fn spin(cycles: u32) {
     for _ in 0..cycles {
-        unsafe { core::arch::asm!("nop"); }
+        unsafe {
+            core::arch::asm!("nop");
+        }
     }
 }

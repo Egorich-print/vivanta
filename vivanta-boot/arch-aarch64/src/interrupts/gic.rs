@@ -4,9 +4,9 @@
 
 #![allow(dead_code)]
 
-use vivanta_boot_common::{println, hardware::InterruptControllerInfo};
-use crate::mmio;
 use crate::barrier;
+use crate::mmio;
+use vivanta_boot_common::{hardware::InterruptControllerInfo, println};
 
 // GICv2 offsets
 const GICD_CTLR: usize = 0x0000;
@@ -125,8 +125,11 @@ impl Gic {
         let typer = read32(self.dist_base, GICD_TYPER);
         let it_lines = ((typer >> 0) & 0x1f) + 1;
         let n_spis = it_lines * 32 - 32;
-        println!("  GICv{}: {} SPIs",
-            if self.version == GicVersion::V3 { 3 } else { 2 }, n_spis);
+        println!(
+            "  GICv{}: {} SPIs",
+            if self.version == GicVersion::V3 { 3 } else { 2 },
+            n_spis
+        );
         write32(self.dist_base, GICD_CTLR, 0);
         let total_regs = (32 + n_spis + 31) / 32;
         for i in 0..total_regs {
@@ -136,18 +139,32 @@ impl Gic {
             write32(self.dist_base, GICD_IGROUPR + off, 0);
         }
         for i in 0..(total_regs * 8) {
-            write32(self.dist_base, GICD_IPRIORITYR + (i as usize) * 4, 0x80808080);
+            write32(
+                self.dist_base,
+                GICD_IPRIORITYR + (i as usize) * 4,
+                0x80808080,
+            );
         }
     }
 
     unsafe fn init_v2(&self) {
         self.init_common_dist();
-        write32(self.dist_base, GICD_CTLR, GICD_CTLR_ENABLE_GRP0 | GICD_CTLR_ENABLE_GRP1);
+        write32(
+            self.dist_base,
+            GICD_CTLR,
+            GICD_CTLR_ENABLE_GRP0 | GICD_CTLR_ENABLE_GRP1,
+        );
         let _ = read32(self.dist_base, GICD_CTLR);
         let cpu = self.cpu_base as *mut u8;
-        if cpu.is_null() { return; }
+        if cpu.is_null() {
+            return;
+        }
         write32(cpu, GICC_PMR, 0xFF);
-        write32(cpu, GICC_CTLR, GICC_CTLR_ENABLE_GRP0 | GICC_CTLR_ENABLE_GRP1);
+        write32(
+            cpu,
+            GICC_CTLR,
+            GICC_CTLR_ENABLE_GRP0 | GICC_CTLR_ENABLE_GRP1,
+        );
         let _ = read32(cpu, GICC_CTLR);
         write32(self.dist_base, GICD_ISENABLER, 0x0000FFFF);
         set_gic_cpu_base(self.cpu_base);
@@ -156,17 +173,25 @@ impl Gic {
 
     unsafe fn init_v3(&self) {
         self.init_common_dist();
-        write32(self.dist_base, GICD_CTLR, GICD_CTLR_ENABLE_GRP1 | GICD_CTLR_ARE_NS);
+        write32(
+            self.dist_base,
+            GICD_CTLR,
+            GICD_CTLR_ENABLE_GRP1 | GICD_CTLR_ARE_NS,
+        );
         let _ = read32(self.dist_base, GICD_CTLR);
         let redist = self.cpu_base as *mut u8;
-        if redist.is_null() { return; }
+        if redist.is_null() {
+            return;
+        }
         let waker = read32(redist, GICR_WAKER);
         if waker & WAKER_PROCESSOR_SLEEP != 0 {
             write32(redist, GICR_WAKER, waker & !WAKER_PROCESSOR_SLEEP);
             let mut timeout = 10000;
             while (read32(redist, GICR_WAKER) & WAKER_CHILDREN_ASLEEP) != 0 {
                 timeout -= 1;
-                if timeout == 0 { break; }
+                if timeout == 0 {
+                    break;
+                }
             }
         }
         let sgi = redist.add(GICR_SGI_BASE);
@@ -181,7 +206,13 @@ impl Gic {
 
     pub unsafe fn enable_cpu_interface(&self) {
         if self.version == GicVersion::V3 {
-            core::arch::asm!("mrs x0, ICC_SRE_EL1", "orr x0, x0, #1", "msr ICC_SRE_EL1, x0", "isb", options(nostack));
+            core::arch::asm!(
+                "mrs x0, ICC_SRE_EL1",
+                "orr x0, x0, #1",
+                "msr ICC_SRE_EL1, x0",
+                "isb",
+                options(nostack)
+            );
             core::arch::asm!("msr ICC_PMR_EL1, {0}", "isb", in(reg) 0xFFu64, options(nostack));
             core::arch::asm!("msr ICC_IGRPEN1_EL1, {0}", "isb", in(reg) 1u64, options(nostack));
             set_gic_sysreg_mode();
@@ -203,12 +234,20 @@ impl Gic {
 
     pub unsafe fn enable_irq(&self, irq: u32) {
         let idx = irq as usize;
-        write32(self.dist_base, GICD_ISENABLER + (idx / 32) * 4, 1 << (idx % 32));
+        write32(
+            self.dist_base,
+            GICD_ISENABLER + (idx / 32) * 4,
+            1 << (idx % 32),
+        );
     }
 
     pub unsafe fn disable_irq(&self, irq: u32) {
         let idx = irq as usize;
-        write32(self.dist_base, GICD_ICENABLER + (idx / 32) * 4, 1 << (idx % 32));
+        write32(
+            self.dist_base,
+            GICD_ICENABLER + (idx / 32) * 4,
+            1 << (idx % 32),
+        );
     }
 
     pub unsafe fn acknowledge(&self) -> u32 {

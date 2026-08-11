@@ -21,10 +21,34 @@ pub struct MemRights {
 }
 
 impl MemRights {
-    pub const READ: Self = MemRights { read: true, write: false, execute: false, map: false, share: false };
-    pub const WRITE: Self = MemRights { read: true, write: true, execute: false, map: false, share: false };
-    pub const EXEC: Self = MemRights { read: true, write: false, execute: true, map: false, share: false };
-    pub const FULL: Self = MemRights { read: true, write: true, execute: true, map: true, share: true };
+    pub const READ: Self = MemRights {
+        read: true,
+        write: false,
+        execute: false,
+        map: false,
+        share: false,
+    };
+    pub const WRITE: Self = MemRights {
+        read: true,
+        write: true,
+        execute: false,
+        map: false,
+        share: false,
+    };
+    pub const EXEC: Self = MemRights {
+        read: true,
+        write: false,
+        execute: true,
+        map: false,
+        share: false,
+    };
+    pub const FULL: Self = MemRights {
+        read: true,
+        write: true,
+        execute: true,
+        map: true,
+        share: true,
+    };
 }
 
 /// A capability granting access to a MemoryObject.
@@ -46,7 +70,12 @@ impl MemoryCapability {
         rights: MemRights,
         owner: OwnerId,
     ) -> Self {
-        MemoryCapability { id, object, rights, owner }
+        MemoryCapability {
+            id,
+            object,
+            rights,
+            owner,
+        }
     }
 
     /// Check whether this capability grants the requested rights.

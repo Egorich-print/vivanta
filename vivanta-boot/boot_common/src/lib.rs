@@ -8,16 +8,16 @@
 
 #![no_std]
 
+pub mod fdt;
+pub mod hardware;
+pub mod memory_discovery;
 pub mod ns16550;
 pub mod pl011;
-pub mod memory_discovery;
-pub mod hardware;
-pub mod fdt;
 
 // Re-export boot-info contract types so existing code keeps working
 pub use vivanta_boot_info::{
-    BootInfo, MemoryMap, MemoryRegion, MemoryRegionKind, MmioRegion, MmioKind,
-    InterruptControllerInfo,
+    BootInfo, InterruptControllerInfo, MemoryMap, MemoryRegion, MemoryRegionKind, MmioKind,
+    MmioRegion,
 };
 
 use core::cell::UnsafeCell;
@@ -36,7 +36,9 @@ pub struct EarlyPlatformInfo {
 static mut EARLY_PLATFORM: Option<EarlyPlatformInfo> = None;
 
 pub fn set_early_platform(info: EarlyPlatformInfo) {
-    unsafe { EARLY_PLATFORM = Some(info); }
+    unsafe {
+        EARLY_PLATFORM = Some(info);
+    }
 }
 
 pub fn early_platform() -> Option<EarlyPlatformInfo> {

@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "Hello World user program for Vivanta"
 
+# User-space EL0 binary (no_main): no host test harness.
+# Verified via QEMU EL0 boot.
 [[bin]]
 name = "hello"
 path = "src/main.rs"
+test = false
 
 [dependencies]
 vivanta-user-libc = { path = "../libc" }

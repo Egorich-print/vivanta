@@ -76,7 +76,10 @@ pub fn discover(memory_map: &MemoryMap, layout: &KernelLayout) -> MemoryRegions 
 
     // Early page tables
     if layout.page_tables_size > 0 {
-        push_reserved(layout.page_tables_start, layout.page_tables_start + layout.page_tables_size);
+        push_reserved(
+            layout.page_tables_start,
+            layout.page_tables_start + layout.page_tables_size,
+        );
     }
 
     // Sort reserved by start (insertion sort — no_std compatible, n ≤ 32)
@@ -150,4 +153,65 @@ pub fn discover(memory_map: &MemoryMap, layout: &KernelLayout) -> MemoryRegions 
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{MemoryMap, MemoryRegion, MemoryRegionKind};
+
+    fn region(start: u64, size: u64, kind: MemoryRegionKind) -> MemoryRegion {
+        MemoryRegion { start, size, kind }
+    }
+
+    fn layout() -> KernelLayout {
+        KernelLayout {
+            start: 0x4020_0000,
+            end: 0x4024_a000,
+            dtb: 0x4000_0000,
+            dtb_size: 0x10_0000,
+            page_tables_start: 0x4024_a000,
+            page_tables_size: 0x5000,
+        }
+    }
+
+    #[test]
+    fn single_usable_region_subtracts_kernel_dtb_tables() {
+        let mut map = MemoryMap::new();
+        map.push(region(0x4000_0000, 0x2000_0000, MemoryRegionKind::Usable)); // 512 MiB
+
+        let found = discover(&map, &layout());
+        assert_eq!(found.count, 2, "expected two gaps around reserved areas");
+
+        // Gap 1: [0x4010_0000, 0x4020_0000) — before kernel, after DTB.
+        assert_eq!(found.regions[0].start, 0x4010_0000);
+        assert_eq!(found.regions[0].end, 0x4020_0000);
+
+        // Gap 2: [0x4024_f000, 0x6000_0000) — after page tables.
+        assert_eq!(found.regions[1].start, 0x4024_f000);
+        assert_eq!(found.regions[1].end, 0x6000_0000);
+    }
+
+    #[test]
+    fn non_usable_region_is_fully_reserved() {
+        let mut map = MemoryMap::new();
+        map.push(region(0x4000_0000, 0x2000_0000, MemoryRegionKind::Usable));
+        map.push(region(0x5000_0000, 0x1000, MemoryRegionKind::Mmio));
+
+        let found = discover(&map, &layout());
+        // The Mmio region inside usable must be subtracted too.
+        for r in found.iter() {
+            assert!(
+                !(r.start <= 0x5000_0000 && r.end > 0x5000_1000),
+                "MMIO region leaked into available memory"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_memory_map_yields_nothing() {
+        let map = MemoryMap::new();
+        let found = discover(&map, &layout());
+        assert_eq!(found.count, 0);
+    }
 }

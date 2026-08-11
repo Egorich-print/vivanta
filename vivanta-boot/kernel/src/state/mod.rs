@@ -42,7 +42,9 @@ impl SystemState {
     /// Called after `PmmBitmap` and `PmmBackend` are constructed.
     pub fn init_memory(&mut self, backend: &mut (dyn crate::memory::MemoryBackend + 'static)) {
         let mut mrm = MemoryResourceManager::new();
-        unsafe { mrm.register(backend); }
+        unsafe {
+            mrm.register(backend);
+        }
         self.memory_manager = Some(mrm);
     }
 

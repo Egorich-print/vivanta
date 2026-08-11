@@ -11,3 +11,10 @@ vivanta-arch-api = { path = "../arch-api" }
 vivanta-arch-aarch64 = { path = "../arch-aarch64" }
 vivanta-platform-amlogic = { path = "../platform-amlogic" }
 vivanta-kernel = { path = "../kernel" }
+
+# Bare-metal firmware binary (no_main + linker script): no host libtest.
+# Verified via QEMU boot.
+[[bin]]
+name = "target_suma_q5"
+path = "src/main.rs"
+test = false

@@ -1,12 +1,12 @@
 #![no_std]
 
+pub mod interrupts;
 pub mod mmap;
 pub mod mmio;
-pub mod interrupts;
 
-pub use mmap::{MemoryMap, MemoryRegion, RegionType, MemoryRegionKind};
-pub use mmio::{MmioRegion, MmioKind};
 pub use interrupts::InterruptControllerInfo;
+pub use mmap::{MemoryMap, MemoryRegion, MemoryRegionKind, RegionType};
+pub use mmio::{MmioKind, MmioRegion};
 
 #[repr(C)]
 pub struct BootInfo {

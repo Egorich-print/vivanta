@@ -29,7 +29,10 @@ impl MemoryResourceManager {
     ///
     /// The backend must be `'static` (no borrowed references)
     /// so its raw pointer can be stored in the backend array.
-    pub unsafe fn register(&mut self, backend: &mut (dyn MemoryBackend + 'static)) -> Option<ResourceId> {
+    pub unsafe fn register(
+        &mut self,
+        backend: &mut (dyn MemoryBackend + 'static),
+    ) -> Option<ResourceId> {
         if self.count >= MAX_BACKENDS {
             return None;
         }

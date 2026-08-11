@@ -26,8 +26,16 @@ pub struct Mapping {
 }
 
 impl Mapping {
-    pub const fn new(virt_range: VirtRange, object_id: MemoryObjectId, permissions: MappingFlags) -> Self {
-        Self { virt_range, object_id, permissions }
+    pub const fn new(
+        virt_range: VirtRange,
+        object_id: MemoryObjectId,
+        permissions: MappingFlags,
+    ) -> Self {
+        Self {
+            virt_range,
+            object_id,
+            permissions,
+        }
     }
 }
 
@@ -72,7 +80,9 @@ impl MappingSet {
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Mapping> {
-        self.mappings[..self.count].iter().filter_map(|m| m.as_ref())
+        self.mappings[..self.count]
+            .iter()
+            .filter_map(|m| m.as_ref())
     }
 
     pub fn len(&self) -> usize {

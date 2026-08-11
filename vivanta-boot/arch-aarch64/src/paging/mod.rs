@@ -1,7 +1,7 @@
 pub mod descriptor;
-pub mod walker;
 pub mod mapper;
 pub mod self_test;
+pub mod walker;
 
 use descriptor::*;
 
@@ -34,19 +34,44 @@ pub struct Permissions {
 
 impl Permissions {
     pub const fn kernel_rw() -> Self {
-        Permissions { readable: true, writable: true, executable: false, user: false }
+        Permissions {
+            readable: true,
+            writable: true,
+            executable: false,
+            user: false,
+        }
     }
     pub const fn kernel_rwx() -> Self {
-        Permissions { readable: true, writable: true, executable: true, user: false }
+        Permissions {
+            readable: true,
+            writable: true,
+            executable: true,
+            user: false,
+        }
     }
     pub const fn kernel_rx() -> Self {
-        Permissions { readable: true, writable: false, executable: true, user: false }
+        Permissions {
+            readable: true,
+            writable: false,
+            executable: true,
+            user: false,
+        }
     }
     pub const fn user_rw() -> Self {
-        Permissions { readable: true, writable: true, executable: false, user: true }
+        Permissions {
+            readable: true,
+            writable: true,
+            executable: false,
+            user: true,
+        }
     }
     pub const fn none() -> Self {
-        Permissions { readable: false, writable: false, executable: false, user: false }
+        Permissions {
+            readable: false,
+            writable: false,
+            executable: false,
+            user: false,
+        }
     }
 }
 
@@ -60,18 +85,23 @@ pub struct MappingFlags {
 
 impl MappingFlags {
     pub const fn normal(perms: Permissions) -> Self {
-        MappingFlags { perms, mem_type: MemoryType::Normal }
+        MappingFlags {
+            perms,
+            mem_type: MemoryType::Normal,
+        }
     }
     pub const fn device(perms: Permissions) -> Self {
-        MappingFlags { perms, mem_type: MemoryType::Device }
+        MappingFlags {
+            perms,
+            mem_type: MemoryType::Device,
+        }
     }
     pub const fn identity() -> Self {
         MappingFlags::normal(Permissions::kernel_rwx())
     }
 
     fn to_descriptor_bits(self, phys: u64, is_block: bool) -> u64 {
-        let mut d = DESC_VALID | DESC_AF | DESC_SH_INNER
-            | (self.mem_type.to_attr_index() << 2);
+        let mut d = DESC_VALID | DESC_AF | DESC_SH_INNER | (self.mem_type.to_attr_index() << 2);
 
         if !is_block {
             d |= DESC_TABLE;
@@ -104,7 +134,12 @@ pub struct Mapping {
 
 impl Mapping {
     pub const fn new(va: u64, pa: u64, size: u64, flags: MappingFlags) -> Self {
-        Mapping { va, pa, size, flags }
+        Mapping {
+            va,
+            pa,
+            size,
+            flags,
+        }
     }
 }
 

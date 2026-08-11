@@ -4,10 +4,10 @@
 
 #![no_std]
 
-use vivanta_boot_common::set_console;
 use vivanta_boot_common::fdt::FdtScanner;
-use vivanta_boot_common::ns16550::Ns16550;
 use vivanta_boot_common::hardware::NS16550_FAMILY;
+use vivanta_boot_common::ns16550::Ns16550;
+use vivanta_boot_common::set_console;
 
 /// Hardcoded console init — no FDT dependency, always works.
 pub fn init_console_hardcoded() {

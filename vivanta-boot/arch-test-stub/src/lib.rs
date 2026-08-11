@@ -11,22 +11,40 @@
 pub unsafe extern "Rust" fn early_init() {}
 #[no_mangle]
 pub unsafe extern "Rust" fn wait_for_interrupt() {
-    loop { core::hint::spin_loop() }
+    loop {
+        core::hint::spin_loop()
+    }
 }
 
 // mmu
 #[no_mangle]
-pub unsafe extern "Rust" fn mmu_init(_alloc_ctx: *mut (), _alloc: unsafe extern "Rust" fn(*mut ()) -> u64) -> usize { 0 }
+pub unsafe extern "Rust" fn mmu_init(
+    _alloc_ctx: *mut (),
+    _alloc: unsafe extern "Rust" fn(*mut ()) -> u64,
+) -> usize {
+    0
+}
 #[no_mangle]
-pub unsafe extern "Rust" fn mmu_map_range(_pt: usize, _vaddr: u64, _paddr: u64, _size: u64, _user: bool) {}
+pub unsafe extern "Rust" fn mmu_map_range(
+    _pt: usize,
+    _vaddr: u64,
+    _paddr: u64,
+    _size: u64,
+    _user: bool,
+) {
+}
 #[no_mangle]
 pub unsafe extern "Rust" fn mmu_map_ram(_pt: usize, _vaddr: u64, _paddr: u64, _size: u64) {}
 #[no_mangle]
 pub unsafe extern "Rust" fn mmu_activate(_pt: usize) {}
 #[no_mangle]
-pub unsafe extern "Rust" fn mmu_root_addr(_pt: usize) -> u64 { 0 }
+pub unsafe extern "Rust" fn mmu_root_addr(_pt: usize) -> u64 {
+    0
+}
 #[no_mangle]
-pub unsafe extern "Rust" fn mmu_alloc_frame(_pt: usize) -> u64 { 0 }
+pub unsafe extern "Rust" fn mmu_alloc_frame(_pt: usize) -> u64 {
+    0
+}
 
 // irq
 #[no_mangle]
@@ -41,7 +59,12 @@ pub unsafe extern "Rust" fn timer_init() {}
 // context
 use vivanta_arch_api::context::{ArchContext, ExecutionLevel};
 #[no_mangle]
-pub unsafe extern "Rust" fn context_init(_stack_top: usize, _user_stack_top: usize, _entry: usize, _level: ExecutionLevel) -> ArchContext {
+pub unsafe extern "Rust" fn context_init(
+    _stack_top: usize,
+    _user_stack_top: usize,
+    _entry: usize,
+    _level: ExecutionLevel,
+) -> ArchContext {
     ArchContext::from_raw(0)
 }
 #[no_mangle]
@@ -53,10 +76,19 @@ pub unsafe extern "Rust" fn context_switch(_old: *mut ArchContext, _new: ArchCon
 
 // user (only needed if user_bootstrap is in the boot module)
 #[no_mangle]
-pub unsafe extern "Rust" fn user_bootstrap(_pt: usize) -> usize { 0 }
+pub unsafe extern "Rust" fn user_bootstrap(_pt: usize) -> usize {
+    0
+}
 
 #[no_mangle]
-pub unsafe extern "Rust" fn mmu_map_user_pages(_pt: usize, _code_va: u64, _code_src: *const u8, _code_len: usize, _stack_va: u64) {}
+pub unsafe extern "Rust" fn mmu_map_user_pages(
+    _pt: usize,
+    _code_va: u64,
+    _code_src: *const u8,
+    _code_len: usize,
+    _stack_va: u64,
+) {
+}
 
 #[no_mangle]
 pub unsafe extern "Rust" fn flush_user_code_icache() {}
@@ -72,10 +104,24 @@ use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator, RootPageTable};
 pub unsafe extern "Rust" fn activate_address_space(_root: RootPageTable) {}
 
 #[no_mangle]
-pub unsafe extern "Rust" fn mmu_map_object(_pt: RootPageTable, _vaddr: u64, _paddr: u64, _size: u64, _flags: MappingFlags, _alloc: &mut dyn PageTableAllocator) {}
+pub unsafe extern "Rust" fn mmu_map_object(
+    _pt: RootPageTable,
+    _vaddr: u64,
+    _paddr: u64,
+    _size: u64,
+    _flags: MappingFlags,
+    _alloc: &mut dyn PageTableAllocator,
+) {
+}
 
 #[no_mangle]
-pub unsafe extern "Rust" fn mmu_unmap(_pt: RootPageTable, _vaddr: u64, _size: u64, _alloc: &mut dyn PageTableAllocator) {}
+pub unsafe extern "Rust" fn mmu_unmap(
+    _pt: RootPageTable,
+    _vaddr: u64,
+    _size: u64,
+    _alloc: &mut dyn PageTableAllocator,
+) {
+}
 
 #[no_mangle]
 pub unsafe extern "Rust" fn mmu_self_test() {}

@@ -2,6 +2,7 @@
 // AArch64 context switch assembly — used by vivanta_kernel scheduler
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "none")]
 core::arch::global_asm!(
     ".global context_switch_asm",
     "context_switch_asm:",

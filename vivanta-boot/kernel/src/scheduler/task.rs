@@ -1,9 +1,9 @@
-use alloc::vec;
-use alloc::vec::Vec;
 use crate::memory::MemoryObject;
 use crate::scheduler::thread::ThreadId;
-use crate::vmm::AddressSpaceId;
 use crate::signal::SignalState;
+use crate::vmm::AddressSpaceId;
+use alloc::vec;
+use alloc::vec::Vec;
 
 pub type TaskId = u64;
 

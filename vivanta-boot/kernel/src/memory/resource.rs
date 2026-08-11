@@ -91,7 +91,11 @@ impl MemoryProperties {
 
 impl fmt::Display for MemoryProperties {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "cap={} lat={}ns bw={}MB/s", self.capacity, self.latency_ns, self.bandwidth_mb_s)
+        write!(
+            f,
+            "cap={} lat={}ns bw={}MB/s",
+            self.capacity, self.latency_ns, self.bandwidth_mb_s
+        )
     }
 }
 

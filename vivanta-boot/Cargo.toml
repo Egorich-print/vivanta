@@ -26,7 +26,6 @@ members = [
 
     # --- Target binaries ---
     "target-qemu-aarch64",
-    "target-qemu-armv7a",
     "target-rk3568",
     "target-x96q",
     "target-lavender",

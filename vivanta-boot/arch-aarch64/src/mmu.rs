@@ -2,10 +2,10 @@
 // AArch64 4-level page table builder
 // ---------------------------------------------------------------------------
 
-use vivanta_arch_api::pmm::{FrameAllocator, PhysFrame};
 use crate::barrier;
 use crate::paging::descriptor::*;
 use crate::paging::walker::*;
+use vivanta_arch_api::pmm::{FrameAllocator, PhysFrame};
 
 /// Page attribute flags — describes intended access semantics.
 ///
@@ -21,13 +21,55 @@ pub struct PageFlags {
 }
 
 impl PageFlags {
-    pub const READ_ONLY: Self = Self { writable: false, executable: false, user: false, privileged_executable: true, device: false };
-    pub const READ_WRITE: Self = Self { writable: true, executable: false, user: false, privileged_executable: true, device: false };
-    pub const READ_WRITE_EXEC: Self = Self { writable: true, executable: true, user: false, privileged_executable: true, device: false };
-    pub const USER_READ_WRITE: Self = Self { writable: true, executable: false, user: true, privileged_executable: false, device: false };
-    pub const USER_READ_WRITE_EXEC: Self = Self { writable: true, executable: true, user: true, privileged_executable: false, device: false };
-    pub const DEVICE: Self = Self { writable: true, executable: false, user: false, privileged_executable: false, device: true };
-    pub const USER_DEVICE: Self = Self { writable: true, executable: false, user: true, privileged_executable: false, device: true };
+    pub const READ_ONLY: Self = Self {
+        writable: false,
+        executable: false,
+        user: false,
+        privileged_executable: true,
+        device: false,
+    };
+    pub const READ_WRITE: Self = Self {
+        writable: true,
+        executable: false,
+        user: false,
+        privileged_executable: true,
+        device: false,
+    };
+    pub const READ_WRITE_EXEC: Self = Self {
+        writable: true,
+        executable: true,
+        user: false,
+        privileged_executable: true,
+        device: false,
+    };
+    pub const USER_READ_WRITE: Self = Self {
+        writable: true,
+        executable: false,
+        user: true,
+        privileged_executable: false,
+        device: false,
+    };
+    pub const USER_READ_WRITE_EXEC: Self = Self {
+        writable: true,
+        executable: true,
+        user: true,
+        privileged_executable: false,
+        device: false,
+    };
+    pub const DEVICE: Self = Self {
+        writable: true,
+        executable: false,
+        user: false,
+        privileged_executable: false,
+        device: true,
+    };
+    pub const USER_DEVICE: Self = Self {
+        writable: true,
+        executable: false,
+        user: true,
+        privileged_executable: false,
+        device: true,
+    };
 }
 
 fn table_desc(phys: u64) -> u64 {
@@ -35,8 +77,16 @@ fn table_desc(phys: u64) -> u64 {
 }
 
 fn block_or_page_desc(phys: u64, flags: PageFlags, is_page: bool) -> u64 {
-    let attr_idx = if flags.device { DESC_ATTRIDX_DEVICE } else { DESC_ATTRIDX_NORMAL };
-    let sh = if flags.device { DESC_SH_NON } else { DESC_SH_INNER };
+    let attr_idx = if flags.device {
+        DESC_ATTRIDX_DEVICE
+    } else {
+        DESC_ATTRIDX_NORMAL
+    };
+    let sh = if flags.device {
+        DESC_SH_NON
+    } else {
+        DESC_SH_INNER
+    };
     let mut d = DESC_VALID | DESC_AF | sh | attr_idx;
     if is_page {
         d |= DESC_TABLE;
@@ -125,13 +175,23 @@ impl<A: FrameAllocator> PageTableBuilder<A> {
         let entry = self.read(table, idx);
         if entry & DESC_VALID != 0 {
             if entry & DESC_TABLE == 0 {
-                let l3_frame = self.alloc.alloc_frame().expect("cannot alloc L3 frame").addr;
-                unsafe { split_l2_block(table, idx, entry, l3_frame); }
+                let l3_frame = self
+                    .alloc
+                    .alloc_frame()
+                    .expect("cannot alloc L3 frame")
+                    .addr;
+                unsafe {
+                    split_l2_block(table, idx, entry, l3_frame);
+                }
                 return l3_frame;
             }
             return entry & ADDR_MASK;
         }
-        let frame = self.alloc.alloc_frame().expect("cannot alloc page-table frame").addr;
+        let frame = self
+            .alloc
+            .alloc_frame()
+            .expect("cannot alloc page-table frame")
+            .addr;
         unsafe { core::ptr::write_bytes(frame as *mut u8, 0, 4096) }
         self.write(table, idx, table_desc(frame));
         frame
@@ -146,12 +206,8 @@ impl PageTableGuard {
         asm!("msr mair_el1, {}", in(reg) 0x44_FF_u64);
 
         // 2. Set translation control
-        let tcr: u64 = (25)
-            | (0b01 << 8)
-            | (0b01 << 10)
-            | (0b11 << 12)
-            | (0b00 << 14)
-            | (3u64 << 32);
+        let tcr: u64 =
+            (25) | (0b01 << 8) | (0b01 << 10) | (0b11 << 12) | (0b00 << 14) | (3u64 << 32);
         asm!("msr tcr_el1, {}", in(reg) tcr);
 
         // 3. Flush TLB (from early identity map)
@@ -216,8 +272,6 @@ fn flags_to_desc_bits(flags: MappingFlags, phys: u64) -> u64 {
     d | (phys & ADDR_MASK)
 }
 
-
-
 #[no_mangle]
 pub unsafe extern "Rust" fn mmu_map_object(
     pt: RootPageTable,
@@ -238,7 +292,11 @@ pub unsafe extern "Rust" fn mmu_map_object(
                     write_desc(l3_table + (l3_idx as u64) * 8, desc);
                     break;
                 }
-                WalkResult::NeedsSplit { l2_table_addr, l2_index, block_desc } => {
+                WalkResult::NeedsSplit {
+                    l2_table_addr,
+                    l2_index,
+                    block_desc,
+                } => {
                     let frame_paddr = alloc.alloc_page_table_frame();
                     split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
                 }
@@ -266,7 +324,11 @@ pub unsafe extern "Rust" fn mmu_unmap(
                     write_desc(l3_table + (l3_idx as u64) * 8, 0);
                     break;
                 }
-                WalkResult::NeedsSplit { l2_table_addr, l2_index, block_desc } => {
+                WalkResult::NeedsSplit {
+                    l2_table_addr,
+                    l2_index,
+                    block_desc,
+                } => {
                     let frame_paddr = alloc.alloc_page_table_frame();
                     split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
                 }
@@ -291,9 +353,15 @@ pub unsafe fn dump_walk(root: u64, va: u64, label: &str) {
 
     let l1_entry = core::ptr::read_volatile((root + (l1_idx as u64) * 8) as *const u64);
     let l1_valid = l1_entry & DESC_VALID != 0;
-    let l1_table = l1_entry & DESC_VALID | DESC_TABLE != 0;
-    vivanta_boot_common::println!("  {} VA={:#x}: L1[{}]={:#x} valid={} table={}",
-        label, va, l1_idx, l1_entry, l1_valid, l1_entry & DESC_TABLE != 0);
+    vivanta_boot_common::println!(
+        "  {} VA={:#x}: L1[{}]={:#x} valid={} table={}",
+        label,
+        va,
+        l1_idx,
+        l1_entry,
+        l1_valid,
+        l1_entry & DESC_TABLE != 0
+    );
 
     if !l1_valid || l1_entry & DESC_TABLE == 0 {
         return;
@@ -303,14 +371,26 @@ pub unsafe fn dump_walk(root: u64, va: u64, label: &str) {
     let l2_entry = core::ptr::read_volatile((l2_table + (l2_idx as u64) * 8) as *const u64);
     let l2_valid = l2_entry & DESC_VALID != 0;
     let l2_is_table = l2_entry & DESC_TABLE != 0;
-    vivanta_boot_common::println!("    L2[{}]={:#x} valid={} table={}", l2_idx, l2_entry, l2_valid, l2_is_table);
+    vivanta_boot_common::println!(
+        "    L2[{}]={:#x} valid={} table={}",
+        l2_idx,
+        l2_entry,
+        l2_valid,
+        l2_is_table
+    );
 
-    if !l2_valid { return; }
+    if !l2_valid {
+        return;
+    }
 
     if !l2_is_table {
         // L2 block — maps 2 MiB
         let block_pa = l2_entry & ADDR_MASK_BLOCK;
-        vivanta_boot_common::println!("    -> BLOCK PA={:#x} (offset={:#x})", block_pa | page_offset, page_offset);
+        vivanta_boot_common::println!(
+            "    -> BLOCK PA={:#x} (offset={:#x})",
+            block_pa | page_offset,
+            page_offset
+        );
         return;
     }
 
@@ -336,7 +416,10 @@ pub unsafe extern "Rust" fn dump_critical_tables(root: u64) {
     dump_walk(root, pc, "PC");
 
     // Kernel start / end
-    extern "C" { static __kernel_start: u8; static __stack_top: u8; }
+    extern "C" {
+        static __kernel_start: u8;
+        static __stack_top: u8;
+    }
     let ks = &__kernel_start as *const u8 as u64;
     let ke = &__stack_top as *const u8 as u64;
     dump_walk(root, ks, "kernel_start");

@@ -1,3 +1,4 @@
+use crate::error::{PmmError, PmmResult};
 use vivanta_arch_api::pmm::{FrameAllocator, PhysFrame};
 use vivanta_boot_common::memory_discovery::AvailableRegion;
 
@@ -60,7 +61,8 @@ impl PmmBitmap {
     pub unsafe fn new(region: &AvailableRegion) -> Self {
         assert!(
             region.start % FRAME_SIZE == 0,
-            "PMM: region start ({:#x}) must be page-aligned", region.start
+            "PMM: region start ({:#x}) must be page-aligned",
+            region.start
         );
         let bitmap_start = region.start as *mut u8;
         let region_size = region.end - region.start;
@@ -109,12 +111,21 @@ impl PmmBitmap {
         self.region_start
     }
 
-    pub fn allocate_page(&mut self) -> Option<u64> {
-        self.alloc_frame().map(|f| f.addr)
+    #[must_use]
+    pub fn allocate_page(&mut self) -> PmmResult<u64> {
+        self.alloc_frame()
+            .map(|f| f.addr)
+            .ok_or(PmmError::OutOfMemory)
     }
 
-    pub fn free_page(&mut self, addr: u64) {
+    pub fn free_page(&mut self, addr: u64) -> PmmResult<()> {
+        if addr < self.region_start
+            || addr >= self.region_start + self.total_frames as u64 * FRAME_SIZE
+        {
+            return Err(PmmError::InvalidAddress);
+        }
         self.free_frame(PhysFrame { addr });
+        Ok(())
     }
 
     pub fn reserve_page(&mut self, addr: u64) {
@@ -147,25 +158,27 @@ impl PmmBitmap {
         }
     }
 
-    pub fn run_self_test(&mut self) {
-        let a = self.allocate_page();
-        let b = self.allocate_page();
+    pub fn run_self_test(&mut self) -> PmmResult<()> {
+        let pa = self.allocate_page()?;
+        let pb = self.allocate_page()?;
 
-        if let (Some(pa), Some(pb)) = (a, b) {
-            assert_ne!(pa, pb, "PMM: consecutive pages have same address");
-            assert!(self.is_allocated(pa), "PMM: page not marked allocated");
-            assert!(self.is_allocated(pb), "PMM: page not marked allocated");
+        assert_ne!(pa, pb, "PMM: consecutive pages have same address");
+        assert!(self.is_allocated(pa), "PMM: page not marked allocated");
+        assert!(self.is_allocated(pb), "PMM: page not marked allocated");
 
-            self.free_page(pa);
-            assert!(!self.is_allocated(pa), "PMM: page not freed");
+        self.free_page(pa)?;
+        assert!(!self.is_allocated(pa), "PMM: page not freed");
 
-            let re_alloc = self.allocate_page().expect("PMM: cannot reuse freed page");
-            assert_eq!(re_alloc, pa, "PMM: freed page not reused first");
+        let re_alloc = self.allocate_page()?;
+        assert_eq!(re_alloc, pa, "PMM: freed page not reused first");
 
-            self.free_page(re_alloc);
-            self.free_page(pb);
-        }
+        self.free_page(re_alloc)?;
+        self.free_page(pb)?;
 
-        assert_eq!(self.allocated_count, 0, "PMM: allocated leak after self-test");
+        assert_eq!(
+            self.allocated_count, 0,
+            "PMM: allocated leak after self-test"
+        );
+        Ok(())
     }
 }

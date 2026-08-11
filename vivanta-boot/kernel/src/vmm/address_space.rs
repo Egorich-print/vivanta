@@ -1,5 +1,5 @@
-use vivanta_arch_api::mmu::{RootPageTable, MappingFlags, PageTableAllocator};
 use super::mapping::{Mapping, MappingSet, VirtRange};
+use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator, RootPageTable};
 
 pub type AddressSpaceId = u64;
 
@@ -49,7 +49,8 @@ impl AddressSpace {
         }
         let range = VirtRange::new(vaddr, size);
         let mapping = Mapping::new(range, object_id, flags);
-        self.mappings.insert(mapping)
+        self.mappings
+            .insert(mapping)
             .ok_or(VmmError::MappingTableFull)?;
         Ok(())
     }
@@ -76,9 +77,9 @@ impl AddressSpace {
     }
 
     pub fn query(&self, vaddr: u64) -> Option<&Mapping> {
-        self.mappings.iter().find(|m| {
-            vaddr >= m.virt_range.base && vaddr < m.virt_range.end()
-        })
+        self.mappings
+            .iter()
+            .find(|m| vaddr >= m.virt_range.base && vaddr < m.virt_range.end())
     }
 
     /// Change permissions on an existing mapping.
@@ -101,9 +102,8 @@ pub enum VmmError {
     NotMapped,
 }
 
-static mut ADDRESS_SPACES: [Option<AddressSpace>; MAX_ADDRESS_SPACES] = [
-    None, None, None, None, None, None, None, None,
-];
+static mut ADDRESS_SPACES: [Option<AddressSpace>; MAX_ADDRESS_SPACES] =
+    [None, None, None, None, None, None, None, None];
 static mut NEXT_AS_ID: AddressSpaceId = 1;
 
 pub fn init_kernel_address_space(root: RootPageTable) {
@@ -147,13 +147,17 @@ pub fn lookup_root(as_id: AddressSpaceId) -> RootPageTable {
 
 pub fn kernel_address_space() -> &'static AddressSpace {
     unsafe {
-        ADDRESS_SPACES[0].as_ref().expect("KernelAddressSpace not initialised")
+        ADDRESS_SPACES[0]
+            .as_ref()
+            .expect("KernelAddressSpace not initialised")
     }
 }
 
 pub fn kernel_address_space_mut() -> &'static mut AddressSpace {
     unsafe {
-        ADDRESS_SPACES[0].as_mut().expect("KernelAddressSpace not initialised")
+        ADDRESS_SPACES[0]
+            .as_mut()
+            .expect("KernelAddressSpace not initialised")
     }
 }
 

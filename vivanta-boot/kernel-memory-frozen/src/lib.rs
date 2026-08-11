@@ -1,14 +1,14 @@
 #![no_std]
 
-pub mod object;
-pub mod resource;
-pub mod manager;
 pub mod capability;
+pub mod manager;
+pub mod object;
 pub mod policy;
+pub mod resource;
 
-pub use object::MemoryObject;
-pub use resource::MemoryBackend;
-pub use manager::MemoryResourceManager;
-pub use capability::MemoryCapability;
 pub use capability::MemRights;
-pub use policy::{PlacementPolicy, AllocationRequirements};
+pub use capability::MemoryCapability;
+pub use manager::MemoryResourceManager;
+pub use object::MemoryObject;
+pub use policy::{AllocationRequirements, PlacementPolicy};
+pub use resource::MemoryBackend;

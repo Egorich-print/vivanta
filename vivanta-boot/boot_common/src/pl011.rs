@@ -9,7 +9,9 @@ unsafe impl Sync for Pl011 {}
 
 impl Pl011 {
     pub const fn new(base: usize) -> Self {
-        Pl011 { base: base as *mut u32 }
+        Pl011 {
+            base: base as *mut u32,
+        }
     }
 
     fn reg(&self, offset: u32) -> *mut u32 {

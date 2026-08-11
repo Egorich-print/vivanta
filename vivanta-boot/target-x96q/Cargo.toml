@@ -11,3 +11,10 @@ vivanta-arch-api = { path = "../arch-api" }
 vivanta-arch-aarch64 = { path = "../arch-aarch64" }
 vivanta-platform-allwinner-h616 = { path = "../platform-allwinner-h616" }
 vivanta-kernel = { path = "../kernel" }
+
+# Bare-metal firmware binary (no_main + linker script): no host libtest.
+# Verified via QEMU boot.
+[[bin]]
+name = "target_x96q"
+path = "src/main.rs"
+test = false

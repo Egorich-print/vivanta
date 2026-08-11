@@ -1,4 +1,5 @@
 #![no_std]
+#![allow(static_mut_refs)]
 extern crate alloc;
 
 use memory::KernelHeap;
@@ -6,6 +7,7 @@ use memory::KernelHeap;
 #[global_allocator]
 static ALLOCATOR: KernelHeap = KernelHeap::uninitialized();
 
+pub mod error;
 pub mod identity;
 pub mod memory;
 pub mod pmm;
@@ -13,15 +15,17 @@ pub mod scheduler;
 pub mod signal;
 pub mod state;
 pub mod syscall;
+pub mod usercopy;
+pub mod verify;
 pub mod vmm;
 
 pub use vivanta_arch_api::pmm::{FrameAllocator, PhysFrame};
 
-use vivanta_boot_common::{println, MemoryRegionKind};
-use vivanta_boot_common::memory_discovery::{self, KernelLayout};
-use vivanta_boot_info::BootInfo;
-use vivanta_arch_api::mmu::RootPageTable;
 use crate::memory::PmmBackend;
+use vivanta_arch_api::mmu::RootPageTable;
+use vivanta_boot_common::memory_discovery::{self, KernelLayout};
+use vivanta_boot_common::{println, MemoryRegionKind};
+use vivanta_boot_info::BootInfo;
 
 extern "C" {
     static __kernel_start: u8;
@@ -44,7 +48,9 @@ pub unsafe extern "Rust" fn boot_alloc_frame(ctx: *mut ()) -> u64 {
 /// The one and only vivanta_kernel entry point.
 pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!();
-    println!("\u{2500}\u{2500}\u{2500}\u{2500} Vivanta Kernel Entry \u{2500}\u{2500}\u{2500}\u{2500}");
+    println!(
+        "\u{2500}\u{2500}\u{2500}\u{2500} Vivanta Kernel Entry \u{2500}\u{2500}\u{2500}\u{2500}"
+    );
 
     // V1.1: Runtime Identity Bootstrap — construct SystemState from BootInfo
     let mut system_state = state::SystemState::from_boot_info(info);
@@ -110,14 +116,25 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let pmm_reserved = pmm.reserved_count();
     println!();
     println!("Physical Memory Manager:");
-    println!("  Region    0x{:016x} – 0x{:016x}  ({} MiB)",
-        pmm.region_start(), pmm.region_start() + (region.end - region.start) - 1,
-        (region.end - region.start) >> 20);
-    println!("  Total {}  Reserved {}  Free {}  frames",
-        total, pmm_reserved, pmm.free_count());
+    println!(
+        "  Region    0x{:016x} – 0x{:016x}  ({} MiB)",
+        pmm.region_start(),
+        pmm.region_start() + (region.end - region.start) - 1,
+        (region.end - region.start) >> 20
+    );
+    println!(
+        "  Total {}  Reserved {}  Free {}  frames",
+        total,
+        pmm_reserved,
+        pmm.free_count()
+    );
 
-    pmm.run_self_test();
+    pmm.run_self_test().expect("PMM self-test failed");
     println!("  PMM self-test ok");
+
+    // M5.0: Runtime stress-test (1000 alloc/free cycles with invariant validation)
+    crate::verify::stress_test_pmm(&mut pmm, 1000).expect("PMM stress-test failed");
+    println!("  PMM stress-test (1000 cycles) ok");
 
     // Init MRM with PmmBackend (no hardware borrow alive here)
     let mut pmm_backend = unsafe { PmmBackend::new_dram(&mut pmm as *mut dyn FrameAllocator) };
@@ -131,13 +148,20 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             .allocate(&memory::AllocationRequirements::new(heap_size), 0)
             .expect("KernelHeap: allocation failed");
         let heap_base = heap_obj.phys_addr.expect("KernelHeap: no phys addr");
-        unsafe { core::ptr::write_bytes(heap_base as *mut u8, 0, heap_size as usize); }
+        unsafe {
+            core::ptr::write_bytes(heap_base as *mut u8, 0, heap_size as usize);
+        }
         ALLOCATOR.init(heap_base as usize, heap_size as usize);
         println!("  KernelHeap: 64 KiB @ 0x{:x}", heap_base);
 
         // heap smoke test
         let v = alloc::vec![1u8, 2, 3, 4];
-        println!("  Heap smoke: vec={:?} (len={}, cap={})", &v[..], v.len(), v.capacity());
+        println!(
+            "  Heap smoke: vec={:?} (len={}, cap={})",
+            &v[..],
+            v.len(),
+            v.capacity()
+        );
     }
 
     let mrm = system_state.memory_manager();
@@ -170,7 +194,11 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     // Map MMIO regions (from HardwareState per ADR-021)
     for mmio in hardware.mmio_regions {
         vivanta_arch_api::boot::mmu::mmu_map_range(
-            pt, mmio.base, mmio.base, mmio.size, mmio.kind.is_user_accessible(),
+            pt,
+            mmio.base,
+            mmio.base,
+            mmio.size,
+            mmio.kind.is_user_accessible(),
         );
     }
 
@@ -180,17 +208,31 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     //     println!("  User token: 0x{:x}", user_token);
     // }
 
-    println!("  L1 table at     0x{:x}", vivanta_arch_api::boot::mmu::mmu_root_addr(pt));
+    println!(
+        "  L1 table at     0x{:x}",
+        vivanta_arch_api::boot::mmu::mmu_root_addr(pt)
+    );
     for r in hardware.memory_map.regions() {
         use vivanta_boot_common::MemoryRegionKind;
         if r.kind == MemoryRegionKind::Usable {
-            println!("  RAM ident:      0x{:016x} – 0x{:016x}  ({} MiB)",
-                r.start, r.start + r.size - 1, r.size >> 20);
+            println!(
+                "  RAM ident:      0x{:016x} – 0x{:016x}  ({} MiB)",
+                r.start,
+                r.start + r.size - 1,
+                r.size >> 20
+            );
         }
     }
     for mmio in hardware.mmio_regions {
-        let kind_str = if mmio.kind.is_user_accessible() { "user" } else { "vivanta_kernel" };
-        println!("  MMIO ident:     0x{:x} ({} bytes, {})", mmio.base, mmio.size, kind_str);
+        let kind_str = if mmio.kind.is_user_accessible() {
+            "user"
+        } else {
+            "vivanta_kernel"
+        };
+        println!(
+            "  MMIO ident:     0x{:x} ({} bytes, {})",
+            mmio.base, mmio.size, kind_str
+        );
     }
 
     // ------- Wrap in AddressSpace ------------------------------------------
@@ -210,7 +252,11 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         }
         for mmio in hardware.mmio_regions {
             vivanta_arch_api::boot::mmu::mmu_map_range(
-                rpt, mmio.base, mmio.base, mmio.size, mmio.kind.is_user_accessible(),
+                rpt,
+                mmio.base,
+                mmio.base,
+                mmio.size,
+                mmio.kind.is_user_accessible(),
             );
         }
         if extra_pa != 0 {
@@ -219,10 +265,13 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         // M4.5.1: map user code + stack into UserAS1
         if label == "UserAS1" {
             let code_src = &user_code_start as *const u8;
-            let code_len = (&user_code_end as *const u8 as usize) - (&user_code_start as *const u8 as usize);
+            let code_len =
+                (&user_code_end as *const u8 as usize) - (&user_code_start as *const u8 as usize);
             const CODE_VA: u64 = 0x5E00_0000;
             const STACK_VA: u64 = 0x5E01_0000;
-            vivanta_arch_api::boot::mmu::mmu_map_user_pages(rpt, CODE_VA, code_src, code_len, STACK_VA);
+            vivanta_arch_api::boot::mmu::mmu_map_user_pages(
+                rpt, CODE_VA, code_src, code_len, STACK_VA,
+            );
             println!("  UserAS1: code=0x{:x}, stack=0x{:x}", CODE_VA, STACK_VA);
         }
         let ra = vivanta_arch_api::boot::mmu::mmu_root_addr(rpt);
@@ -234,7 +283,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
 
     // Debug: dump UserAS1 page table for UART address
     println!("  UserAS1 UART mapping check:");
-    unsafe { vivanta_arch_api::boot::mmu::dump_critical_tables(root1.0 as u64); }
+    unsafe {
+        vivanta_arch_api::boot::mmu::dump_critical_tables(root1.0 as u64);
+    }
 
     let user_as1 = vmm::register(root1, vmm::AddressSpaceFlags::User);
     let _user_as2 = vmm::register(root2, vmm::AddressSpaceFlags::User);
@@ -281,9 +332,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!("  Allocated  @ 0x{:x}  (size={})", phys, obj.size);
 
     let pt_alloc_mrm = mrm as *mut memory::MemoryResourceManager;
-    let mut pt_alloc = unsafe {
-        memory::MrmPageTableAllocator::new(pt_alloc_mrm)
-    };
+    let mut pt_alloc = unsafe { memory::MrmPageTableAllocator::new(pt_alloc_mrm) };
     let kernel_as = vmm::kernel_address_space_mut();
     let slot = obj
         .map(phys, 4096, kernel_as, &mut pt_alloc)
@@ -328,11 +377,19 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         )
         .expect("spawn_user");
     println!("  Task {} created (thread, code @ 0x{:x})", tid, CODE_VA);
-    println!("  {} task(s), {} running", taskman.task_count(), taskman.running_count());
+    println!(
+        "  {} task(s), {} running",
+        taskman.task_count(),
+        taskman.running_count()
+    );
 
     // Verify Task structure via TaskManager
     if let Some(task) = taskman.get(tid) {
-        println!("  Task[{}]: {} object(s) owned", tid, task.owned_objects.len());
+        println!(
+            "  Task[{}]: {} object(s) owned",
+            tid,
+            task.owned_objects.len()
+        );
     }
 
     println!();

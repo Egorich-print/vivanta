@@ -1,3 +1,4 @@
+use crate::usercopy::UserSlice;
 use vivanta_boot_common::println;
 
 pub const SYS_READ: u64 = 0;
@@ -27,15 +28,22 @@ pub unsafe extern "Rust" fn syscall_dispatch(
             let buf = arg1 as *const u8;
             let count = arg2 as usize;
             if fd == 1 || fd == 2 {
-                // stdout/stderr: write to UART
-                for i in 0..count {
-                    let byte = *buf.add(i);
-                    // Direct PL011 UART write
-                    let uart = 0x0900_0000 as *mut u32;
-                    while core::ptr::read_volatile(uart.add(0x18 / 4)) & (1 << 5) != 0 {}
-                    core::ptr::write_volatile(uart, byte as u32);
+                if let Ok(user_slice) = UserSlice::read(buf, count) {
+                    for i in 0..user_slice.len() {
+                        if let Ok(byte) = user_slice.read_byte(i) {
+                            // Direct PL011 UART write
+                            let uart = 0x0900_0000 as *mut u32;
+                            unsafe {
+                                while core::ptr::read_volatile(uart.add(0x18 / 4)) & (1 << 5) != 0 {
+                                }
+                                core::ptr::write_volatile(uart, byte as u32);
+                            }
+                        }
+                    }
+                    count as u64
+                } else {
+                    -14i64 as u64 // -EFAULT
                 }
-                count as u64
             } else {
                 -1i64 as u64
             }

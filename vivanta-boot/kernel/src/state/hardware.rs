@@ -3,7 +3,7 @@
 // This module provides abstractions for hardware-related state,
 // including device tree, memory map, and device registry.
 
-use vivanta_boot_info::{BootInfo, MemoryMap, MmioRegion, InterruptControllerInfo};
+use vivanta_boot_info::{BootInfo, InterruptControllerInfo, MemoryMap, MmioRegion};
 
 /// Empty memory map for default HardwareState construction.
 const EMPTY_MEMORY_MAP: MemoryMap = MemoryMap::new();
@@ -38,9 +38,9 @@ impl HardwareState {
             interrupt_controller: None,
         }
     }
-    
+
     /// Creates a new HardwareState from BootInfo.
-    /// 
+    ///
     /// As per ADR-021, this extracts all hardware-related data from BootInfo.
     /// After this call, BootInfo should not be accessed for hardware information.
     pub fn from_boot_info(boot_info: &BootInfo) -> Self {

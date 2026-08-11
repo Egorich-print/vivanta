@@ -3,12 +3,12 @@
 // VBAR_EL1 must be aligned to 2048 bytes.
 // ---------------------------------------------------------------------------
 
+#[cfg(target_os = "none")]
 core::arch::global_asm!(
     ".section .text.vectors, \"ax\"",
     ".balign 2048",
     ".global exception_vectors",
     "exception_vectors:",
-
     // EL1t (SP_EL0)
     ".balign 128",
     "    b   el1t_sync",
@@ -18,7 +18,6 @@ core::arch::global_asm!(
     "    b   el1t_fiq",
     ".balign 128",
     "    b   el1t_serror",
-
     // EL1h (SP_EL1) — used by vivanta_kernel
     ".balign 128",
     "    b   el1h_sync",
@@ -28,7 +27,6 @@ core::arch::global_asm!(
     "    b   el1h_fiq",
     ".balign 128",
     "    b   el1h_serror",
-
     // Lower EL AArch64
     ".balign 128",
     "    b   lower_aarch64_sync",
@@ -38,7 +36,6 @@ core::arch::global_asm!(
     "    b   lower_aarch64_fiq",
     ".balign 128",
     "    b   lower_aarch64_serror",
-
     // Lower EL AArch32
     ".balign 128",
     "    b   lower_aarch32_sync",
@@ -48,7 +45,6 @@ core::arch::global_asm!(
     "    b   lower_aarch32_fiq",
     ".balign 128",
     "    b   lower_aarch32_serror",
-
     // macro: save_and_halt — for synchronous exceptions / faults
     ".macro save_and_halt kind",
     "    sub   sp, sp, #(34 * 8)",
@@ -81,7 +77,6 @@ core::arch::global_asm!(
     "    bl    exception_handler",
     "    b     .",
     ".endm",
-
     // macro: save_and_eret — for IRQs
     ".macro save_and_eret kind",
     "    sub   sp, sp, #(34 * 8)",
@@ -138,7 +133,6 @@ core::arch::global_asm!(
     "    add   sp, sp, #(34 * 8)",
     "    eret",
     ".endm",
-
     // macro: save_and_eret_sync — for SVC / sync exceptions from EL0
     ".macro save_and_eret_sync kind",
     "    sub   sp, sp, #(34 * 8)",
@@ -195,7 +189,6 @@ core::arch::global_asm!(
     "    add   sp, sp, #(34 * 8)",
     "    eret",
     ".endm",
-
     // Sync / fault vectors → halt
     "el1t_sync:         save_and_halt 0",
     "el1t_fiq:          save_and_halt 2",
@@ -209,7 +202,6 @@ core::arch::global_asm!(
     "lower_aarch32_sync:  save_and_halt 12",
     "lower_aarch32_fiq:   save_and_halt 14",
     "lower_aarch32_serror: save_and_halt 15",
-
     // IRQ vectors → handle and return
     "el1t_irq:          save_and_eret 1",
     "el1h_irq:          save_and_eret 5",

@@ -52,7 +52,10 @@ impl FdtScanner {
         let version = read_be_u32(dtb_addr.add(20));
         let size_dt_struct = read_be_u32(dtb_addr.add(36));
 
-        println!("FDT: magic OK, version {}, total {} bytes", version, totalsize);
+        println!(
+            "FDT: magic OK, version {}, total {} bytes",
+            version, totalsize
+        );
 
         if version < 16 {
             println!("FDT: version too old");
@@ -148,14 +151,16 @@ impl FdtScanner {
                             2
                         };
                         let entry_bytes = ((parent_ac + parent_sc) * 4) as usize;
-                        let n_entries = if entry_bytes > 0 { prop_len / entry_bytes } else { 0 };
+                        let n_entries = if entry_bytes > 0 {
+                            prop_len / entry_bytes
+                        } else {
+                            0
+                        };
                         for i in 0..n_entries {
                             let off = i * entry_bytes;
                             let base = read_be_u64(value_ptr.add(off), parent_ac);
-                            let size = read_be_u64(
-                                value_ptr.add(off + parent_ac as usize * 4),
-                                parent_sc,
-                            );
+                            let size =
+                                read_be_u64(value_ptr.add(off + parent_ac as usize * 4), parent_sc);
                             mem.push(MemoryRegion {
                                 start: base,
                                 size,
@@ -207,7 +212,10 @@ impl FdtScanner {
             }
         }
 
-        println!("FDT: scan complete – {} memory region(s)", mem.regions().len());
+        println!(
+            "FDT: scan complete – {} memory region(s)",
+            mem.regions().len()
+        );
         true
     }
 
@@ -486,7 +494,6 @@ impl FdtScanner {
                         addr_cells[depth] = addr_cells[depth - 1];
                         size_cells[depth] = size_cells[depth - 1];
                     }
-
                 }
 
                 FDT_END_NODE => {
@@ -533,14 +540,18 @@ impl FdtScanner {
                     if depth == 1 {
                         if pname == "model" {
                             let mut vlen = prop_len;
-                            if vlen > 0 && *value_ptr.add(vlen - 1) == 0 { vlen -= 1; }
+                            if vlen > 0 && *value_ptr.add(vlen - 1) == 0 {
+                                vlen -= 1;
+                            }
                             let bytes = core::slice::from_raw_parts(value_ptr, vlen);
                             let s = core::str::from_utf8(bytes).unwrap_or("?");
                             println!("  model:      {}", s);
                         }
                         if pname == "compatible" {
                             let mut vlen = prop_len;
-                            if vlen > 0 && *value_ptr.add(vlen - 1) == 0 { vlen -= 1; }
+                            if vlen > 0 && *value_ptr.add(vlen - 1) == 0 {
+                                vlen -= 1;
+                            }
                             let bytes = core::slice::from_raw_parts(value_ptr, vlen);
                             let s = core::str::from_utf8(bytes).unwrap_or("?");
                             print!("  compatible:");
@@ -567,17 +578,27 @@ impl FdtScanner {
                     }
 
                     if pname == "reg" && current_name.starts_with("memory") {
-                        let parent_ac = if depth > 1 && depth - 1 < 8 { addr_cells[depth - 1] } else { 2 };
-                        let parent_sc = if depth > 1 && depth - 1 < 8 { size_cells[depth - 1] } else { 2 };
+                        let parent_ac = if depth > 1 && depth - 1 < 8 {
+                            addr_cells[depth - 1]
+                        } else {
+                            2
+                        };
+                        let parent_sc = if depth > 1 && depth - 1 < 8 {
+                            size_cells[depth - 1]
+                        } else {
+                            2
+                        };
                         let entry_bytes = ((parent_ac + parent_sc) * 4) as usize;
-                        let n_entries = if entry_bytes > 0 { prop_len / entry_bytes } else { 0 };
+                        let n_entries = if entry_bytes > 0 {
+                            prop_len / entry_bytes
+                        } else {
+                            0
+                        };
                         for i in 0..n_entries {
                             let off = i * entry_bytes;
                             let base = read_be_u64(value_ptr.add(off), parent_ac);
-                            let size = read_be_u64(
-                                value_ptr.add(off + parent_ac as usize * 4),
-                                parent_sc,
-                            );
+                            let size =
+                                read_be_u64(value_ptr.add(off + parent_ac as usize * 4), parent_sc);
                             mem.push(MemoryRegion {
                                 start: base,
                                 size,
@@ -585,7 +606,10 @@ impl FdtScanner {
                             });
                             println!(
                                 "  memory@0x{:x}: 0x{:016x} – 0x{:016x}  ({} MiB)",
-                                i, base, base + size - 1, size >> 20,
+                                i,
+                                base,
+                                base + size - 1,
+                                size >> 20,
                             );
                         }
                         continue;
@@ -594,7 +618,9 @@ impl FdtScanner {
                     if pname == "compatible" && current_name.starts_with("cpu") && cpu_count > 0 {
                         // CPU compatible — format is "arm,cortex-a53\0..."
                         let mut vlen = prop_len;
-                        if vlen > 0 && *value_ptr.add(vlen - 1) == 0 { vlen -= 1; }
+                        if vlen > 0 && *value_ptr.add(vlen - 1) == 0 {
+                            vlen -= 1;
+                        }
                         let bytes = core::slice::from_raw_parts(value_ptr, vlen);
                         let compat = core::str::from_utf8(bytes).unwrap_or("?");
                         let first = compat.split('\0').next().unwrap_or(compat);
@@ -692,7 +718,9 @@ impl FdtScanner {
 
                     if pname == "device_type" {
                         let mut vlen = prop_len;
-                        if vlen > 0 && *value_ptr.add(vlen - 1) == 0 { vlen -= 1; }
+                        if vlen > 0 && *value_ptr.add(vlen - 1) == 0 {
+                            vlen -= 1;
+                        }
                         let bytes = core::slice::from_raw_parts(value_ptr, vlen);
                         let val = core::str::from_utf8(bytes).unwrap_or("");
                         pending_is_cpu = val == "cpu";
@@ -921,19 +949,15 @@ impl FdtScanner {
 
                         if n_entries >= 1 {
                             let base = read_be_u64(value_ptr, parent_ac);
-                            let size = read_be_u64(
-                                value_ptr.add(parent_ac as usize * 4),
-                                parent_sc,
-                            );
+                            let size =
+                                read_be_u64(value_ptr.add(parent_ac as usize * 4), parent_sc);
                             distributor = Some(MmioRegion { addr: base, size });
                         }
                         if n_entries >= 2 {
                             let off = entry_bytes;
                             let base = read_be_u64(value_ptr.add(off), parent_ac);
-                            let size = read_be_u64(
-                                value_ptr.add(off + parent_ac as usize * 4),
-                                parent_sc,
-                            );
+                            let size =
+                                read_be_u64(value_ptr.add(off + parent_ac as usize * 4), parent_sc);
                             redistributor = Some(MmioRegion { addr: base, size });
                         }
                         continue;

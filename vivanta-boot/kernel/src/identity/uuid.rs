@@ -14,28 +14,28 @@ impl Uuid {
     /// Creates a new random UUID v4
     pub fn new_v4() -> Self {
         use core::sync::atomic::{AtomicU64, Ordering};
-        
+
         static COUNTER: AtomicU64 = AtomicU64::new(0);
-        
+
         let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
-        
+
         let mut bytes = [0u8; 16];
         // Set version (4) in bits 4-7 of byte 6
         bytes[6] = 0x40;
         // Set variant (RFC 4122) in bits 6-7 of byte 8
         bytes[8] = 0x80;
-        
+
         // Fill with counter value
         bytes[0..8].copy_from_slice(&counter.to_le_bytes());
-        
+
         Self { bytes }
     }
-    
+
     /// Creates a nil UUID (all zeros)
     pub fn nil() -> Self {
         Self { bytes: [0u8; 16] }
     }
-    
+
     /// Returns true if this is a nil UUID
     pub fn is_nil(&self) -> bool {
         self.bytes == [0u8; 16]

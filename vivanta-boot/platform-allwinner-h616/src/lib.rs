@@ -12,10 +12,10 @@
 
 #![no_std]
 
-use vivanta_boot_common::{set_console, println};
 use vivanta_boot_common::fdt::FdtScanner;
-use vivanta_boot_common::ns16550::Ns16550;
 use vivanta_boot_common::hardware::NS16550_FAMILY;
+use vivanta_boot_common::ns16550::Ns16550;
+use vivanta_boot_common::{println, set_console};
 
 /// Allwinner H616 UART0 hardcoded fallback address.
 const H616_UART0_BASE: u64 = 0x0500_0000;
@@ -40,8 +40,10 @@ pub unsafe fn init_console_from_fdt(dtb_addr: *const u8) -> bool {
             uart_ptr.write(Some(Ns16550::new(base, shift)));
             if let Some(ref u) = *uart_ptr {
                 set_console(u);
-                println!("  Console: {} @ 0x{:x} (class=NS16550, shift={})",
-                    node.compatible, base as u64, shift);
+                println!(
+                    "  Console: {} @ 0x{:x} (class=NS16550, shift={})",
+                    node.compatible, base as u64, shift
+                );
             }
             return true;
         }
@@ -50,8 +52,10 @@ pub unsafe fn init_console_from_fdt(dtb_addr: *const u8) -> bool {
     // Fallback: hardcoded NS16550 at 0x05000000, reg-shift=2
     static UART: Ns16550 = Ns16550::new(H616_UART0_BASE as *mut u8, H616_UART0_REG_SHIFT);
     set_console(&UART);
-    println!("  Console: fallback NS16550 @ 0x{:x} (shift={})",
-        H616_UART0_BASE, H616_UART0_REG_SHIFT);
+    println!(
+        "  Console: fallback NS16550 @ 0x{:x} (shift={})",
+        H616_UART0_BASE, H616_UART0_REG_SHIFT
+    );
     false
 }
 

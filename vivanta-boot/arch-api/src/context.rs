@@ -19,10 +19,14 @@ pub struct ArchContext(usize);
 
 impl ArchContext {
     #[doc(hidden)]
-    pub fn from_raw(val: usize) -> Self { Self(val) }
+    pub fn from_raw(val: usize) -> Self {
+        Self(val)
+    }
 
     #[doc(hidden)]
-    pub fn as_raw(&self) -> usize { self.0 }
+    pub fn as_raw(&self) -> usize {
+        self.0
+    }
 }
 
 /// Execution privilege level for a thread.
@@ -50,7 +54,12 @@ extern "Rust" {
     /// `level` — ExecutionLevel::Kernel or ExecutionLevel::User.
     ///
     /// Returns an opaque ArchContext token stored in the Thread struct.
-    pub fn context_init(stack_top: usize, user_stack_top: usize, entry: usize, level: ExecutionLevel) -> ArchContext;
+    pub fn context_init(
+        stack_top: usize,
+        user_stack_top: usize,
+        entry: usize,
+        level: ExecutionLevel,
+    ) -> ArchContext;
 
     /// Capture the current thread's context at boot time.
     /// Returns an ArchContext for the already-running boot thread.

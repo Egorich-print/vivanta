@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "Minimal libc for Vivanta user-space"
 
+# User-space EL0 library: syscall asm only valid on aarch64-unknown-none,
+# no host test harness. Verified via QEMU EL0 boot.
 [lib]
 name = "vivanta_user_libc"
 path = "src/lib.rs"
+test = false

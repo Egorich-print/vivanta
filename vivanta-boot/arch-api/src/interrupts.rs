@@ -19,7 +19,10 @@ pub struct InterruptGuard {
 impl InterruptGuard {
     #[doc(hidden)]
     pub fn new(saved_daif: usize, restore: fn(usize)) -> Self {
-        Self { saved_daif, restore }
+        Self {
+            saved_daif,
+            restore,
+        }
     }
 }
 

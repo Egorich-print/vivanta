@@ -42,31 +42,26 @@ core::arch::global_asm!(
     ".balign 2048",
     ".global exception_vectors",
     "exception_vectors:",
-
     // === EL2t (SP_EL0) ===
     ".balign 128; b   el2t_sync",
     ".balign 128; b   el2t_irq",
     ".balign 128; b   el2t_fiq",
     ".balign 128; b   el2t_serror",
-
     // === EL2h (SP_EL2) — current execution mode ===
     ".balign 128; b   el2h_sync",
     ".balign 128; b   el2h_irq",
     ".balign 128; b   el2h_fiq",
     ".balign 128; b   el2h_serror",
-
     // === Lower EL, AArch64 ===
     ".balign 128; b   lower64_sync",
     ".balign 128; b   lower64_irq",
     ".balign 128; b   lower64_fiq",
     ".balign 128; b   lower64_serror",
-
     // === Lower EL, AArch32 ===
     ".balign 128; b   lower32_sync",
     ".balign 128; b   lower32_irq",
     ".balign 128; b   lower32_fiq",
     ".balign 128; b   lower32_serror",
-
     // ============================================================
     // save_and_halt — save full CPU context, call exception_handler, halt
     // ============================================================
@@ -89,11 +84,11 @@ core::arch::global_asm!(
     "    stp   x28,x29, [sp, #(28 * 8)]",
     "    str   x30,     [sp, #(30 * 8)]",
     "    add   x0, sp, #(34 * 8)",
-    "    str   x0,      [sp, #(31 * 8)]",   // saved SP
+    "    str   x0,      [sp, #(31 * 8)]", // saved SP
     "    mrs   x1, elr_el2",
-    "    str   x1,      [sp, #(32 * 8)]",   // ELR_EL2
+    "    str   x1,      [sp, #(32 * 8)]", // ELR_EL2
     "    mrs   x2, spsr_el2",
-    "    str   x2,      [sp, #(33 * 8)]",   // SPSR_EL2
+    "    str   x2,      [sp, #(33 * 8)]", // SPSR_EL2
     "    mov   x0, sp",
     "    mov   x1, \\kind",
     "    mrs   x2, esr_el2",
@@ -101,7 +96,6 @@ core::arch::global_asm!(
     "    bl    exception_handler",
     "    b     .",
     ".endm",
-
     // === Vector dispatch — all go to halt for M0.9 ===
     "el2t_sync:        save_and_halt 0",
     "el2t_irq:         save_and_halt 1",
@@ -137,7 +131,9 @@ pub unsafe extern "C" fn boot_entry(dtb: u64) -> ! {
     println!("=== Vivanta RK3568 (EL2) ===");
 
     // Install exception vectors
-    unsafe { exceptions::init(); }
+    unsafe {
+        exceptions::init();
+    }
 
     // DTB
     let dtb_ptr = if dtb > 0x100 && dtb < 0x1_0000_0000 {
@@ -154,7 +150,9 @@ pub unsafe extern "C" fn boot_entry(dtb: u64) -> ! {
             println!("Memory:");
             let mut usable = 0u64;
             for r in mem.regions() {
-                if r.start == 0 && r.size == 0 { continue; }
+                if r.start == 0 && r.size == 0 {
+                    continue;
+                }
                 usable += 1;
                 println!(
                     "  {}. 0x{:016X} – 0x{:016X} ({} MiB)",

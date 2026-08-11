@@ -55,7 +55,12 @@ pub fn walk_to_l3(pt_root: u64, vaddr: u64) -> WalkResult {
 /// SAFETY:
 /// - Only performs descriptor transformation. Never allocates memory.
 /// - Caller provides a valid, zeroed L3 table frame at `l3_frame_paddr`.
-pub unsafe fn split_l2_block(l2_table_addr: u64, l2_index: usize, block_desc: u64, l3_frame_paddr: u64) {
+pub unsafe fn split_l2_block(
+    l2_table_addr: u64,
+    l2_index: usize,
+    block_desc: u64,
+    l3_frame_paddr: u64,
+) {
     let block_base = block_desc & ADDR_MASK;
     let attrs = block_desc & !(ADDR_MASK | 0x3);
 
@@ -68,31 +73,44 @@ pub unsafe fn split_l2_block(l2_table_addr: u64, l2_index: usize, block_desc: u6
     }
 
     barrier_write();
-    write_desc(l2_table_addr + (l2_index as u64) * 8, l3_addr | DESC_VALID | DESC_TABLE);
+    write_desc(
+        l2_table_addr + (l2_index as u64) * 8,
+        l3_addr | DESC_VALID | DESC_TABLE,
+    );
 }
 
 // ── Barriers ─────────────────────────────────────────────────────────────────
 
 pub fn barrier_write() {
-    unsafe { core::arch::asm!("dsb ishst", options(nomem, nostack)); }
+    unsafe {
+        core::arch::asm!("dsb ishst", options(nomem, nostack));
+    }
 }
 
 pub fn barrier_full() {
-    unsafe { core::arch::asm!("dsb ish", options(nomem, nostack)); }
+    unsafe {
+        core::arch::asm!("dsb ish", options(nomem, nostack));
+    }
 }
 
 pub fn barrier_insn() {
-    unsafe { core::arch::asm!("isb", options(nomem, nostack)); }
+    unsafe {
+        core::arch::asm!("isb", options(nomem, nostack));
+    }
 }
 
 // ── TLBI ─────────────────────────────────────────────────────────────────────
 
 pub fn tlbi_page(va: u64) {
-    unsafe { core::arch::asm!("tlbi vaae1is, {}", in(reg) va, options(nostack)); }
+    unsafe {
+        core::arch::asm!("tlbi vaae1is, {}", in(reg) va, options(nostack));
+    }
 }
 
 pub fn tlbi_all() {
-    unsafe { core::arch::asm!("tlbi vmalle1is", options(nomem, nostack)); }
+    unsafe {
+        core::arch::asm!("tlbi vmalle1is", options(nomem, nostack));
+    }
 }
 
 pub fn tlbi_range(vaddr: u64, size: u64) {

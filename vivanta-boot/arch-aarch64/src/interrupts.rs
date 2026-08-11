@@ -2,8 +2,8 @@
 // AArch64 interrupt subsystem — GICv2/v3 + IRQ dispatch
 // ---------------------------------------------------------------------------
 
-pub mod gic;
 pub mod dispatcher;
+pub mod gic;
 
 pub use dispatcher::{register_irq, IrqHandler};
 pub use gic::{Gic, GicVersion};
@@ -26,7 +26,9 @@ pub fn enable() {
 
 /// Restore exact DAIF state (used by InterruptGuard::drop via fn pointer).
 fn restore_interrupts(daif: usize) {
-    unsafe { core::arch::asm!("msr daif, {}", in(reg) daif, options(nostack)); }
+    unsafe {
+        core::arch::asm!("msr daif, {}", in(reg) daif, options(nostack));
+    }
 }
 
 #[no_mangle]

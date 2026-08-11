@@ -1,0 +1,14 @@
+[package]
+name = "vivanta-mmu-test"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal MMU smoke test - no allocator, no Rust runtime"
+
+# Bare-metal firmware binary (no_main + linker script): no host libtest.
+# Verified via QEMU boot.
+[[bin]]
+name = "mmu-test"
+path = "src/main.rs"
+test = false
+
+[dependencies]

@@ -23,7 +23,7 @@
 use core::panic::PanicInfo;
 
 use vivanta_boot_common::println;
-use vivanta_boot_info::{BootInfo, MmioRegion, MmioKind, InterruptControllerInfo};
+use vivanta_boot_info::{BootInfo, InterruptControllerInfo, MmioKind, MmioRegion};
 
 // Force link arch-aarch64 for extern "Rust" symbol resolution
 extern crate vivanta_arch_aarch64;
@@ -36,31 +36,30 @@ core::arch::global_asm!(
     // ARM64 Image header (64 bytes) — U-Boot booti compatible
     "b _real_start",
     ".word 0",
-    ".quad 0x00000000",             // text_offset = 0 (kernel at load addr)
-    ".quad 0",                      // image_size (0 = unknown)
-    ".quad 0x0a",                   // flags: LE, P-DEP
+    ".quad 0x00000000", // text_offset = 0 (kernel at load addr)
+    ".quad 0",          // image_size (0 = unknown)
+    ".quad 0x0a",       // flags: LE, P-DEP
     ".quad 0",
     ".quad 0",
     ".quad 0",
-    ".word 0x644d5241",             // magic = "ARMd"
+    ".word 0x644d5241", // magic = "ARMd"
     ".word 0",
-
     "_real_start:",
     // Mask all interrupts
     "msr daifset, #0xf",
     // Detect current EL and enable FP/SIMD
     "mrs x5, CurrentEL",
     "and x5, x5, #0xC",
-    "cmp x5, #(2 << 2)",            // EL2?
+    "cmp x5, #(2 << 2)", // EL2?
     "b.eq 5f",
-    "cmp x5, #(1 << 2)",            // EL1?
+    "cmp x5, #(1 << 2)", // EL1?
     "b.eq 6f",
-    "b 7f",                         // EL3 or other — fall through
-    "5:",                           // EL2: enable FP/SIMD
+    "b 7f", // EL3 or other — fall through
+    "5:",   // EL2: enable FP/SIMD
     "mov x5, #(0b11 << 20)",
     "msr CPTR_EL2, x5",
     "b 7f",
-    "6:",                           // EL1: enable FP/SIMD
+    "6:", // EL1: enable FP/SIMD
     "mov x5, #(0b11 << 20)",
     "msr CPACR_EL1, x5",
     "7:",
@@ -117,7 +116,11 @@ pub unsafe extern "C" fn adapter_main() -> ! {
         .filter(|r| r.kind == vivanta_boot_common::MemoryRegionKind::Usable)
         .map(|r| r.size >> 20)
         .sum::<u64>();
-    println!("  Memory:    {} MiB across {} region(s)", total_mib, mem_map.regions().len());
+    println!(
+        "  Memory:    {} MiB across {} region(s)",
+        total_mib,
+        mem_map.regions().len()
+    );
     println!("  CPUs:      {} core(s)", cpu_count);
     println!("  DTB:       0x{:x}", dtb_addr as usize);
     println!();
@@ -126,8 +129,16 @@ pub unsafe extern "C" fn adapter_main() -> ! {
     //   UART_AO:  0xc81004e0 (always-on debug UART)
     //   GIC-400:  0xc4300000–0xc430ffff (distributor at +0x1000, CPU at +0x2000)
     static MMIO_REGIONS: [MmioRegion; 2] = [
-        MmioRegion { base: 0xc810_0000, size: 0x1000, kind: MmioKind::UserDevice },
-        MmioRegion { base: 0xc430_0000, size: 0x1000, kind: MmioKind::Device },
+        MmioRegion {
+            base: 0xc810_0000,
+            size: 0x1000,
+            kind: MmioKind::UserDevice,
+        },
+        MmioRegion {
+            base: 0xc430_0000,
+            size: 0x1000,
+            kind: MmioKind::Device,
+        },
     ];
 
     // Interrupt controller: GIC-400 (GICv2)
@@ -142,8 +153,7 @@ pub unsafe extern "C" fn adapter_main() -> ! {
     // Assemble BootInfo and pass to vivanta_kernel
     let mut mem_map_buf: core::mem::MaybeUninit<vivanta_boot_common::MemoryMap> =
         core::mem::MaybeUninit::uninit();
-    let mut boot_info_buf: core::mem::MaybeUninit<BootInfo> =
-        core::mem::MaybeUninit::uninit();
+    let mut boot_info_buf: core::mem::MaybeUninit<BootInfo> = core::mem::MaybeUninit::uninit();
 
     mem_map_buf.as_mut_ptr().write(mem_map);
     let mem_map_ref: &'static vivanta_boot_common::MemoryMap = &*mem_map_buf.as_ptr();
@@ -164,5 +174,7 @@ pub unsafe extern "C" fn adapter_main() -> ! {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop { core::hint::spin_loop(); }
+    loop {
+        core::hint::spin_loop();
+    }
 }

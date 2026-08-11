@@ -1,10 +1,10 @@
-use alloc::vec::Vec;
-use vivanta_arch_api::pmm::FrameAllocator;
 use crate::memory::{AllocationRequirements, MemoryResourceManager};
 use crate::scheduler;
 use crate::scheduler::task::{Task, TaskId, TaskState};
 use crate::scheduler::thread::Priority;
 use crate::vmm::AddressSpaceId;
+use alloc::vec::Vec;
+use vivanta_arch_api::pmm::FrameAllocator;
 
 /// Manages the lifecycle of all Tasks in the system.
 ///
@@ -124,7 +124,8 @@ impl TaskManager {
 
     /// Count of running tasks.
     pub fn running_count(&self) -> usize {
-        scheduler::pt().iter()
+        scheduler::pt()
+            .iter()
             .filter(|t| t.state == TaskState::Running)
             .count()
     }
@@ -136,7 +137,8 @@ impl TaskManager {
 
     /// Get all zombie tasks (for cleanup).
     pub fn zombies(&self) -> Vec<TaskId> {
-        scheduler::pt().iter()
+        scheduler::pt()
+            .iter()
             .filter(|t| t.state == TaskState::Zombie)
             .map(|t| t.task_id)
             .collect()

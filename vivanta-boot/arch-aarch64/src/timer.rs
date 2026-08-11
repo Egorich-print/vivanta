@@ -2,8 +2,8 @@
 // AArch64 Generic Timer — Non-secure Physical Timer (CNTP)
 // ---------------------------------------------------------------------------
 
-use core::sync::atomic::{AtomicU64, AtomicU32, Ordering};
 use crate::barrier;
+use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 const TICK_HZ: u64 = 100;
 
@@ -13,7 +13,9 @@ pub(crate) static TVAL: AtomicU32 = AtomicU32::new(0);
 /// ARM Generic Timer frequency in Hz.
 pub fn frequency() -> u64 {
     let freq: u64;
-    unsafe { core::arch::asm!("mrs {0}, CNTFRQ_EL0", out(reg) freq, options(nostack)); }
+    unsafe {
+        core::arch::asm!("mrs {0}, CNTFRQ_EL0", out(reg) freq, options(nostack));
+    }
     freq
 }
 
@@ -38,7 +40,9 @@ pub fn set_tval(tval: u32) {
 /// Remaining ticks before the timer fires.
 pub fn tval() -> u32 {
     let val: u64;
-    unsafe { core::arch::asm!("mrs {0}, CNTP_TVAL_EL0", out(reg) val, options(nostack)); }
+    unsafe {
+        core::arch::asm!("mrs {0}, CNTP_TVAL_EL0", out(reg) val, options(nostack));
+    }
     val as u32
 }
 
@@ -61,7 +65,9 @@ pub fn disable() {
 /// Read CNTP_CTL_EL0.
 pub fn ctl() -> u64 {
     let val: u64;
-    unsafe { core::arch::asm!("mrs {0}, CNTP_CTL_EL0", out(reg) val, options(nostack)); }
+    unsafe {
+        core::arch::asm!("mrs {0}, CNTP_CTL_EL0", out(reg) val, options(nostack));
+    }
     val
 }
 

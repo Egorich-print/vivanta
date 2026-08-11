@@ -4,6 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "Vivanta — architecture-independent kernel logic"
 
+# No host libtest harness: kernel links arch-api extern "Rust" symbols that only
+# exist for aarch64-unknown-none, and installs a boot-time global allocator.
+# Kernel invariants are verified via boot self-tests (verify.rs) + QEMU.
+[lib]
+test = false
+
 [features]
 trace-address-space = []
 

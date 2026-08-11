@@ -2,8 +2,8 @@
 // RunQueue — ready thread queue with priority support
 // ---------------------------------------------------------------------------
 
+use super::thread::{Priority, Thread, ThreadId, ThreadState};
 use alloc::vec::Vec;
-use super::thread::{Thread, ThreadId, ThreadState, Priority};
 
 pub struct RunQueue {
     threads: Vec<Option<Thread>>,
@@ -77,13 +77,20 @@ impl RunQueue {
 
     /// Find the next ready thread starting from `from_id`, considering priority.
     pub fn find_next_ready(&self, from_id: ThreadId, exclude_idle: bool) -> Option<ThreadId> {
-        let priorities = [Priority::Realtime, Priority::High, Priority::Normal, Priority::Low];
-        
+        let priorities = [
+            Priority::Realtime,
+            Priority::High,
+            Priority::Normal,
+            Priority::Low,
+        ];
+
         for priority in priorities {
             // Find starting position
-            let start_pos = self.threads.iter().position(|s| {
-                s.as_ref().map_or(false, |t| t.id == from_id)
-            }).unwrap_or(0);
+            let start_pos = self
+                .threads
+                .iter()
+                .position(|s| s.as_ref().map_or(false, |t| t.id == from_id))
+                .unwrap_or(0);
 
             // Search forward from that position
             let len = self.threads.len();
@@ -99,7 +106,7 @@ impl RunQueue {
                 }
             }
         }
-        
+
         // Fallback to idle if not excluded
         if !exclude_idle {
             for slot in self.threads.iter() {
@@ -110,7 +117,7 @@ impl RunQueue {
                 }
             }
         }
-        
+
         None
     }
 

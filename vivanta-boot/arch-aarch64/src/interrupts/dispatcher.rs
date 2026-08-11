@@ -2,8 +2,8 @@
 // IRQ dispatch table
 // ---------------------------------------------------------------------------
 
-use crate::exceptions::ExceptionFrame;
 use super::gic;
+use crate::exceptions::ExceptionFrame;
 
 const MAX_IRQ: usize = 256;
 

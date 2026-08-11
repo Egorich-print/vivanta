@@ -33,15 +33,23 @@ impl MappingFlags {
         Self { bits: 0b100 }
     }
 
-    pub fn is_read_write(&self) -> bool { self.bits & 0b001 != 0 }
-    pub fn is_executable(&self) -> bool { self.bits & 0b010 != 0 }
-    pub fn is_user(&self) -> bool { self.bits & 0b100 != 0 }
+    pub fn is_read_write(&self) -> bool {
+        self.bits & 0b001 != 0
+    }
+    pub fn is_executable(&self) -> bool {
+        self.bits & 0b010 != 0
+    }
+    pub fn is_user(&self) -> bool {
+        self.bits & 0b100 != 0
+    }
 }
 
 impl core::ops::BitOr for MappingFlags {
     type Output = Self;
     fn bitor(self, rhs: Self) -> Self {
-        Self { bits: self.bits | rhs.bits }
+        Self {
+            bits: self.bits | rhs.bits,
+        }
     }
 }
 
@@ -74,7 +82,14 @@ extern "Rust" {
     /// - `pt` must be a valid root page table.
     /// - The virtual range must not already be mapped.
     /// - 4KiB-aligned regions, single 4KiB page at a time.
-    pub fn mmu_map_object(pt: RootPageTable, vaddr: u64, paddr: u64, size: u64, flags: MappingFlags, alloc: &mut dyn PageTableAllocator);
+    pub fn mmu_map_object(
+        pt: RootPageTable,
+        vaddr: u64,
+        paddr: u64,
+        size: u64,
+        flags: MappingFlags,
+        alloc: &mut dyn PageTableAllocator,
+    );
 
     /// Unmap a virtual region from an existing address space.
     ///

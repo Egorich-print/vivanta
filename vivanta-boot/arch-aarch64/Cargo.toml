@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2021"
 description = "Vivanta — AArch64 architecture implementation"
 
+# No host libtest harness: this crate is built for aarch64-unknown-none and
+# contains ELF-only global_asm. Verification is QEMU boot + runtime assertions.
+[lib]
+test = false
+
 [dependencies]
 vivanta-boot-common = { path = "../boot_common" }
 vivanta-arch-api = { path = "../arch-api" }

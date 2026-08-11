@@ -23,6 +23,9 @@ pub mod mmu;
 /// Physical frame allocator contract
 pub mod pmm;
 
+/// User memory validation contract
+pub mod user_memory;
+
 /// Interrupt abstraction: RAII guard for disabled interrupts
 pub mod interrupts;
 

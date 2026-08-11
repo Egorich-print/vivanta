@@ -15,12 +15,22 @@ pub struct ExceptionFrame {
 }
 
 const EXCEPTION_NAMES: [&str; 16] = [
-    "EL1t Sync", "EL1t IRQ", "EL1t FIQ", "EL1t SError",
-    "EL1h Sync", "EL1h IRQ", "EL1h FIQ", "EL1h SError",
-    "Lower EL AArch64 Sync", "Lower EL AArch64 IRQ",
-    "Lower EL AArch64 FIQ", "Lower EL AArch64 SError",
-    "Lower EL AArch32 Sync", "Lower EL AArch32 IRQ",
-    "Lower EL AArch32 FIQ", "Lower EL AArch32 SError",
+    "EL1t Sync",
+    "EL1t IRQ",
+    "EL1t FIQ",
+    "EL1t SError",
+    "EL1h Sync",
+    "EL1h IRQ",
+    "EL1h FIQ",
+    "EL1h SError",
+    "Lower EL AArch64 Sync",
+    "Lower EL AArch64 IRQ",
+    "Lower EL AArch64 FIQ",
+    "Lower EL AArch64 SError",
+    "Lower EL AArch32 Sync",
+    "Lower EL AArch32 IRQ",
+    "Lower EL AArch32 FIQ",
+    "Lower EL AArch32 SError",
 ];
 
 fn esr_class(esr: u64) -> &'static str {
@@ -86,7 +96,11 @@ pub unsafe extern "C" fn exception_handler(
     println!("{:=^48}", "");
     println!();
     println!("  Vector:    {} ({})", name, kind);
-    println!("  Class:     {} (ESR[31:26] = {:#x})", class, (esr >> 26) & 0x3f);
+    println!(
+        "  Class:     {} (ESR[31:26] = {:#x})",
+        class,
+        (esr >> 26) & 0x3f
+    );
     println!();
     println!("  ESR_EL1:   {:#018x}", esr);
     println!("  FAR_EL1:   {:#018x}", far);
@@ -124,11 +138,15 @@ pub unsafe extern "C" fn exception_handler(
 /// Deliberately trigger a Data Abort for regression testing.
 pub unsafe fn trigger_fault() -> ! {
     core::ptr::read_volatile(0x0 as *const u64);
-    loop { core::hint::spin_loop(); }
+    loop {
+        core::hint::spin_loop();
+    }
 }
 
 pub fn init() {
-    extern "C" { pub static exception_vectors: u8; }
+    extern "C" {
+        pub static exception_vectors: u8;
+    }
     let vectors = unsafe { &exception_vectors as *const u8 as u64 };
     unsafe {
         core::arch::asm!(

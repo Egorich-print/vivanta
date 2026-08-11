@@ -6,8 +6,8 @@
 // ---------------------------------------------------------------------------
 
 pub mod cpu;
-pub mod mmu;
 pub mod irq;
-pub mod timer;
+pub mod mmu;
 pub mod sched;
+pub mod timer;
 pub mod user;

@@ -6,7 +6,7 @@
 #![no_main]
 
 use core::panic::PanicInfo;
-use vivanta_boot_common::{println, set_console};
+use vivanta_boot_common::println;
 
 // ARM64 entry with Image header
 core::arch::global_asm!(
@@ -82,5 +82,7 @@ pub unsafe extern "C" fn adapter_main() -> ! {
 
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
-    loop { core::hint::spin_loop(); }
+    loop {
+        core::hint::spin_loop();
+    }
 }

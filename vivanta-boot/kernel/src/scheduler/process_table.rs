@@ -2,8 +2,8 @@
 // Process Table — global registry of all tasks
 // ---------------------------------------------------------------------------
 
+use super::task::{Task, TaskId};
 use alloc::vec::Vec;
-use super::task::{Task, TaskId, TaskState};
 
 pub struct ProcessTable {
     tasks: Vec<Option<Task>>,
@@ -23,7 +23,7 @@ impl ProcessTable {
         let pid = self.next_pid;
         self.next_pid += 1;
         task.task_id = pid;
-        
+
         // Find empty slot
         for slot in self.tasks.iter_mut() {
             if slot.is_none() {
@@ -74,7 +74,8 @@ impl ProcessTable {
 
     /// Get all children of a task.
     pub fn children_of(&self, parent: TaskId) -> Vec<TaskId> {
-        self.tasks.iter()
+        self.tasks
+            .iter()
             .filter_map(|s| s.as_ref())
             .filter(|t| t.parent == Some(parent))
             .map(|t| t.task_id)

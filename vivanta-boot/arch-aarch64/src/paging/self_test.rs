@@ -6,7 +6,9 @@ use crate::paging::{MappingFlags, Permissions};
 
 fn read_ttbr0() -> u64 {
     let root: u64;
-    unsafe { core::arch::asm!("mrs {}, ttbr0_el1", out(reg) root, options(nostack)); }
+    unsafe {
+        core::arch::asm!("mrs {}, ttbr0_el1", out(reg) root, options(nostack));
+    }
     root
 }
 
@@ -25,12 +27,14 @@ unsafe fn test_translate_known(pt: &PageTable) {
     // Only test addresses that are actually mapped in the page table
     let known_addrs = [0x4000_0000u64, 0x4000_1000, 0x4020_0000, 0x4021_b000];
     for &va in &known_addrs {
-        let pa = pt.translate(va).unwrap_or_else(|| panic!("translate failed at VA {:#x}", va));
+        let pa = pt
+            .translate(va)
+            .unwrap_or_else(|| panic!("translate failed at VA {:#x}", va));
         assert_eq!(pa, va, "identity: VA {:#x} -> PA {:#x} mismatch", va, pa);
     }
 }
 
-unsafe fn test_readback(pt: &PageTable) {
+unsafe fn test_readback(_pt: &PageTable) {
     let test_addr = 0x4000_0000u64;
     let val = core::ptr::read_volatile(test_addr as *const u64);
     core::ptr::write_volatile(test_addr as *mut u64, val);
@@ -62,5 +66,8 @@ fn test_descriptor_constants() {
 
     let ro_flags = MappingFlags::normal(Permissions::kernel_rx());
     let ro_desc = ro_flags.to_descriptor_bits(0x4000_0000, true);
-    assert!(ro_desc & DESC_AP_RO_EL1 == DESC_AP_RO_EL1, "descriptor: RO AP bits wrong");
+    assert!(
+        ro_desc & DESC_AP_RO_EL1 == DESC_AP_RO_EL1,
+        "descriptor: RO AP bits wrong"
+    );
 }

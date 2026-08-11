@@ -4,7 +4,7 @@
 
 use crate::capability::{MemRights, MemoryCapability, OwnerId};
 use crate::object::{MemoryObject, MemoryObjectId};
-use crate::policy::{AllocationRequirements, evaluate};
+use crate::policy::{evaluate, AllocationRequirements};
 use crate::resource::{MemoryBackend, ResourceId};
 
 /// Maximum number of memory backends that can be registered.

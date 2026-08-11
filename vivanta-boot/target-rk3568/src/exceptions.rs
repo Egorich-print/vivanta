@@ -10,17 +10,29 @@ use vivanta_boot_common::println;
 #[repr(C)]
 #[derive(Clone, Copy)]
 pub struct ExceptionFrame {
-    pub x: [u64; 31],   // x0–x30 (x30 = LR)
-    pub sp: u64,        // SP before exception
-    pub elr: u64,       // ELR_EL2
-    pub spsr: u64,      // SPSR_EL2
+    pub x: [u64; 31], // x0–x30 (x30 = LR)
+    pub sp: u64,      // SP before exception
+    pub elr: u64,     // ELR_EL2
+    pub spsr: u64,    // SPSR_EL2
 }
 
 const EXCEPTION_NAMES: [&str; 16] = [
-    "EL2t Sync",  "EL2t IRQ",  "EL2t FIQ",  "EL2t SError",
-    "EL2h Sync",  "EL2h IRQ",  "EL2h FIQ",  "EL2h SError",
-    "AArch64 Lo", "AArch64 Lo", "AArch64 Lo", "AArch64 Lo",
-    "AArch32 Lo", "AArch32 Lo", "AArch32 Lo", "AArch32 Lo",
+    "EL2t Sync",
+    "EL2t IRQ",
+    "EL2t FIQ",
+    "EL2t SError",
+    "EL2h Sync",
+    "EL2h IRQ",
+    "EL2h FIQ",
+    "EL2h SError",
+    "AArch64 Lo",
+    "AArch64 Lo",
+    "AArch64 Lo",
+    "AArch64 Lo",
+    "AArch32 Lo",
+    "AArch32 Lo",
+    "AArch32 Lo",
+    "AArch32 Lo",
 ];
 
 fn esr_class(esr: u64) -> &'static str {

@@ -45,7 +45,7 @@
 //     Offset 0x0C:  MISC       — misc control
 //     Offset 0x10:  WFIFO      — write data (transmit FIFO)
 //     Offset 0x14:  RFIFO      — read data (receive FIFO)
-//   
+//
 //   STATUS register bits:
 //     Bit 20: TX FIFO empty (when set, can write to WFIFO)
 //     Bit 21: TX FIFO full
@@ -92,11 +92,9 @@ pub const EARLY_UART_BASE: u64 = UART_AO_BASE;
 /// This configures the early console on UART_AO so that panic messages
 /// are visible even before the full kernel boots.
 pub unsafe fn init_early_platform() {
-    vivanta_boot_common::set_early_platform(
-        vivanta_boot_common::EarlyPlatformInfo {
-            uart_base: EARLY_UART_BASE as usize,
-        },
-    );
+    vivanta_boot_common::set_early_platform(vivanta_boot_common::EarlyPlatformInfo {
+        uart_base: EARLY_UART_BASE as usize,
+    });
 }
 
 /// Initialise console from FDT, with fallback to hardcoded Meson UART at
@@ -108,7 +106,10 @@ pub unsafe fn init_console_from_fdt(dtb_addr: *const u8) -> bool {
     // TODO: Implement Meson UART driver in boot_common
     // For now, print the known UART base for reference
     let _ = dtb_addr;
-    println!("  [Amlogic] UART_AO base: 0x{:x} (Meson UART — driver TBD)", UART_AO_BASE);
+    println!(
+        "  [Amlogic] UART_AO base: 0x{:x} (Meson UART — driver TBD)",
+        UART_AO_BASE
+    );
     false
 }
 

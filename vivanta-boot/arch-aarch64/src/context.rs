@@ -7,8 +7,8 @@
 //   - ExecutionLevel determines SPSR at thread creation.
 // ---------------------------------------------------------------------------
 
-use vivanta_arch_api::context::{ArchContext, ExecutionLevel};
 use crate::exceptions::ExceptionFrame;
+use vivanta_arch_api::context::{ArchContext, ExecutionLevel};
 
 /// Byte size of an ExceptionFrame (34 × 8 bytes = 272).
 const FRAME_SIZE: usize = core::mem::size_of::<ExceptionFrame>();
@@ -31,7 +31,10 @@ struct BootThreadBlock {
 /// Boot thread's context block.
 /// `tc_loc(&raw mut BOOT_BLOCK.frame as usize) == &raw mut BOOT_BLOCK.thread_ctx`
 static mut BOOT_BLOCK: BootThreadBlock = BootThreadBlock {
-    thread_ctx: ThreadContext { x19_x30: [0; 12], sp: 0 },
+    thread_ctx: ThreadContext {
+        x19_x30: [0; 12],
+        sp: 0,
+    },
     frame: [0; FRAME_SIZE],
 };
 
@@ -43,7 +46,7 @@ static mut BOOT_BLOCK: BootThreadBlock = BootThreadBlock {
 
 #[repr(C)]
 struct ThreadContext {
-    x19_x30: [u64; 12],  // x19 through x30
+    x19_x30: [u64; 12], // x19 through x30
     sp: u64,
 }
 
@@ -74,7 +77,9 @@ pub fn idle_entry() -> ! {
 // ---------------------------------------------------------------------------
 
 // Reference to the EL1→EL0 trampoline defined in the user module.
-extern "C" { static eret_to_user_stub: u8; }
+extern "C" {
+    static eret_to_user_stub: u8;
+}
 
 #[no_mangle]
 pub unsafe extern "Rust" fn context_init(
@@ -90,8 +95,8 @@ pub unsafe extern "Rust" fn context_init(
     };
 
     let spsr = match level {
-        ExecutionLevel::Kernel => 0x345u64,  // EL1h, DAIF masked
-        ExecutionLevel::User => 0x000u64,    // EL0t
+        ExecutionLevel::Kernel => 0x345u64, // EL1h, DAIF masked
+        ExecutionLevel::User => 0x000u64,   // EL0t
     };
 
     // x30 for context_switch_asm ret:
@@ -119,8 +124,8 @@ pub unsafe extern "Rust" fn context_init(
 
     let tc = tc_loc(frame_loc as usize);
     core::ptr::write_bytes(tc as *mut u8, 0, core::mem::size_of::<ThreadContext>());
-    (*tc).x19_x30[11] = entry_x30;       // x30 = trampoline or stub
-    (*tc).sp = stack_top as u64;          // SP_EL1 = vivanta_kernel stack top
+    (*tc).x19_x30[11] = entry_x30; // x30 = trampoline or stub
+    (*tc).sp = stack_top as u64; // SP_EL1 = vivanta_kernel stack top
 
     ArchContext::from_raw(frame_loc as usize)
 }

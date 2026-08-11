@@ -33,11 +33,18 @@ impl AllocationRequirements {
     }
 
     pub fn fastest(size: u64) -> Self {
-        Self { preferred_policy: PlacementPolicy::Fastest, ..Self::new(size) }
+        Self {
+            preferred_policy: PlacementPolicy::Fastest,
+            ..Self::new(size)
+        }
     }
 
     pub fn persistent(size: u64) -> Self {
-        Self { require_persistence: Some(true), preferred_policy: PlacementPolicy::Persistent, ..Self::new(size) }
+        Self {
+            require_persistence: Some(true),
+            preferred_policy: PlacementPolicy::Persistent,
+            ..Self::new(size)
+        }
     }
 }
 
@@ -66,20 +73,29 @@ fn score_dimensions(props: &MemoryProperties) -> DimensionScores {
         BandwidthClass::Low => 10,
     };
     let gib = (props.capacity / (1024 * 1024 * 1024)).max(1);
-    let capacity = if gib >= 64 { 100 } else if gib >= 8 { 80 } else if gib >= 1 { 50 } else { 10 };
+    let capacity = if gib >= 64 {
+        100
+    } else if gib >= 8 {
+        80
+    } else if gib >= 1 {
+        50
+    } else {
+        10
+    };
     let persistence = match props.persistence {
         PersistenceType::Persistent => 100,
         PersistenceType::Volatile => 0,
     };
-    DimensionScores { latency, bandwidth, capacity, persistence }
+    DimensionScores {
+        latency,
+        bandwidth,
+        capacity,
+        persistence,
+    }
 }
 
 fn weighted_score(dim: &DimensionScores, w: &[u32; 4]) -> u32 {
-    (dim.latency * w[0]
-        + dim.bandwidth * w[1]
-        + dim.capacity * w[2]
-        + dim.persistence * w[3])
-        / 100
+    (dim.latency * w[0] + dim.bandwidth * w[1] + dim.capacity * w[2] + dim.persistence * w[3]) / 100
 }
 
 /// Compute a single [0..100] score for a backend given the requirements.

@@ -56,3 +56,46 @@ impl MemoryMap {
 }
 
 pub type RegionType = MemoryRegionKind;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn push_and_iterate() {
+        let mut map = MemoryMap::new();
+        map.push(MemoryRegion {
+            start: 0x4000_0000,
+            size: 0x1000,
+            kind: MemoryRegionKind::Usable,
+        });
+        map.push(MemoryRegion {
+            start: 0x9000_0000,
+            size: 0x1000,
+            kind: MemoryRegionKind::Mmio,
+        });
+        assert_eq!(map.regions().len(), 2);
+        assert!(map.regions()[0].kind.is_usable());
+        assert_eq!(map.regions()[0].start, 0x4000_0000);
+        assert_eq!(map.regions()[1].kind, MemoryRegionKind::Mmio);
+    }
+
+    #[test]
+    fn capacity_limit_respected() {
+        let mut map = MemoryMap::new();
+        for i in 0..(MAX_REGIONS + 4) {
+            map.push(MemoryRegion {
+                start: i as u64,
+                size: 1,
+                kind: MemoryRegionKind::Reserved,
+            });
+        }
+        assert_eq!(map.regions().len(), MAX_REGIONS);
+    }
+
+    #[test]
+    fn new_is_empty() {
+        let map = MemoryMap::new();
+        assert_eq!(map.regions().len(), 0);
+    }
+}

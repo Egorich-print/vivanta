@@ -15,10 +15,11 @@ impl MrmPageTableAllocator {
 
 impl PageTableAllocator for MrmPageTableAllocator {
     fn alloc_page_table_frame(&mut self) -> u64 {
-        use crate::memory::{AllocationRequirements, MemoryBackend};
+        use crate::memory::AllocationRequirements;
         let req = AllocationRequirements::new(4096);
         unsafe {
-            (*self.mrm).allocate(&req, 0)
+            (*self.mrm)
+                .allocate(&req, 0)
                 .expect("alloc_page_table_frame: OOM")
                 .phys_addr
                 .expect("alloc_page_table_frame: no phys addr")
@@ -78,7 +79,12 @@ pub struct MemoryObject {
 }
 
 impl MemoryObject {
-    pub fn new(id: MemoryObjectId, size: u64, resource_id: ResourceId, capability: MemoryCapability) -> Self {
+    pub fn new(
+        id: MemoryObjectId,
+        size: u64,
+        resource_id: ResourceId,
+        capability: MemoryCapability,
+    ) -> Self {
         MemoryObject {
             id,
             size,
@@ -135,7 +141,8 @@ impl MemoryObject {
         let phys = self.phys_addr.ok_or(ObjectError::NoStorage)?;
 
         let flags = rights_to_flags(self.capability.rights);
-        aspace.map_pages(vaddr, phys, size, flags, alloc, self.id)
+        aspace
+            .map_pages(vaddr, phys, size, flags, alloc, self.id)
             .map_err(|_| ObjectError::MappingLimitReached)?;
 
         for i in 0..MAX_MAPPINGS {
@@ -148,7 +155,7 @@ impl MemoryObject {
         Err(ObjectError::MappingLimitReached)
     }
 
-        /// Unmap this object and clear the page table entries.
+    /// Unmap this object and clear the page table entries.
     pub fn unmap(
         &mut self,
         slot: usize,
@@ -158,15 +165,19 @@ impl MemoryObject {
         if self.is_revoked() {
             return Err(ObjectError::Revoked);
         }
-        let mapping = self.mappings.get(slot).and_then(|m| *m).ok_or(ObjectError::NotMapped)?;
-        aspace.unmap_pages(mapping.vaddr, mapping.size, alloc)
+        let mapping = self
+            .mappings
+            .get(slot)
+            .and_then(|m| *m)
+            .ok_or(ObjectError::NotMapped)?;
+        aspace
+            .unmap_pages(mapping.vaddr, mapping.size, alloc)
             .map_err(|_| ObjectError::NotMapped)?;
         self.mappings[slot] = None;
         if self.mappings.iter().all(|m| m.is_none()) {
             self.state = MemoryObjectState::Allocated;
         }
-        Ok(()
-)
+        Ok(())
     }
 
     pub fn mapping_count(&self) -> usize {
@@ -217,7 +228,9 @@ impl MemoryObject {
     // ------------------------------------------------------------------
 
     pub fn vaddr(&self) -> Option<u64> {
-        self.mappings.iter().find_map(|m| m.as_ref().map(|x| x.vaddr))
+        self.mappings
+            .iter()
+            .find_map(|m| m.as_ref().map(|x| x.vaddr))
     }
 }
 

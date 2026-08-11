@@ -2,10 +2,10 @@
 #![no_main]
 
 use core::panic::PanicInfo;
-use vivanta_boot_common::{println, set_console};
-use vivanta_boot_common::pl011::Pl011;
-use vivanta_platform_rpi3b::init_uart_gpio;
 use vivanta_arch_aarch64::early_mmu;
+use vivanta_boot_common::pl011::Pl011;
+use vivanta_boot_common::{println, set_console};
+use vivanta_platform_rpi3b::init_uart_gpio;
 
 const PL011_BASE: usize = 0x3F20_1000;
 
