@@ -25,7 +25,7 @@ fn phys_addr<T>(ptr: *const T) -> u64 {
 }
 
 fn l1_table_desc(l2_phys: u64) -> u64 {
-    DESC_VALID | DESC_TABLE | (l2_phys & ADDR_MASK)
+    DESC_TABLE | (l2_phys & ADDR_MASK)
 }
 
 pub fn build_identity(size: u64) -> u64 {

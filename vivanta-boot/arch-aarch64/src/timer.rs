@@ -87,7 +87,6 @@ pub fn timer_handler(_irq: u32) {
     set_tval(TVAL.load(Ordering::Relaxed));
     unsafe { vivanta_arch_api::scheduler::scheduler_tick() }
 }
-
 /// Register the timer IRQ handler and start periodic ticks.
 pub unsafe fn init(gic: &crate::interrupts::Gic) {
     let freq = frequency();
