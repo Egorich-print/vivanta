@@ -37,12 +37,25 @@ deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
 
 ## Post-M5 deferred artifacts
 
-1. **G4+ soak** — `tools/soak_test.sh` (default 60 min), validated on 30s run;
-   full run pending.
+1. **G4+ soak** — `tools/soak_test.sh` (default 60 min). **Note: soak run
+   surfaced INV-002 (preemption IRQ-loss under sustained load) — see below.
+   Soak must pass consistently before it is trusted as a reliability gate.**
 2. **MMU descriptor encoding** — HW-validation plan documented; requires
    physical ARM64 hardware.
 3. **Orphan workspace members removed** (`kernel-memory-frozen`, `user/hello`,
    `user/libc`); directories kept per ADR-011.
+
+## Known issues
+
+- **P1 — INV-002: preemption IRQ-loss under sustained load** (pre-existing
+  M5.0-path defect, surfaced by the soak). Under long timer preemption the
+  kernel loses ticks (tight loop at ~99% CPU) or crashes
+  (EL1h Instruction Abort, `x30=0`). See
+  `vivanta-boot/docs/investigations/INV-002-preemption-irq-loss.md`.
+  Blocks long-running multi-thread workloads; must be fixed before the
+  preemption claim is considered reliable.
+- M5.0 G4 "preemption proven" is true for short runs (60 s smoke, manual
+  runs) but is NOT reliable over minutes until INV-002 is resolved.
 
 ## Platforms
 
