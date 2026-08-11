@@ -32,7 +32,7 @@ SECTIONS
 
     . = ALIGN(16);
     __stack_bottom = .;
-    . += 16384;
+    . += 32768;
     __stack_top = .;
 
     /DISCARD/ : {

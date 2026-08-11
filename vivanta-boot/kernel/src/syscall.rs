@@ -62,7 +62,7 @@ pub unsafe extern "Rust" fn syscall_dispatch(
         }
         SYS_EXIT => {
             println!("  syscall: exit({})", arg0);
-            crate::scheduler::thread_exit();
+            crate::scheduler::thread_exit(arg0 as i32);
         }
         SYS_YIELD => {
             crate::scheduler::yield_now();

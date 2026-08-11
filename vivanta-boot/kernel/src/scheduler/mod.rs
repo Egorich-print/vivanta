@@ -12,6 +12,7 @@ use crate::vmm::AddressSpaceId;
 use alloc::vec::Vec;
 use process_table::ProcessTable;
 use runqueue::RunQueue;
+use task::{TaskId, TaskState};
 use thread::{Priority, Thread, ThreadEntry, ThreadId, ThreadState};
 use vivanta_arch_api::pmm::FrameAllocator;
 
@@ -301,6 +302,16 @@ pub fn maybe_reschedule(_frame: usize) {
 // Thread lifecycle
 // ---------------------------------------------------------------------------
 
+/// Find the Task that owns the given thread, if any.
+///
+/// M6: threads are owned by Tasks (`Task.threads`); this is how the scheduler
+/// links a terminating thread back to its process container.
+pub fn task_for_thread(tid: ThreadId) -> Option<TaskId> {
+    pt().iter()
+        .find(|t| t.threads.contains(&tid))
+        .map(|t| t.task_id)
+}
+
 extern "C" fn thread_trampoline(_arg: usize) {
     // First entry of a kernel thread: the previous thread's InterruptGuard is
     // still "held" across the context switch, so IRQs are disabled here.
@@ -309,29 +320,70 @@ extern "C" fn thread_trampoline(_arg: usize) {
         vivanta_arch_api::interrupts::enable_interrupts();
     }
     let current_id = current_thread_id();
+    // M6: when a task's first thread starts executing, mark the task Running.
+    if let Some(tid) = task_for_thread(current_id) {
+        if let Some(task) = pt().lookup_mut(tid) {
+            if task.state == TaskState::Created {
+                task.state = TaskState::Running;
+            }
+        }
+    }
     let entry = rq()
         .get(current_id)
         .and_then(|t| t.entry)
         .expect("trampoline: no entry");
     thread_set_state(current_id, ThreadState::Running);
     entry(0);
-    thread_exit();
+    thread_exit(0); // entry returned => normal completion
 }
 
 /// Called from the arch EL0 fault handler (G3 fault containment): terminate
-/// the current task without returning to EL0.
+/// the current task without returning to EL0. A fault is an abnormal exit
+/// (convention: negative code).
 #[no_mangle]
 pub extern "Rust" fn user_fault_terminate() -> ! {
-    thread_exit()
+    thread_exit(-1)
 }
 
-pub fn thread_exit() -> ! {
+/// Terminate the current thread and mark its owning Task as exited.
+///
+/// M6 (G6-A/G6-B): the process container learns the thread's exit code so
+/// `Task::exit()` / `TaskState::Exited` become real, and the parent/monitor
+/// can collect it on reap.
+pub fn thread_exit(exit_code: i32) -> ! {
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
 
     // Snapshot the current ThreadId FIRST (ThreadId is stable across slot
     // reuse; never read it after cleanup may have removed/reused slots).
     let current_id = current_thread_id();
     let current_as = rq().get(current_id).unwrap().address_space;
+
+    // M6 (G6-A/G6-B): notify the owning Task of this thread's exit code.
+    // Only the LAST thread of a task transitions it to Exited; intermediate
+    // threads just end (state stays Running until the last one).
+    if let Some(tid) = task_for_thread(current_id) {
+        let remaining = pt()
+            .lookup(tid)
+            .map(|t| {
+                t.threads
+                    .iter()
+                    .filter(|th| **th != current_id && rq().get(**th).is_some())
+                    .count()
+            })
+            .unwrap_or(0);
+        if remaining == 0 {
+            if let Some(task) = pt().lookup_mut(tid) {
+                if task.state != TaskState::Exited {
+                    task.exit(exit_code);
+                    vivanta_boot_common::println!(
+                        "  [task] Task {} -> Exited code={}",
+                        tid,
+                        exit_code
+                    );
+                }
+            }
+        }
+    }
 
     // Remove previously terminated threads (never the current one — it is
     // still present; we mark it Terminated after cleanup).

@@ -54,8 +54,12 @@ impl Task {
         self.owned_objects.push(obj);
     }
 
+    /// Mark the task as terminated (zombie) with the given exit code.
+    ///
+    /// M6: an exited task that has not been reaped is a `Zombie`; the parent
+    /// or monitor collects it via `reap_zombie`, which releases its resources.
     pub fn exit(&mut self, code: i32) {
-        self.state = TaskState::Exited;
+        self.state = TaskState::Zombie;
         self.exit_code = Some(code);
     }
 

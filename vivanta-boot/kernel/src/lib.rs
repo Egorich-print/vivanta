@@ -292,13 +292,30 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     }
 
     // ------- Wrap in AddressSpace ------------------------------------------
+    let uart_dbg = 0x0900_0000 as *mut u32;
+    unsafe {
+        core::ptr::write_volatile(uart_dbg, b'B' as u32);
+    }
     let root = vivanta_arch_api::mmu::RootPageTable(pt);
+    unsafe {
+        core::ptr::write_volatile(uart_dbg, b'C' as u32);
+    }
     vmm::address_space::init_kernel_address_space(root);
+    unsafe {
+        core::ptr::write_volatile(uart_dbg, b'D' as u32);
+    }
 
     // Build independent root tables for UserAS1/UserAS2
     let alloc_ctx_root: *mut () = mrm_ptr as *mut ();
     let build_root = |label: &str, extra_va: u64, extra_pa: u64| -> RootPageTable {
+        let uart = 0x0900_0000 as *mut u32;
+        unsafe {
+            core::ptr::write_volatile(uart, b'X' as u32);
+        }
         let rpt = vivanta_arch_api::boot::mmu::mmu_init(alloc_ctx_root, boot_alloc_frame);
+        unsafe {
+            core::ptr::write_volatile(uart, b'Y' as u32);
+        }
         // Map ALL usable RAM (not just available region) — kernel code/stack must be accessible
         for r in hardware.memory_map.regions() {
             use vivanta_boot_common::MemoryRegionKind;
@@ -505,6 +522,63 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!("  boot thread survived the faulting task (containment OK)");
     let (fa, fb) = unsafe { (PREEMPT_COUNTER_A, PREEMPT_COUNTER_B) };
     println!("  preempt counters before test: A={} B={}", fa, fb);
+
+    // ------------------------------------------------------------------
+    // M6 process-lifecycle demo: the demo user task (tid) already ran and
+    // exited with code 0 through the new thread_exit path. Observe its Task
+    // state transitions and verify reaping returns frames to the PMM
+    // (G6-A / G6-B / G6-C).
+    // ------------------------------------------------------------------
+    println!();
+    println!("M6 process-lifecycle verification:");
+    let m6_before_free = pmm.free_count();
+    if let Some(task) = taskman.get(tid) {
+        println!(
+            "  [M6] demo Task {} state={:?} exit_code={:?}",
+            tid, task.state, task.exit_code
+        );
+        assert_eq!(task.exit_code, Some(0), "M6 FAIL: demo task exit code != 0");
+        assert_eq!(
+            task.state,
+            scheduler::task::TaskState::Zombie,
+            "M6 FAIL: demo task not Zombie after exit"
+        );
+    }
+    if let Some(ft) = faultman.get(ftid) {
+        println!(
+            "  [M6] fault Task {} state={:?} exit_code={:?}",
+            ftid, ft.state, ft.exit_code
+        );
+    }
+    println!(
+        "  [M6] running_count={} (demo task exited)",
+        taskman.running_count()
+    );
+    let zombies: alloc::vec::Vec<scheduler::task::TaskId> = taskman.zombies();
+    println!("  [M6] zombies before reap: {:?}", zombies);
+    let before_reap_free = pmm.free_count();
+    let mut reaped = 0;
+    for z in zombies {
+        if taskman.reap_zombie(z).is_some() {
+            reaped += 1;
+        }
+    }
+    let after_reap_free = pmm.free_count();
+    println!(
+        "  [M6] reaped={} free_before={} free_after={} delta={}",
+        reaped,
+        before_reap_free,
+        after_reap_free,
+        after_reap_free - before_reap_free
+    );
+    assert!(
+        after_reap_free >= before_reap_free,
+        "M6 FAIL: reaping leaked memory (free decreased)"
+    );
+    println!(
+        "  [M6] process lifecycle demo OK (baseline_free={})",
+        m6_before_free
+    );
 
     // ------------------------------------------------------------------
     // G4 preemption test: two live CPU-bound kernel threads, NO voluntary
