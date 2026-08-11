@@ -13,9 +13,6 @@ members = [
     # --- Kernel ---
     "kernel",
 
-    # --- Frozen RFC prototypes (ADR-011) ---
-    "kernel-memory-frozen",
-
     # --- Platform support ---
     "platform-qemu",
     "platform-rk3568",
@@ -36,10 +33,6 @@ members = [
     "arch-test-stub",
     "target-test",
     "target-mmu-test",
-
-    # --- User-space ---
-    "user/libc",
-    "user/hello",
 ]
 
 [profile.dev]
