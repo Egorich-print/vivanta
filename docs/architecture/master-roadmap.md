@@ -8,15 +8,17 @@
 
 ## Current Focus
 
-*   **Active Track:** `M5.0 GREEN BASELINE` (recovery milestone)
-*   **Active Milestone:** `M5.0` — see `vivanta-boot/docs/milestones/M5.0-green-baseline.md` (ratified baseline; source of truth)
-*   **Current Engineering Objective:** Restore the kernel to a provable baseline: workspace integrity (G1), physical memory ownership + reclamation (G2), user memory boundary + fault containment (G3), scheduler state + preemption correctness (G4). No new features.
+*   **Active Track:** `M6 PROCESS LIFECYCLE CORRECTNESS` (closed 2026-08-11)
+*   **Completed:** `M5.0 GREEN BASELINE` — PASS/CLOSED (see `vivanta-boot/docs/milestones/M5.0-green-baseline.md`)
+*   **Completed:** `M6 Process Lifecycle` — PASS/CLOSED (see `vivanta-boot/docs/milestones/M6-process-lifecycle.md`)
+*   **Current Engineering Objective:** Post-M6 — finish deferred reliability artifacts (60-min soak, MMU descriptor HW validation), then define the next milestone from actual state.
 *   **Architecture Version:** V1 architecture stabilized (ADR-021/024 ratified); ADR-030 paging architecture accepted.
 *   **Architecture Status:** ADR-011 through ADR-025 ratified (engineering ADRs canonical in `vivanta-boot/docs/adr/`).
 
-> M5.0 supersedes the previous "V2/M5 Memory Resource Manager" focus. The MRM
-> integration is complete; the next engineering gate is the recovery baseline,
-> not a new subsystem.
+> M5.0/M6 supersede the pre-M5 "V2/M5 Memory Resource Manager" roadmap. The
+> next milestone is defined from actual repository state, not the old roadmap.
+> Scope fence holds: IPC / storage / drivers / distributed AI / Ed25519 /
+> BIP-39 / persistent identity / TTBR1 / ASID / signals / new syscalls.
 
 ---
 
@@ -382,8 +384,9 @@ The first genuine isolated EL0 process. Not just a jump — a runtime environmen
 *Every roadmap modification must update this section.*
 
 ### 2026-08-11
--   **M5.0 GREEN BASELINE ratified** (`vivanta-boot/docs/milestones/M5.0-green-baseline.md`).
--   Current Focus switched from V2/M5 (MRM) to M5.0 recovery milestone.
+-   **M5.0 GREEN BASELINE — PASS/CLOSED** (`vivanta-boot/docs/milestones/M5.0-green-baseline.md`).
+-   **M6 Process Lifecycle — PASS/CLOSED** (`vivanta-boot/docs/milestones/M6-process-lifecycle.md`).
+-   Current Focus: post-M6 deferred reliability (60-min soak, MMU descriptor HW validation), next milestone from actual state.
 -   ADR registry reconciled: canonical engineering ADRs live in `vivanta-boot/docs/adr/`;
     ADR-031…039 quarantined as distributed/AI research track (no implementation).
 
