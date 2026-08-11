@@ -44,6 +44,7 @@ pub unsafe extern "Rust" fn syscall_dispatch(
                 }
                 .is_err()
                 {
+                    println!("  syscall: write -> -EFAULT (invalid user range)");
                     return -14i64 as u64; // -EFAULT
                 }
                 // Direct PL011 UART write.

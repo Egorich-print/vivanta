@@ -38,6 +38,8 @@ extern "C" {
     static __stack_top: u8;
     static user_code_start: u8;
     static user_code_end: u8;
+    static fault_code_start: u8;
+    static fault_code_end: u8;
 }
 
 /// Allocator callback for arch boot MMU init.
@@ -328,6 +330,26 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             );
             println!("  UserAS1: code=0x{:x}, stack=0x{:x}", CODE_VA, STACK_VA);
         }
+        // G3 fault-containment test: map the deliberately-faulting code into
+        // UserAS2 so a fault task can be spawned without disturbing the demo.
+        if label == "UserAS2" {
+            const FAULT_CODE_VA: u64 = 0x5F00_0000;
+            const FAULT_STACK_VA: u64 = 0x5F01_0000;
+            let code_src = &fault_code_start as *const u8;
+            let code_len =
+                (&fault_code_end as *const u8 as usize) - (&fault_code_start as *const u8 as usize);
+            vivanta_arch_api::boot::mmu::mmu_map_user_pages(
+                rpt,
+                FAULT_CODE_VA,
+                code_src,
+                code_len,
+                FAULT_STACK_VA,
+            );
+            println!(
+                "  UserAS2: fault code=0x{:x}, stack=0x{:x}",
+                FAULT_CODE_VA, FAULT_STACK_VA
+            );
+        }
         let ra = vivanta_arch_api::boot::mmu::mmu_root_addr(rpt);
         println!("  {} root table at 0x{:x}", label, ra);
         RootPageTable(ra as usize)
@@ -342,7 +364,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     }
 
     let user_as1 = vmm::register(root1, vmm::AddressSpaceFlags::User);
-    let _user_as2 = vmm::register(root2, vmm::AddressSpaceFlags::User);
+    let user_as2 = vmm::register(root2, vmm::AddressSpaceFlags::User);
     println!("  Address spaces: {} total", vmm::count());
 
     // ------- Enable MMU ----------------------------------------------------
@@ -455,6 +477,34 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     // After yield_now returns, the boot thread has been rescheduled.
     // The user thread ran write(1, "Hello, Vivanta!") then exit(0).
     println!("Boot thread resumed (user thread exited cleanly)");
+
+    // ------------------------------------------------------------------
+    // G3 fault-containment test: spawn a user task that deliberately faults.
+    // The faulting task must be terminated (user_fault_terminate →
+    // thread_exit), its resources reclaimed, and other threads must continue.
+    // ------------------------------------------------------------------
+    println!();
+    println!("G3 fault-containment test: spawning faulting task");
+    const FAULT_CODE_VA: usize = 0x5F00_0000;
+    let mut faultman = scheduler::task_manager::TaskManager::new();
+    let ftid = faultman
+        .spawn_user(
+            FAULT_CODE_VA,
+            0x5F01_1000,
+            user_as2,
+            &mut pmm,
+            system_state.memory_manager_mut(),
+            scheduler::thread::Priority::Normal,
+            None,
+        )
+        .expect("spawn fault task");
+    println!("  fault task {} spawned, yielding to it", ftid);
+    // Let the faulting task run; it faults and is terminated by the kernel.
+    scheduler::yield_now();
+    scheduler::yield_now();
+    println!("  boot thread survived the faulting task (containment OK)");
+    let (fa, fb) = unsafe { (PREEMPT_COUNTER_A, PREEMPT_COUNTER_B) };
+    println!("  preempt counters before test: A={} B={}", fa, fb);
 
     // ------------------------------------------------------------------
     // G4 preemption test: two live CPU-bound kernel threads, NO voluntary

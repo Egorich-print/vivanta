@@ -68,13 +68,20 @@ core::arch::global_asm!(
     ".section .user.text, \"ax\"",
     ".global user_code_start",
     "user_code_start:",
-    // write(1, msg, 16)
+    // 1. write(1, msg, 16) — valid user buffer.
     "mov  x8, #1",        // SYS_WRITE
     "mov  x0, #1",        // fd = stdout
     "adr  x1, hello_msg", // buf = message
     "mov  x2, #16",       // len
     "svc  #0",
-    // exit(0)
+    // 2. G3 negative test: write(1, 0x40200000, 8) with a KERNEL address.
+    //    Must return -EFAULT (0xfffffffffffffff2), never leak kernel memory.
+    "mov  x8, #1",          // SYS_WRITE
+    "mov  x0, #1",          // fd = stdout
+    "mov  x1, #0x40000000", // kernel VA (identity-mapped kernel image region)
+    "mov  x2, #8",          // len
+    "svc  #0",
+    // 3. exit(0) — normal exit (proves the kernel survived the -EFAULT).
     "mov  x8, #2", // SYS_EXIT
     "mov  x0, #0", // code = 0
     "svc  #0",
@@ -90,6 +97,48 @@ core::arch::global_asm!(
 extern "C" {
     static user_code_start: u8;
     static user_code_end: u8;
+}
+
+/// Faulting user code — placed in `.user.text.fault`. Deliberately stores to
+/// address 0 (a kernel/unmapped VA) to trigger a synchronous EL0 data abort.
+/// Used by the G3 fault-containment test: the faulting task must be
+/// terminated and other threads must continue.
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
+    ".section .user.text.fault, \"ax\"",
+    ".global fault_code_start",
+    "fault_code_start:",
+    // Attempt to write to unmapped VA 0 -> Data Abort (EC=0b100100)
+    "mov  x0, #0",
+    "str  wzr, [x0]",
+    // If the fault were (incorrectly) skipped, fall through to exit.
+    "mov  x8, #2",
+    "mov  x0, #1",
+    "svc  #0",
+    "b .",
+    ".global fault_code_end",
+    "fault_code_end:",
+);
+
+extern "C" {
+    static fault_code_start: u8;
+    static fault_code_end: u8;
+}
+
+/// Addresses used for the faulting user task.
+pub const FAULT_CODE_VA: u64 = 0x5F00_0000;
+pub const FAULT_STACK_VA: u64 = 0x5F01_0000;
+
+/// Copy the faulting code into a fresh physical frame and return its address.
+pub unsafe fn fault_code_pa(alloc: &mut dyn vivanta_arch_api::pmm::FrameAllocator) -> u64 {
+    let pa = alloc.alloc_frame().expect("fault code frame").addr;
+    let src = &fault_code_start as *const u8;
+    let len = (&fault_code_end as *const u8).offset_from(src) as usize;
+    core::ptr::copy_nonoverlapping(src, pa as *mut u8, len);
+    if len < 4096 {
+        core::ptr::write_bytes((pa as *mut u8).add(len), 0u8, 4096 - len);
+    }
+    pa
 }
 
 fn user_code_size() -> usize {
