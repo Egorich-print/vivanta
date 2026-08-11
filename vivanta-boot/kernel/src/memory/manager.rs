@@ -56,17 +56,16 @@ impl MemoryResourceManager {
         let idx = self.best_backend_idx(req)?;
         let entry = self.backends[idx].as_mut()?;
         // entry: &mut (ResourceId, *mut dyn MemoryBackend)
-        // raw_ptr: *mut dyn MemoryBackend (copied from the field)
-        let raw_ptr = entry.1;
+        let (rid, raw_ptr) = *entry;
         let backend: &mut dyn MemoryBackend = unsafe { &mut *raw_ptr };
         let phys_addr = backend.allocate(req.size, req.align).ok()?;
-        let rid = idx as ResourceId;
         let obj_id = self.next_object_id;
         self.next_object_id += 1;
         let cap_id = self.next_cap_id;
         self.next_cap_id += 1;
         let cap = MemoryCapability::new(cap_id, obj_id, MemRights::FULL, owner);
         let mut obj = MemoryObject::new(obj_id, req.size, rid, cap);
+        obj.set_backend(raw_ptr);
         obj.set_phys_addr(phys_addr);
         let _ = obj.mark_allocated();
         Some(obj)

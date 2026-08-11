@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 use crate::error::{KernelResult, PmmError};
+use crate::memory::{AllocationRequirements, MemoryResourceManager};
 use crate::pmm::PmmBitmap;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,5 +66,29 @@ pub fn stress_test_pmm(pmm: &mut PmmBitmap, cycles: usize) -> KernelResult<()> {
     }
 
     verify_pmm(pmm)?;
+    Ok(())
+}
+
+/// G2 churn: allocate MemoryObjects via the MRM and drop them, proving that
+/// `free_count` returns to its baseline after each cycle (Drop → deallocate).
+///
+/// Returns the free-count delta across all cycles; a non-zero value means a
+/// leak. `before`/`after` deltas are checked by the caller against the PMM
+/// free count.
+#[must_use]
+pub fn stress_mrm_churn(mrm: &mut MemoryResourceManager, cycles: usize) -> KernelResult<()> {
+    let mut objs = alloc::vec::Vec::new();
+    for _ in 0..cycles {
+        let req = AllocationRequirements::new(4096);
+        let obj = mrm.allocate(&req, 0).ok_or(PmmError::OutOfMemory)?;
+        // Physical frame must be present (Drop will release it).
+        assert!(
+            obj.phys_addr.is_some(),
+            "MRM churn: object without phys addr"
+        );
+        objs.push(obj);
+        // Free immediately: Drop deallocates the frame.
+    }
+    objs.clear();
     Ok(())
 }

@@ -21,6 +21,19 @@ static mut RUNQUEUE: Option<RunQueue> = None;
 static mut PROCESS_TABLE: Option<ProcessTable> = None;
 static mut BOOT_THREAD_ID: ThreadId = 0;
 static mut IDLE_THREAD_ID: ThreadId = 0;
+/// Frame allocator used to reclaim kernel stacks of terminated threads.
+/// Set once during boot (kernel_main) after the PMM is initialised.
+static mut STACK_ALLOCATOR: Option<*mut dyn FrameAllocator> = None;
+
+/// Register the allocator used to free kernel stacks on thread exit (G2).
+/// The PMM outlives all threads; the pointer stays valid for the kernel's
+/// whole lifetime (same aliasing contract as PmmBackend).
+pub fn register_stack_allocator(alloc: &mut (dyn FrameAllocator + 'static)) {
+    let ptr: *mut dyn FrameAllocator = alloc;
+    unsafe {
+        STACK_ALLOCATOR = Some(ptr);
+    }
+}
 
 use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 static NEED_RESCHEDULE: AtomicBool = AtomicBool::new(false);
@@ -144,6 +157,7 @@ pub fn create_user_thread(
         address_space,
         level: vivanta_arch_api::context::ExecutionLevel::User,
         sleep_until: None,
+        kernel_stack_pa: Some((kernel_stack_top - KERNEL_STACK_SIZE) as u64),
     };
     register(thread);
     thread_set_state(id, ThreadState::Ready);
@@ -157,10 +171,12 @@ pub fn create_kernel_thread(
     address_space: AddressSpaceId,
     priority: Priority,
 ) -> ThreadId {
-    let stack_base = alloc.alloc_frame().expect("stack frame 0").addr;
-    for _ in 1..4 {
-        alloc.alloc_frame().expect("stack frame");
-    }
+    // Kernel stack: KERNEL_STACK_SIZE (16 KiB) must be physically contiguous
+    // so SP_EL1 is a valid single stack. Use the explicit contiguous contract.
+    let stack_base = alloc
+        .alloc_contiguous(KERNEL_STACK_SIZE / 4096)
+        .expect("kernel stack contiguous alloc failed")
+        .addr;
     let stack_top = (stack_base as usize) + KERNEL_STACK_SIZE;
     let ctx = unsafe {
         vivanta_arch_api::context::context_init(
@@ -180,6 +196,7 @@ pub fn create_kernel_thread(
         address_space,
         level: vivanta_arch_api::context::ExecutionLevel::Kernel,
         sleep_until: None,
+        kernel_stack_pa: Some(stack_base),
     };
     register(thread);
     thread_set_state(id, ThreadState::Ready);
@@ -354,7 +371,23 @@ fn cleanup() {
         .collect();
 
     for id in to_remove {
-        rq().remove(id);
+        let removed = rq().remove(id);
+        if let Some(t) = removed {
+            // G2 reclamation: return the contiguous kernel stack frames to the
+            // physical allocator. Boot/idle threads use static stacks (None).
+            if let Some(pa) = t.kernel_stack_pa {
+                unsafe {
+                    if let Some(alloc) = STACK_ALLOCATOR {
+                        let frames = KERNEL_STACK_SIZE / 4096;
+                        for i in 0..frames {
+                            (*alloc).free_frame(vivanta_arch_api::pmm::PhysFrame {
+                                addr: pa + (i as u64) * 4096,
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -379,6 +412,7 @@ pub fn init_boot() {
             address_space: kernel_as,
             level: vivanta_arch_api::context::ExecutionLevel::Kernel,
             sleep_until: None,
+            kernel_stack_pa: None, // static boot stack, never freed
         })
         .expect("Failed to insert boot thread");
 
@@ -404,6 +438,7 @@ pub fn init_boot() {
             address_space: kernel_as,
             level: vivanta_arch_api::context::ExecutionLevel::Kernel,
             sleep_until: None,
+            kernel_stack_pa: None, // static idle stack, never freed
         })
         .expect("Failed to insert idle thread");
 

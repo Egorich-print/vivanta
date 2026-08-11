@@ -32,14 +32,13 @@ impl MemoryBackend for PmmBackend {
         }
         let frames_needed = ((size + 4095) / 4096) as usize;
         let pmm = self.pmm();
-        let mut first_addr = None;
-        for _ in 0..frames_needed {
-            let frame = pmm.alloc_frame().ok_or(AllocError::OutOfCapacity)?;
-            if first_addr.is_none() {
-                first_addr = Some(frame.addr);
-            }
-        }
-        first_addr.ok_or(AllocError::OutOfCapacity)
+        // G2 contiguity contract: multi-frame allocations use the explicit
+        // contiguous API. PMM's alloc_contiguous returns an atomic run of
+        // contiguous free frames (no partial leak on failure).
+        let first = pmm
+            .alloc_contiguous(frames_needed)
+            .ok_or(AllocError::OutOfCapacity)?;
+        Ok(first.addr)
     }
 
     fn deallocate(&mut self, addr: PhysAddr, size: u64) {

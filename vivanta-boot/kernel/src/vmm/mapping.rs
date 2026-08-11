@@ -56,18 +56,28 @@ impl MappingSet {
     }
 
     pub fn insert(&mut self, mapping: Mapping) -> Option<usize> {
-        if self.count >= MAX_MAPPINGS {
-            return None;
+        // Reuse the first hole left by remove(); only grow `count` when no
+        // hole exists. This keeps capacity usable across insert/remove churn.
+        for (i, slot) in self.mappings.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(mapping);
+                if i >= self.count {
+                    self.count = i + 1;
+                }
+                return Some(i);
+            }
         }
-        let slot = self.count;
-        self.mappings[slot] = Some(mapping);
-        self.count += 1;
-        Some(slot)
+        None
     }
 
     pub fn remove(&mut self, slot: usize) {
         if slot < self.count {
             self.mappings[slot] = None;
+            // Shrink count while the tail is empty so `len()` reflects live
+            // mappings and a fresh insert can reuse the freed slot.
+            while self.count > 0 && self.mappings[self.count - 1].is_none() {
+                self.count -= 1;
+            }
         }
     }
 

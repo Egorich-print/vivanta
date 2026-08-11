@@ -32,4 +32,7 @@ pub struct Thread {
     pub address_space: AddressSpaceId,
     pub level: ExecutionLevel,
     pub sleep_until: Option<u64>, // Tick count when to wake up
+    /// Physical base of the contiguous kernel stack (KERNEL_STACK_SIZE).
+    /// `None` for the boot/idle threads (static stacks, never freed).
+    pub kernel_stack_pa: Option<u64>,
 }

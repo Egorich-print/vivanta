@@ -37,10 +37,10 @@ impl TaskManager {
         priority: Priority,
         parent: Option<TaskId>,
     ) -> Result<TaskId, &'static str> {
-        let stack_base = alloc.alloc_frame().ok_or("kernel stack frame 0")?.addr;
-        for _ in 1..4 {
-            alloc.alloc_frame().ok_or("kernel stack frame")?;
-        }
+        let stack_base = alloc
+            .alloc_contiguous(16384 / 4096)
+            .ok_or("kernel stack contiguous alloc failed")?
+            .addr;
         let kernel_stack_top = (stack_base as usize) + 16384;
 
         let user_stack = mrm

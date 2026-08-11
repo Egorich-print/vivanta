@@ -29,6 +29,39 @@ impl FrameAllocator for PmmBitmap {
         None
     }
 
+    /// Allocate `n` physically contiguous free frames.
+    ///
+    /// Scans for a run of `n` consecutive free frames and marks them all
+    /// allocated atomically (no partial leak on failure).
+    fn alloc_contiguous(&mut self, n: usize) -> Option<PhysFrame> {
+        if n == 0 || n > self.total_frames {
+            return None;
+        }
+        let mut run = 0usize;
+        let mut run_start = 0usize;
+        for i in 0..=self.total_frames {
+            let free = i < self.total_frames && !self.test(i);
+            if free {
+                if run == 0 {
+                    run_start = i;
+                }
+                run += 1;
+                if run == n {
+                    for j in run_start..(run_start + n) {
+                        self.set(j, true);
+                    }
+                    self.allocated_count += n;
+                    return Some(PhysFrame {
+                        addr: self.region_start + run_start as u64 * FRAME_SIZE,
+                    });
+                }
+            } else {
+                run = 0;
+            }
+        }
+        None
+    }
+
     fn free_frame(&mut self, frame: PhysFrame) {
         let offset = frame.addr.wrapping_sub(self.region_start);
         let idx = (offset / FRAME_SIZE) as usize;
@@ -70,6 +103,52 @@ impl PmmBitmap {
         let bitmap_bytes = Self::bitmap_size(region_size);
         let bitmap_pages = (bitmap_bytes as u64 + 0xFFF) / 0x1000;
         pmm.reserve(region.start, bitmap_pages * 0x1000);
+        pmm
+    }
+
+    /// Build a bitmap covering ALL available regions (G2: managed RAM >= 95%
+    /// usable RAM).
+    ///
+    /// The bitmap covers the full span `[first.start, last.end)` of the
+    /// supplied usable regions. Gaps between regions (kernel image, DTB, page
+    /// tables, MMIO) are marked reserved so `alloc_frame` never returns them.
+    ///
+    /// The bitmap itself is placed at `first.start` and its frames reserved.
+    ///
+    /// # Safety
+    /// - `regions` must be sorted by start and non-overlapping (as produced by
+    ///   `memory_discovery::discover`).
+    /// - `first.start` must be page-aligned.
+    pub unsafe fn new_multi(regions: &[AvailableRegion]) -> Self {
+        assert!(!regions.is_empty(), "PMM: no available regions");
+        let first = &regions[0];
+        let last = &regions[regions.len() - 1];
+        assert!(
+            first.start % FRAME_SIZE == 0,
+            "PMM: region start ({:#x}) must be page-aligned",
+            first.start
+        );
+        assert!(
+            last.end % FRAME_SIZE == 0,
+            "PMM: region end ({:#x}) must be page-aligned",
+            last.end
+        );
+
+        let span_start = first.start;
+        let span_end = last.end;
+        let bitmap_start = span_start as *mut u8;
+        let mut pmm = Self::init(bitmap_start, span_start, span_end - span_start);
+
+        // Reserve the bitmap itself (first region).
+        let bitmap_bytes = Self::bitmap_size(span_end - span_start);
+        let bitmap_pages = (bitmap_bytes as u64 + 0xFFF) / 0x1000;
+        pmm.reserve(span_start, bitmap_pages * 0x1000);
+
+        // Reserve gaps between usable regions.
+        for w in regions.windows(2) {
+            pmm.reserve(w[0].end, w[1].start - w[0].end);
+        }
+
         pmm
     }
 

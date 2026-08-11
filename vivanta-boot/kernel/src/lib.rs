@@ -35,14 +35,25 @@ extern "C" {
 }
 
 /// Allocator callback for arch boot MMU init.
+///
+/// Boot-fatal: page tables are a hard requirement of the boot path; an OOM
+/// here means the kernel cannot map memory, so we panic rather than return a
+/// fake PA 0 (which would silently corrupt the page tables).
 #[no_mangle]
 pub unsafe extern "Rust" fn boot_alloc_frame(ctx: *mut ()) -> u64 {
     let mrm = &mut *(ctx as *mut memory::MemoryResourceManager);
     let req = memory::AllocationRequirements::new(4096);
-    // Use Owner 0 (Kernel) for boot page tables
-    mrm.allocate(&req, 0)
-        .and_then(|obj| obj.phys_addr)
-        .unwrap_or(0)
+    // Use Owner 0 (Kernel) for boot page tables.
+    // Page-table frames are permanent: leak the MemoryObject so Drop does not
+    // free the frames the live page tables point into.
+    let obj = mrm
+        .allocate(&req, 0)
+        .unwrap_or_else(|| panic!("boot_alloc_frame: OOM during boot page-table allocation"));
+    let pa = obj
+        .phys_addr
+        .expect("boot_alloc_frame: no phys addr on allocated object");
+    core::mem::forget(obj);
+    pa
 }
 
 /// The one and only vivanta_kernel entry point.
@@ -108,19 +119,27 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         page_tables_size,
     };
     let available = memory_discovery::discover(system_state.hardware().memory_map, &layout);
-    let region = available.iter().next().expect("no available memory region");
 
-    let mut pmm = unsafe { pmm::PmmBitmap::new(region) };
+    // G2: use ALL usable regions, not just the first. Sum of usable RAM for
+    // the managed-percentage check.
+    let usable_ram: u64 = available.iter().map(|r| r.end - r.start).sum();
+    let mut pmm = unsafe { pmm::PmmBitmap::new_multi(&available.regions[..available.count]) };
 
     let total = pmm.total_frames();
     let pmm_reserved = pmm.reserved_count();
     println!();
     println!("Physical Memory Manager:");
     println!(
-        "  Region    0x{:016x} – 0x{:016x}  ({} MiB)",
+        "  Managed    0x{:016x} – 0x{:016x}  ({} MiB)",
         pmm.region_start(),
-        pmm.region_start() + (region.end - region.start) - 1,
-        (region.end - region.start) >> 20
+        pmm.region_start() + pmm.total_frames() as u64 * pmm::FRAME_SIZE - 1,
+        (pmm.total_frames() as u64 * pmm::FRAME_SIZE) >> 20
+    );
+    println!(
+        "  Usable RAM  {} MiB, managed {} MiB ({:.1}%)",
+        usable_ram >> 20,
+        (pmm.total_frames() as u64 * pmm::FRAME_SIZE) >> 20,
+        (pmm.total_frames() as u64 * pmm::FRAME_SIZE) as f64 * 100.0 / usable_ram as f64
     );
     println!(
         "  Total {}  Reserved {}  Free {}  frames",
@@ -140,6 +159,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let mut pmm_backend = unsafe { PmmBackend::new_dram(&mut pmm as *mut dyn FrameAllocator) };
     system_state.init_memory(&mut pmm_backend);
 
+    // G2: let the scheduler reclaim kernel stacks of terminated threads.
+    scheduler::register_stack_allocator(&mut pmm);
+
     // Init kernel heap: allocate 64 KiB from MRM
     {
         let mrm = system_state.memory_manager_mut();
@@ -153,6 +175,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         }
         ALLOCATOR.init(heap_base as usize, heap_size as usize);
         println!("  KernelHeap: 64 KiB @ 0x{:x}", heap_base);
+        // The heap lives for the whole kernel lifetime: leak the MemoryObject
+        // so Drop does not free the frames backing the global allocator.
+        core::mem::forget(heap_obj);
 
         // heap smoke test
         let v = alloc::vec![1u8, 2, 3, 4];
@@ -172,6 +197,29 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         pmm.free_frame(f);
         println!("  Freed frame              (ok)");
     }
+
+    // G2 churn: allocate+drop MemoryObjects repeatedly; free_count must return
+    // to baseline (allocated + free == managed holds after each cycle).
+    let baseline_free = pmm.free_count();
+    {
+        let mrm = system_state.memory_manager_mut();
+        crate::verify::stress_mrm_churn(mrm, 100).expect("MRM churn test failed");
+    }
+    let after_churn_free = pmm.free_count();
+    println!(
+        "  MRM churn: baseline_free={} after={} delta={}",
+        baseline_free,
+        after_churn_free,
+        baseline_free - after_churn_free
+    );
+    assert_eq!(
+        baseline_free,
+        after_churn_free,
+        "G2 FAIL: MRM churn leaked {} frames (free_count did not return to baseline)",
+        baseline_free - after_churn_free
+    );
+    crate::verify::verify_pmm(&pmm).expect("G2: verify_pmm after churn failed");
+    println!("  MRM churn test (100 cycles) ok — free == baseline");
 
     // ------- VMM: Address Space Construction -------------------------------
     println!();

@@ -43,15 +43,20 @@ impl AddressSpace {
         alloc: &mut dyn PageTableAllocator,
         object_id: u64,
     ) -> Result<(), VmmError> {
-        // SAFETY: caller ensures vaddr range is unmapped
-        unsafe {
-            vivanta_arch_api::mmu::mmu_map_object(self.root, vaddr, paddr, size, flags, alloc);
-        }
+        // Transactional ordering (G2 §3.6): reserve the software slot FIRST.
+        // Only after the slot is guaranteed do we program the MMU, so a
+        // MappingTableFull failure never leaves an orphaned PTE.
+        // (mmu_map_object panics on OOM — boot/runtime fatal — so no rollback
+        // is reachable on the failure path after the insert succeeds.)
         let range = VirtRange::new(vaddr, size);
         let mapping = Mapping::new(range, object_id, flags);
         self.mappings
             .insert(mapping)
             .ok_or(VmmError::MappingTableFull)?;
+        // SAFETY: caller ensures vaddr range is unmapped.
+        unsafe {
+            vivanta_arch_api::mmu::mmu_map_object(self.root, vaddr, paddr, size, flags, alloc);
+        }
         Ok(())
     }
 

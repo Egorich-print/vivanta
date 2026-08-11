@@ -1,5 +1,5 @@
 use crate::memory::capability::MemoryCapability;
-use crate::memory::resource::{PhysAddr, ResourceId};
+use crate::memory::resource::{MemoryBackend, PhysAddr, ResourceId};
 use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator};
 
 /// Adapter that wraps the kernel's `MemoryResourceManager` into a `PageTableAllocator`.
@@ -68,6 +68,11 @@ pub struct ShareHandle {
 }
 
 /// A MemoryObject represents a logical region of memory.
+///
+/// Owns its physical frames: on `drop` (or `revoke`) the underlying backend's
+/// `deallocate` is invoked so `allocated + free == managed` holds after any
+/// object lifetime. `clone()` shares the same physical storage and must NOT
+/// double-free; clones are non-owning and the original owner releases frames.
 pub struct MemoryObject {
     pub id: MemoryObjectId,
     pub size: u64,
@@ -76,6 +81,26 @@ pub struct MemoryObject {
     pub phys_addr: Option<PhysAddr>,
     pub(super) mappings: [Option<VirtualMapping>; MAX_MAPPINGS],
     pub capability: MemoryCapability,
+    /// Backend that owns the physical frames (for Drop/deallocate).
+    backend: Option<*mut dyn MemoryBackend>,
+    /// Whether this instance is the owner that must deallocate on drop.
+    owns_storage: bool,
+}
+
+impl Drop for MemoryObject {
+    fn drop(&mut self) {
+        // revoke() already released the frames; Drop must not double-free.
+        if self.owns_storage && self.state != MemoryObjectState::Revoked {
+            if let Some(pa) = self.phys_addr {
+                unsafe {
+                    if let Some(b) = self.backend {
+                        (*b).deallocate(pa, self.size);
+                    }
+                }
+            }
+            self.owns_storage = false;
+        }
+    }
 }
 
 impl MemoryObject {
@@ -93,7 +118,18 @@ impl MemoryObject {
             phys_addr: None,
             mappings: [None; MAX_MAPPINGS],
             capability,
+            backend: None,
+            owns_storage: false,
         }
+    }
+
+    /// Attach the owning backend so Drop can release physical frames.
+    ///
+    /// Called by `MemoryResourceManager::allocate` after a successful backend
+    /// allocation.
+    pub fn set_backend(&mut self, backend: *mut dyn MemoryBackend) {
+        self.backend = Some(backend);
+        self.owns_storage = true;
     }
 
     /// Set the physical address after backend allocation succeeds.
@@ -201,6 +237,10 @@ impl MemoryObject {
             phys_addr: self.phys_addr,
             mappings: [None; MAX_MAPPINGS],
             capability: new_cap,
+            // Clone shares the original's storage: non-owning to avoid
+            // double-free on drop. No refcount yet (deferred).
+            backend: None,
+            owns_storage: false,
         }
     }
 
@@ -218,6 +258,18 @@ impl MemoryObject {
 
     pub fn revoke(&mut self) {
         self.state = MemoryObjectState::Revoked;
+        // Release physical frames to the backend (G2 reclamation).
+        if self.owns_storage {
+            if let Some(pa) = self.phys_addr {
+                unsafe {
+                    if let Some(b) = self.backend {
+                        (*b).deallocate(pa, self.size);
+                    }
+                }
+            }
+            self.owns_storage = false;
+            self.phys_addr = None;
+        }
         for slot in &mut self.mappings {
             *slot = None;
         }
