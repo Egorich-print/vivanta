@@ -20,8 +20,10 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 DURATION="${1:-3600}"
-LOG="$(mktemp /tmp/vivanta-soak.XXXXXX.log)"
-PIDFILE="$(mktemp /tmp/vivanta-soak.XXXXXX.pid)"
+LOG_BASE="$(mktemp /tmp/vivanta-soak.XXXXXX)"
+PIDFILE_BASE="$(mktemp /tmp/vivanta-soak.XXXXXX)"
+LOG="${LOG_BASE}.log"
+PIDFILE="${PIDFILE_BASE}.pid"
 
 echo "=== Vivanta M5.0 G4+ soak test (${DURATION}s) ==="
 echo "log: ${LOG}"
