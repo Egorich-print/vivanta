@@ -10,6 +10,6 @@ vivanta-boot-common = { path = "../boot_common" }
 # Bare-metal firmware binary (no_main + linker script): no host libtest.
 # Verified via QEMU boot.
 [[bin]]
-name = "target_rk3568"
+name = "vivanta-target-rk3568"
 path = "src/main.rs"
 test = false

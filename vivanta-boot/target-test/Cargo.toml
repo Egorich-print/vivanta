@@ -14,6 +14,6 @@ vivanta-kernel = { path = "../kernel" }
 # Bare-metal firmware binary (no_main + linker script): no host libtest.
 # Verified via QEMU boot.
 [[bin]]
-name = "target_test"
+name = "vivanta-target-test"
 path = "src/main.rs"
 test = false

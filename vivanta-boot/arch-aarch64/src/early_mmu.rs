@@ -29,8 +29,14 @@ fn l1_table_desc(l2_phys: u64) -> u64 {
 }
 
 pub fn build_identity(size: u64) -> u64 {
-    assert!(size <= 4 * 1024 * 1024 * 1024, "build_identity: size > 4 GB");
-    assert!(size % 0x20_0000 == 0, "build_identity: size must be 2 MB-aligned");
+    assert!(
+        size <= 4 * 1024 * 1024 * 1024,
+        "build_identity: size > 4 GB"
+    );
+    assert!(
+        size % 0x20_0000 == 0,
+        "build_identity: size must be 2 MB-aligned"
+    );
 
     let l1_phys = unsafe { phys_addr(&L1) };
 
@@ -41,7 +47,9 @@ pub fn build_identity(size: u64) -> u64 {
         }
         let l2 = unsafe { &L2[l1_idx] };
         let l2_phys = phys_addr(l2);
-        unsafe { L1.0[l1_idx] = l1_table_desc(l2_phys); }
+        unsafe {
+            L1.0[l1_idx] = l1_table_desc(l2_phys);
+        }
     }
 
     barrier::dsb_ish();
@@ -69,11 +77,8 @@ pub fn configure_tcr() {
     const ORGN_WBWA: u64 = 1;
     const IRGN_WBWA: u64 = 1;
 
-    let tcr: u64 = T0SZ
-        | (TG0_4KB << 14)
-        | (SH0_INNER << 12)
-        | (ORGN_WBWA << 10)
-        | (IRGN_WBWA << 8);
+    let tcr: u64 =
+        T0SZ | (TG0_4KB << 14) | (SH0_INNER << 12) | (ORGN_WBWA << 10) | (IRGN_WBWA << 8);
     unsafe {
         core::arch::asm!("msr tcr_el1, {}", in(reg) tcr, options(nostack));
     }

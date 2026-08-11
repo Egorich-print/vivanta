@@ -15,6 +15,6 @@ vivanta-kernel = { path = "../kernel" }
 # Bare-metal firmware binary (no_main + linker script): no host libtest.
 # Verified via QEMU boot.
 [[bin]]
-name = "target_x96q"
+name = "vivanta-target-x96q"
 path = "src/main.rs"
 test = false

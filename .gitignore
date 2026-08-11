@@ -1,5 +1,7 @@
+# Cargo build output
 target/
-target-*/
+# NB: `target-*/` (singular member dirs) must NOT be ignored — they are
+# workspace members. Only the cargo `target/` build dir is ignored.
 .DS_Store
 *.bin
 *.elf
