@@ -23,6 +23,7 @@ pub enum ThreadState {
     Terminated,
 }
 
+#[derive(Clone, Copy)]
 pub struct Thread {
     pub id: ThreadId,
     pub state: ThreadState,

@@ -35,16 +35,43 @@ pub fn register_stack_allocator(alloc: &mut (dyn FrameAllocator + 'static)) {
     }
 }
 
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 static NEED_RESCHEDULE: AtomicBool = AtomicBool::new(false);
-static ATOMIC_CURRENT: AtomicUsize = AtomicUsize::new(0);
+/// The ThreadId of the currently running thread (NOT a runqueue index).
+/// Index-based `current` aliased stale threads after slot reuse; ThreadId is
+/// immutable and never reused, so churn (spawn A, B, kill A, spawn C) cannot
+/// corrupt it (G4 §8).
+static CURRENT_THREAD: AtomicU64 = AtomicU64::new(0);
+
+/// Read the current ThreadId.
+pub fn current_thread_id() -> ThreadId {
+    CURRENT_THREAD.load(Ordering::Relaxed)
+}
+
+/// G4 invariant check: how many threads are in the Running state right now.
+/// The scheduler model requires exactly one Running thread on single-core.
+pub fn running_thread_count() -> usize {
+    rq().iter()
+        .filter(|t| t.state == ThreadState::Running)
+        .count()
+}
 
 // ---------------------------------------------------------------------------
+// RunQueue accessor helpers (unsafe because static mut)
+// ---------------------------------------------------------------------------
+
+/// The currently-running thread.
+fn current() -> Thread {
+    let id = current_thread_id();
+    rq().get(id)
+        .copied()
+        .expect("current thread not in runqueue")
+}
+
 pub fn thread_set_state(id: ThreadId, new_state: ThreadState) {
     rq().set_state(id, new_state)
         .expect("thread_set_state failed");
 }
-// ---------------------------------------------------------------------------
 
 fn rq() -> &'static mut RunQueue {
     unsafe {
@@ -70,21 +97,16 @@ fn pt() -> &'static mut ProcessTable {
 
 /// Get the `AddressSpaceId` of the currently running thread.
 pub fn current_thread_address_space() -> AddressSpaceId {
-    let current_id = {
-        let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
-        rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
-    };
-    rq().get(current_id).map(|t| t.address_space).unwrap_or(0)
+    rq().get(current_thread_id())
+        .map(|t| t.address_space)
+        .unwrap_or(0)
 }
 
 /// Put current thread to sleep for `ticks` timer ticks.
 pub fn sleep(ticks: u64) {
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
 
-    let current_id = {
-        let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
-        rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
-    };
+    let current_id = current_thread_id();
 
     // Get current tick count from timer
     let current_tick = unsafe { vivanta_arch_api::boot::timer::ticks() };
@@ -208,39 +230,38 @@ pub fn create_kernel_thread(
 // ---------------------------------------------------------------------------
 
 pub fn yield_now() {
-    vivanta_boot_common::println!("  yield_now: enter");
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
 
-    let current_id = {
-        let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
-        rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
-    };
+    let current_id = current_thread_id();
+    let current_as = rq().get(current_id).map(|t| t.address_space).unwrap_or(0);
 
     let next_id = match rq().find_next_ready(current_id, true) {
         Some(id) => id,
         None => {
-            vivanta_boot_common::println!("  yield_now: no next thread");
             return;
         }
     };
 
     if current_id == next_id {
-        vivanta_boot_common::println!("  yield_now: same thread");
         return;
     }
 
     vivanta_boot_common::println!("  yield_now: {} -> {}", current_id, next_id);
 
-    // Set current thread to Ready
+    // G4 running invariant: exactly one thread Running at any instant.
+    // Transition order:
+    //   current: Running -> Ready
+    //   next:    Ready  -> Running   (BEFORE the context switch, so an EL0
+    //            thread entered via eret_to_user_stub is already Running;
+    //            the post-switch bookkeeping can no longer be skipped)
     thread_set_state(current_id, ThreadState::Ready);
+    thread_set_state(next_id, ThreadState::Running);
 
-    // Update current index
-    let next_idx = rq().iter().position(|t| t.id == next_id).unwrap_or(0);
-    ATOMIC_CURRENT.store(next_idx, Ordering::Relaxed);
+    // Store the ThreadId, not a slot index (G4 §8).
+    CURRENT_THREAD.store(next_id, Ordering::Relaxed);
 
     // Activate address space if different
     let next_as = rq().get(next_id).unwrap().address_space;
-    let current_as = rq().get(current_id).unwrap().address_space;
 
     vivanta_boot_common::println!(
         "  yield: {} -> {}, as: {} -> {}",
@@ -267,14 +288,8 @@ pub fn yield_now() {
             rq().get(next_id).unwrap().context,
         );
     }
-
-    // After context switch, we are now running as 'next'
-    let now_idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
-    if let Some(t) = rq().iter().nth(now_idx) {
-        if t.id != unsafe { IDLE_THREAD_ID } {
-            thread_set_state(t.id, ThreadState::Running);
-        }
-    }
+    // After context switch we are running as `next`, which was already set
+    // to Running before the switch.
 }
 
 pub fn schedule_tick() {
@@ -283,17 +298,10 @@ pub fn schedule_tick() {
 }
 
 pub fn maybe_reschedule(_frame: usize) {
-    // M4.4.5 (ADR-017): _frame belongs to the interrupted execution context.
-    // Scheduler never copies or owns this frame.
-    // Context switch changes SP_EL1 via context_switch() — the same
-    // mechanism used by yield_now(). The frame parameter provides access
-    // to exception state for inspection only, not for copying.
-
     if !NEED_RESCHEDULE.load(Ordering::Relaxed) {
         return;
     }
     NEED_RESCHEDULE.store(false, Ordering::Relaxed);
-
     yield_now();
 }
 
@@ -302,10 +310,13 @@ pub fn maybe_reschedule(_frame: usize) {
 // ---------------------------------------------------------------------------
 
 extern "C" fn thread_trampoline(_arg: usize) {
-    let current_id = {
-        let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
-        rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
-    };
+    // First entry of a kernel thread: the previous thread's InterruptGuard is
+    // still "held" across the context switch, so IRQs are disabled here.
+    // Enable them so timer preemption can reschedule this thread (G4).
+    unsafe {
+        vivanta_arch_api::interrupts::enable_interrupts();
+    }
+    let current_id = current_thread_id();
     let entry = rq()
         .get(current_id)
         .and_then(|t| t.entry)
@@ -324,13 +335,15 @@ pub extern "Rust" fn user_fault_terminate() -> ! {
 
 pub fn thread_exit() -> ! {
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
-    cleanup();
 
-    let current_id = {
-        let idx = ATOMIC_CURRENT.load(Ordering::Relaxed);
-        rq().iter().nth(idx).map(|t| t.id).unwrap_or(0)
-    };
+    // Snapshot the current ThreadId FIRST (ThreadId is stable across slot
+    // reuse; never read it after cleanup may have removed/reused slots).
+    let current_id = current_thread_id();
     let current_as = rq().get(current_id).unwrap().address_space;
+
+    // Remove previously terminated threads (never the current one — it is
+    // still present; we mark it Terminated after cleanup).
+    cleanup();
 
     thread_set_state(current_id, ThreadState::Terminated);
 
@@ -340,9 +353,14 @@ pub fn thread_exit() -> ! {
         None => panic!("thread_exit: no thread to run"),
     };
 
-    // Update current index
-    let next_idx = rq().iter().position(|t| t.id == next_id).unwrap_or(0);
-    ATOMIC_CURRENT.store(next_idx, Ordering::Relaxed);
+    // G4 running invariant: next becomes Running BEFORE the switch so the
+    // resumed thread (including an EL0 thread) is Running while executing.
+    if next_id != current_id {
+        thread_set_state(next_id, ThreadState::Running);
+    }
+
+    // Store the ThreadId, not a slot index.
+    CURRENT_THREAD.store(next_id, Ordering::Relaxed);
 
     // Activate address space if different
     let next = rq().get(next_id).unwrap();
@@ -424,7 +442,7 @@ pub fn init_boot() {
         .expect("Failed to insert boot thread");
 
         BOOT_THREAD_ID = boot_id;
-        ATOMIC_CURRENT.store(0, Ordering::Relaxed);
+        CURRENT_THREAD.store(boot_id, Ordering::Relaxed);
 
         // Create idle thread
         let idle_id = rq().alloc_id();

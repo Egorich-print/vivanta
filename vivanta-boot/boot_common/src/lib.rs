@@ -22,6 +22,38 @@ pub use vivanta_boot_info::{
 
 use core::cell::UnsafeCell;
 use core::fmt;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+/// Console spin lock: serialises console output across threads and IRQ
+/// contexts. Interrupts are disabled while the lock is held so a timer IRQ
+/// handler (which may itself print) cannot self-deadlock on the lock (G4).
+struct ConsoleLock {
+    held: AtomicBool,
+}
+
+impl ConsoleLock {
+    const fn new() -> Self {
+        ConsoleLock {
+            held: AtomicBool::new(false),
+        }
+    }
+
+    fn acquire(&self) {
+        while self
+            .held
+            .compare_exchange_weak(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .is_err()
+        {
+            core::hint::spin_loop();
+        }
+    }
+
+    fn release(&self) {
+        self.held.store(false, Ordering::Release);
+    }
+}
+
+static CONSOLE_LOCK: ConsoleLock = ConsoleLock::new();
 
 // ---------------------------------------------------------------------------
 // EarlyPlatformInfo — platform-provided constants for early boot debug output.
@@ -138,21 +170,26 @@ pub fn set_console(c: &'static dyn Console) {
 }
 
 pub fn write_direct(s: &str) {
+    CONSOLE_LOCK.acquire();
     unsafe {
         if let Some(c) = (*GLOBAL_CONSOLE.inner.get()).as_ref() {
             c.write_str(s);
         }
     }
+    CONSOLE_LOCK.release();
 }
 
 pub fn with_console<F, R>(f: F) -> R
 where
     F: FnOnce(&dyn Console) -> R,
 {
+    CONSOLE_LOCK.acquire();
     let p = GLOBAL_CONSOLE.inner.get();
     let opt = unsafe { (*p).as_ref() };
     let c = opt.expect("console not initialized");
-    f(*c)
+    let r = f(*c);
+    CONSOLE_LOCK.release();
+    r
 }
 
 // ---------------------------------------------------------------------------

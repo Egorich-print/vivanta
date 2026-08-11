@@ -455,8 +455,99 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     // After yield_now returns, the boot thread has been rescheduled.
     // The user thread ran write(1, "Hello, Vivanta!") then exit(0).
     println!("Boot thread resumed (user thread exited cleanly)");
+
+    // ------------------------------------------------------------------
+    // G4 preemption test: two live CPU-bound kernel threads, NO voluntary
+    // yield. The 100 Hz timer must preempt them and switch A <-> B. The
+    // observability log ([PREEMPT] current=.. counter=..) proves real
+    // timer-driven context switches (G4 observability sub-gate).
+    // ------------------------------------------------------------------
+    println!();
+    println!("G4 preemption test: spawning 2 CPU-bound threads");
+    let mut taskman2 = scheduler::task_manager::TaskManager::new();
+    let ta = taskman2
+        .spawn_kernel(
+            preempt_worker_a,
+            0,
+            crate::vmm::KERNEL_ADDRESS_SPACE_ID,
+            &mut pmm,
+            scheduler::thread::Priority::Normal,
+            None,
+        )
+        .expect("spawn preempt A");
+    let tb = taskman2
+        .spawn_kernel(
+            preempt_worker_b,
+            0,
+            crate::vmm::KERNEL_ADDRESS_SPACE_ID,
+            &mut pmm,
+            scheduler::thread::Priority::Normal,
+            None,
+        )
+        .expect("spawn preempt B");
+    println!("  preempt tasks A={} B={} spawned", ta, tb);
+
+    // Boot thread: monitor the counters, then spin.
+    for i in 0..5 {
+        scheduler::yield_now();
+        let (ca, cb) = unsafe { (PREEMPT_COUNTER_A, PREEMPT_COUNTER_B) };
+        vivanta_boot_common::println!(
+            "  [MONITOR] iter={} A={} B={} running={} current={}",
+            i,
+            ca,
+            cb,
+            scheduler::running_thread_count(),
+            scheduler::current_thread_id()
+        );
+    }
+
+    // G4 running invariant: exactly one Running thread at a time. The enum
+    // state is exclusive, so Running ∩ Ready == ∅ holds structurally; the
+    // dangerous case (a thread stranded Ready while actually running) is
+    // caught by running_count != 1.
+    let rcount = scheduler::running_thread_count();
+    vivanta_boot_common::println!("  [G4] running_count={} (expect 1)", rcount);
+    assert_eq!(rcount, 1, "G4 FAIL: expected exactly one Running thread");
+
     loop {
         scheduler::yield_now();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// G4 preemption workers — CPU-bound, no voluntary yield. The timer IRQ drives
+// the reschedule. Counters are plain unsync statics because preemption is
+// single-core and each thread touches only its own counter.
+// ---------------------------------------------------------------------------
+
+static mut PREEMPT_COUNTER_A: u64 = 0;
+static mut PREEMPT_COUNTER_B: u64 = 0;
+
+extern "C" fn preempt_worker_a(_arg: usize) {
+    loop {
+        unsafe { PREEMPT_COUNTER_A += 1 };
+        let c = unsafe { PREEMPT_COUNTER_A };
+        if c % 1000000 == 0 {
+            vivanta_boot_common::println!(
+                "  [PREEMPT] current={} A={}",
+                scheduler::current_thread_id(),
+                c
+            );
+        }
+    }
+}
+
+extern "C" fn preempt_worker_b(_arg: usize) {
+    loop {
+        unsafe { PREEMPT_COUNTER_B += 1 };
+        let c = unsafe { PREEMPT_COUNTER_B };
+        if c % 1000000 == 0 {
+            vivanta_boot_common::println!(
+                "  [PREEMPT] current={} B={}",
+                scheduler::current_thread_id(),
+                c
+            );
+        }
     }
 }
 
