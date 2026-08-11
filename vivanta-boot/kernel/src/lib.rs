@@ -7,6 +7,12 @@ use memory::KernelHeap;
 #[global_allocator]
 static ALLOCATOR: KernelHeap = KernelHeap::uninitialized();
 
+/// RAII guard that disables interrupts for the kernel heap's critical section
+/// (single-core: the timer IRQ must not re-enter alloc/dealloc mid-operation).
+pub(crate) fn interrupts_guard() -> impl core::ops::Drop {
+    unsafe { vivanta_arch_api::interrupts::disable_interrupts() }
+}
+
 pub mod error;
 pub mod identity;
 pub mod memory;
