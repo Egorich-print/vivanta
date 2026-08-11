@@ -60,14 +60,6 @@ pub fn running_thread_count() -> usize {
 // RunQueue accessor helpers (unsafe because static mut)
 // ---------------------------------------------------------------------------
 
-/// The currently-running thread.
-fn current() -> Thread {
-    let id = current_thread_id();
-    rq().get(id)
-        .copied()
-        .expect("current thread not in runqueue")
-}
-
 pub fn thread_set_state(id: ThreadId, new_state: ThreadState) {
     rq().set_state(id, new_state)
         .expect("thread_set_state failed");

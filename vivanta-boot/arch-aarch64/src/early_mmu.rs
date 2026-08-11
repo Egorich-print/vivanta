@@ -9,6 +9,9 @@ const L2_TABLE_COUNT: usize = 4;
 struct L1Table([u64; L1_ENTRIES]);
 
 #[repr(align(4096))]
+// Field 0 is written through raw pointers in build_identity (the compiler
+// cannot see the direct reads), so it is intentionally not "read" in safe code.
+#[allow(dead_code)]
 struct L2Table([u64; L2_ENTRIES]);
 const L2_ENTRIES: usize = 512;
 

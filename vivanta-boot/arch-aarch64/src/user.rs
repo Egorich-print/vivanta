@@ -99,10 +99,10 @@ extern "C" {
     static user_code_end: u8;
 }
 
-/// Faulting user code — placed in `.user.text.fault`. Deliberately stores to
-/// address 0 (a kernel/unmapped VA) to trigger a synchronous EL0 data abort.
-/// Used by the G3 fault-containment test: the faulting task must be
-/// terminated and other threads must continue.
+// Faulting user code — placed in `.user.text.fault`. Deliberately stores to
+// address 0 (a kernel/unmapped VA) to trigger a synchronous EL0 data abort.
+// Used by the G3 fault-containment test: the faulting task must be
+// terminated and other threads must continue.
 #[cfg(target_os = "none")]
 core::arch::global_asm!(
     ".section .user.text.fault, \"ax\"",
@@ -242,9 +242,8 @@ pub unsafe extern "C" fn el0_sync_handler(
     }
 }
 
-/// Kernel-provided hook: terminate the task that caused an EL0 fault.
-///
-/// Implemented by vivanta_kernel as `thread_exit`; never returns.
+// Kernel-provided hook: terminate the task that caused an EL0 fault.
+// Implemented by vivanta_kernel as `thread_exit`; never returns.
 extern "Rust" {
     fn user_fault_terminate() -> !;
 }

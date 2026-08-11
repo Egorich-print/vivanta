@@ -4,59 +4,58 @@
 
 ## Current milestone
 
-M5.0 — GREEN BASELINE (recovery milestone, in progress)
+**M5.0 GREEN BASELINE — PASS / CLOSED** (2026-08-11)
 Ratified spec: `vivanta-boot/docs/milestones/M5.0-green-baseline.md`
 
-> M5.0 is NOT a feature milestone. It restores the kernel to a provable
-> baseline: workspace integrity (G1), physical memory ownership + reclamation
-> (G2), user memory boundary + fault containment (G3), scheduler state +
-> preemption correctness (G4).
+Honest status: **M5.0 QEMU-correct baseline**, NOT "hardware-correct". One
+deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
+`docs/investigations/MMU-descriptor-encoding-hardware-validation.md`).
+60-min soak is tooled (`tools/soak_test.sh`) and pending a full run.
 
-## G1 — Workspace integrity (PASS as of 2026-08-11)
+## M5.0 gates — all PASS (verified on clean clone + QEMU)
 
-- `cargo build --workspace` — PASS (clean clone)
-- `cargo clippy --workspace` — PASS (0 errors)
-- `cargo fmt --check` — PASS
-- `cargo test --workspace --target aarch64-apple-darwin` — PASS (13 unit tests
-  in boot-info / boot_common / kernel-memory-frozen; bare-metal crates are
-  `test = false` and QEMU-verified)
-- `cargo build -p vivanta-target-qemu-aarch64` — PASS
-- QEMU boot + EL0 demo — PASS (`Hello, Vivanta!` → `exit(0)`)
+- G1 Workspace integrity — PASS
+- G2 Physical ownership + reclamation — PASS (511 MiB managed, churn delta=0)
+- G3 User boundary + fault containment — PASS (EFAULT, fault-kill, W^X)
+- G4 Scheduler + preemption — PASS (ThreadId current, Running==1, 100 Hz A↔B, 60s smoke)
 
 ## Kernel
 
-- PMM (Physical Memory Manager) — ⚠️ G2 pending (currently 1 MiB of usable RAM)
-- Early MMU (aarch64) — ✅
-- Paging API — ✅ (ADR-030: mechanism/policy split)
-- Memory Resource Manager — ⚠️ G2 pending (no reclamation)
-- Scheduler — ⚠️ G4 pending (index-based current, preemption unproven)
-- VMM (AddressSpace) — ⚠️ G2 pending (MappingSet capacity bug, no VA allocator)
-- Identity — ⚠️ nominal only (counter-based UUID; no crypto/Ed25519)
-- Process Model — ⚠️ lifecycle incomplete (task state never updated on exit)
-- Signals — ⚠️ enum only, no delivery path
-- Syscalls — ⚠️ G3 pending (access_ok implemented, copy primitives + fault
-  containment pending)
-- User threads — ✅ EL0 demo works end-to-end
+- PMM (Physical Memory Manager) — ✅ full usable RAM, self-test + stress
+- Paging / MMU (aarch64) — ✅ (ADR-030 split; descriptor encoding deferred to HW)
+- Memory Resource Manager — ✅ reclamation proven (Drop→deallocate, churn delta=0)
+- Kernel heap — ✅ free-list allocator with reclamation (was bump-leak-all)
+- Scheduler — ✅ ThreadId-based current, Running invariant, timer preemption
+- VMM (AddressSpace) — ⚠️ `protect()` still `todo!` (needs arch-api mmu_protect);
+  no VA allocator (post-M5)
+- Identity — ⚠️ nominal only (counter-based UUID; no crypto/Ed25519 — scope fence)
+- Process Model — ⚠️ lifecycle incomplete: `Task::exit()` never called,
+  `running_count()` always 0, exit_code/zombie/reap are dead APIs (candidate M6)
+- Signals — ⚠️ enum only, no delivery path (scope fence)
+- Syscalls — ⚠️ SYS_READ is a stub returning 0; mmap returns -ENOMEM (post-M5)
+- User threads — ✅ EL0 demo, EFAULT test, fault-containment test all pass
 
-## Known blockers (M5.0)
+## Post-M5 deferred artifacts
 
-- G2: full-RAM PMM, MemoryObject Drop→deallocate, contiguous allocation
-  contract, MappingSet slot reuse, boot_alloc_frame OOM semantics
-- G3: copy_from_user/copy_to_user, `elr += 4` fault masking removal, W^X
-- G4: ThreadId-based current, Running invariant, preemption proof on QEMU
+1. **G4+ soak** — `tools/soak_test.sh` (default 60 min), validated on 30s run;
+   full run pending.
+2. **MMU descriptor encoding** — HW-validation plan documented; requires
+   physical ARM64 hardware.
+3. **Orphan workspace members removed** (`kernel-memory-frozen`, `user/hello`,
+   `user/libc`); directories kept per ADR-011.
 
 ## Platforms
 
 | Platform | Status |
 |----------|--------|
-| qemu-aarch64 | Active, boots to kernel_main, EL0 demo works |
+| qemu-aarch64 | Active, boots to kernel_main, EL0 demo + preemption work |
 | rk3568 | Diagnostic only (does not link vivanta-kernel) |
 | rpi3b+ | Standalone diagnostic (early_mmu identity map) |
 | qemu-armv7a | Frozen (arch-armv7a is an empty stub; removed from workspace members) |
 | allwinner-h616 / amlogic / sdm660 | Stalled / planned |
 
-## Scope fence (until M5.0 PASS)
+## Scope fence (holds through any next milestone until explicitly lifted)
 
 IPC · storage · drivers · distributed AI (ADR-031…039) · Ed25519 · BIP-39 ·
-persistent identity · TTBR1/ASID · signal delivery · new syscalls · new
-hardware targets · new architectures
+persistent identity · TTBR1/ASID · signal delivery · new hardware targets ·
+new architectures
