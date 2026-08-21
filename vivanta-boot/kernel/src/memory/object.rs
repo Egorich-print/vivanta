@@ -17,13 +17,18 @@ impl PageTableAllocator for MrmPageTableAllocator {
     fn alloc_page_table_frame(&mut self) -> u64 {
         use crate::memory::AllocationRequirements;
         let req = AllocationRequirements::new(4096);
-        unsafe {
-            (*self.mrm)
-                .allocate(&req, 0)
-                .expect("alloc_page_table_frame: OOM")
-                .phys_addr
-                .expect("alloc_page_table_frame: no phys addr")
-        }
+        let obj = unsafe { (*self.mrm).allocate(&req, 0) }.expect("alloc_page_table_frame: OOM");
+        let pa = obj.phys_addr.expect("alloc_page_table_frame: no phys addr");
+        // The frame backs the live page-table hierarchy and must outlive
+        // this call: dropping the MemoryObject would deallocate() the frame
+        // back to the PMM while descriptors still point into it, and the
+        // next allocation would overwrite live translation tables
+        // (observed as EL1 translation faults after block splits).
+        // Vivanta has no page-table teardown yet, so tables are permanent
+        // for the lifetime of their address space — leak the object,
+        // exactly like boot_alloc_frame does for boot-time tables.
+        core::mem::forget(obj);
+        pa
     }
 }
 
