@@ -9,6 +9,20 @@
 target). No nightly features; host tests, clippy and the freestanding
 kernel build share one compiler.
 
+## Virtual memory (M5.1/M5.2, 2026-08-21)
+
+- VA allocator (`vivanta-vm`) — ✅ first-fit intervals, model-checked
+  20k-op host stress; user domain 0x01000000–0x40000000, page-0 guard
+- Page-table ownership registry — ✅ every runtime table frame tracked
+  (frame/as_id/level/parent/backend); roots + boot-era frames leak by rule
+- Table reclamation — ✅ hardware-proven emptiness → IRQ-guarded unlink →
+  PMM return; exercised in QEMU with PMM delta asserts
+- Range protect/unmap — ✅ partial ranges with transactional shadow
+  splitting; `MappingSet` stays an exact hardware image
+- Aliasing — ✅ VAs may alias; PA ownership never follows unmap
+  (regression-tested)
+- ADR-031 ratified: `vivanta-boot/docs/adr/ADR-031-va-page-table-ownership.md`
+
 ## Current milestone
 
 **M5.0 GREEN BASELINE — PASS / CLOSED** (2026-08-11)

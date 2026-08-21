@@ -383,6 +383,21 @@ The first genuine isolated EL0 process. Not just a jump — a runtime environmen
 
 *Every roadmap modification must update this section.*
 
+### 2026-08-21 (mission 3 — M5.1/M5.2)
+-   **VA allocator** added (`vivanta-vm`, host-proven): first-fit interval
+    allocator, overflow-safe, canonical merged free list, user/kernel
+    domain separation.
+-   **Page-table ownership** (ADR-031): install-time registry via
+    `PageTableAllocator::table_installed`; reclamation only after
+    hardware-proven emptiness + IRQ-guarded parent unlink; roots and
+    boot-era frames leak by explicit rule.
+-   **Range protect/unmap**: partial ranges supported; shadow mappings
+    split transactionally; `mmu_map_object` now creates missing
+    intermediate tables (allocator-backed).
+-   QEMU VM lifecycle test added (map/protect/unmap/reclaim/alias/
+    block-split/remap); mutation battery M1–M4, M6, M8 caught; M5 (TLBI
+    widening) remains a QEMU limitation.
+
 ### 2026-08-21 (mission 2)
 -   **Toolchain:** whole workspace migrated to Rust 1.98.0 stable +
     edition 2024 (`rust-toolchain.toml` pin, resolver 3). unsafe-extern /
