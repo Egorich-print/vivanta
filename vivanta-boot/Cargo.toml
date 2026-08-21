@@ -4,6 +4,7 @@ resolver = "3"
 
 members = [
     # --- Shared libraries ---
+    "vm",
     "boot-info",
     "boot_common",
     "arch-api",

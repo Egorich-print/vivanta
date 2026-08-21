@@ -48,6 +48,7 @@ dependencies = [
  "vivanta-arch-api",
  "vivanta-boot-common",
  "vivanta-boot-info",
+ "vivanta-vm",
 ]
 
 [[package]]
@@ -173,3 +174,7 @@ dependencies = [
  "vivanta-kernel",
  "vivanta-platform-allwinner-h616",
 ]
+
+[[package]]
+name = "vivanta-vm"
+version = "0.1.0"

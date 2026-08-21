@@ -1,0 +1,9 @@
+[package]
+name = "vivanta-vm"
+version = "0.1.0"
+edition = "2024"
+description = "Vivanta — architecture-neutral virtual-memory mechanisms (VA allocator, range math)"
+
+# Pure no_std logic with no arch or hardware dependencies: the VA allocator
+# and its invariants are proven by host unit tests (thousands of lifecycle
+# operations), keeping hardware programming out of the proof obligation.
