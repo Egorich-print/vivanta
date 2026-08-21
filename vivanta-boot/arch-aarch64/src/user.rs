@@ -146,8 +146,8 @@ pub const FAULT_STACK_VA: u64 = 0x5F01_0000;
 pub unsafe fn fault_code_pa(alloc: &mut dyn vivanta_arch_api::pmm::FrameAllocator) -> u64 {
     unsafe {
         let pa = alloc.alloc_frame().expect("fault code frame").addr;
-        let src = &fault_code_start as *const u8;
-        let len = (&fault_code_end as *const u8).offset_from(src) as usize;
+        let src = &raw const fault_code_start as *const u8;
+        let len = (&raw const fault_code_end as *const u8).offset_from(src) as usize;
         core::ptr::copy_nonoverlapping(src, pa as *mut u8, len);
         if len < 4096 {
             core::ptr::write_bytes((pa as *mut u8).add(len), 0u8, 4096 - len);
@@ -157,11 +157,14 @@ pub unsafe fn fault_code_pa(alloc: &mut dyn vivanta_arch_api::pmm::FrameAllocato
 }
 
 fn user_code_size() -> usize {
-    unsafe { (&user_code_end as *const u8).offset_from(&user_code_start as *const u8) as usize }
+    unsafe {
+        (&raw const user_code_end as *const u8).offset_from(&raw const user_code_start as *const u8)
+            as usize
+    }
 }
 
 fn user_code_src() -> *const u8 {
-    unsafe { &user_code_start as *const u8 }
+    &raw const user_code_start as *const u8
 }
 
 // ---------------------------------------------------------------------------

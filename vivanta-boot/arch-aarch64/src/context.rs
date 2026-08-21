@@ -97,7 +97,7 @@ pub unsafe extern "Rust" fn context_init(
         //   User   → eret_to_user_stub (transitions to EL0)
         let entry_x30: u64 = match level {
             ExecutionLevel::Kernel => actual_entry as u64,
-            ExecutionLevel::User => &eret_to_user_stub as *const u8 as u64,
+            ExecutionLevel::User => &raw const eret_to_user_stub as *const u8 as u64,
         };
 
         // SP_EL0 for user threads (0 for vivanta_kernel — unused in EL1h)

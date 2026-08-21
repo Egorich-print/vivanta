@@ -492,8 +492,8 @@ pub unsafe extern "Rust" fn dump_critical_tables(root: u64) {
             static __kernel_start: u8;
             static __stack_top: u8;
         }
-        let ks = &__kernel_start as *const u8 as u64;
-        let ke = &__stack_top as *const u8 as u64;
+        let ks = &raw const __kernel_start as *const u8 as u64;
+        let ke = &raw const __stack_top as *const u8 as u64;
         dump_walk(root, ks, "kernel_start");
         dump_walk(root, ke, "stack_top");
 

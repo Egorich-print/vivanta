@@ -32,8 +32,8 @@ extern "C" {
 }
 
 unsafe fn bss_zero() {
-    let start = &__bss_start as *const u8 as usize;
-    let end = &__bss_end as *const u8 as usize;
+    let start = &raw const __bss_start as *const u8 as usize;
+    let end = &raw const __bss_end as *const u8 as usize;
     if end > start {
         core::ptr::write_bytes(start as *mut u8, 0, end - start);
     }

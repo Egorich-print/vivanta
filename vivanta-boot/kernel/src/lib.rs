@@ -331,9 +331,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             }
             // M4.5.1: map user code + stack into UserAS1
             if label == "UserAS1" {
-                let code_src = &user_code_start as *const u8;
-                let code_len = (&user_code_end as *const u8 as usize)
-                    - (&user_code_start as *const u8 as usize);
+                let code_src = &raw const user_code_start as *const u8;
+                let code_len = (&raw const user_code_end as *const u8 as usize)
+                    - (&raw const user_code_start as *const u8 as usize);
                 const CODE_VA: u64 = 0x5E00_0000;
                 const STACK_VA: u64 = 0x5E01_0000;
                 vivanta_arch_api::boot::mmu::mmu_map_user_pages(
@@ -346,9 +346,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             if label == "UserAS2" {
                 const FAULT_CODE_VA: u64 = 0x5F00_0000;
                 const FAULT_STACK_VA: u64 = 0x5F01_0000;
-                let code_src = &fault_code_start as *const u8;
-                let code_len = (&fault_code_end as *const u8 as usize)
-                    - (&fault_code_start as *const u8 as usize);
+                let code_src = &raw const fault_code_start as *const u8;
+                let code_len = (&raw const fault_code_end as *const u8 as usize)
+                    - (&raw const fault_code_start as *const u8 as usize);
                 vivanta_arch_api::boot::mmu::mmu_map_user_pages(
                     rpt,
                     FAULT_CODE_VA,
