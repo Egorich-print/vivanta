@@ -149,7 +149,7 @@ pub fn init() {
     unsafe extern "C" {
         pub static exception_vectors: u8;
     }
-    let vectors = &raw const exception_vectors as *const u8 as u64;
+    let vectors = &raw const exception_vectors as u64;
     unsafe {
         core::arch::asm!(
             "msr VBAR_EL1, {v}",

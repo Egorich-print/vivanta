@@ -40,6 +40,12 @@ unsafe extern "C" {
     static user_code_end: u8;
     static fault_code_start: u8;
     static fault_code_end: u8;
+    static exec_nx_code_start: u8;
+    static exec_nx_code_end: u8;
+    static kread_code_start: u8;
+    static kread_code_end: u8;
+    static unmapped_code_start: u8;
+    static unmapped_code_end: u8;
 }
 
 /// Allocator callback for arch boot MMU init.
@@ -109,8 +115,8 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         }
 
         // ------- Physical Memory Manager + MRM ---------------------------------
-        let kernel_start = &raw const __kernel_start as *const u8 as u64;
-        let kernel_end = &raw const __stack_top as *const u8 as u64;
+        let kernel_start = &raw const __kernel_start as u64;
+        let kernel_end = &raw const __stack_top as u64;
 
         let dtb_addr = system_state.hardware().dtb_ptr;
         let dtb_size = if dtb_addr != 0 {
@@ -240,11 +246,17 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         let alloc_ctx: *mut () = mrm_ptr as *mut ();
         let pt = vivanta_arch_api::boot::mmu::mmu_init(alloc_ctx, boot_alloc_frame);
 
-        // Re-fetch hardware for VMM and beyond (after init_memory)
-        let hardware = system_state.hardware();
+        // Re-fetch hardware for VMM and beyond (after init_memory).
+        // The &'static fields are copied out so the root-builder closures
+        // hold raw copies instead of keeping the SystemState borrow alive
+        // across the memory_manager_mut() calls below.
+        let (memory_map, mmio_regions) = {
+            let hw = system_state.hardware();
+            (hw.memory_map, hw.mmio_regions)
+        };
 
         // Identity-map all usable RAM from memory map (not just available region)
-        for r in hardware.memory_map.regions() {
+        for r in memory_map.regions() {
             use vivanta_boot_common::MemoryRegionKind;
             if r.kind == MemoryRegionKind::Usable {
                 vivanta_arch_api::boot::mmu::mmu_map_ram(pt, r.start, r.start, r.size);
@@ -252,7 +264,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         }
 
         // Map MMIO regions (from HardwareState per ADR-021)
-        for mmio in hardware.mmio_regions {
+        for mmio in mmio_regions {
             vivanta_arch_api::boot::mmu::mmu_map_range(
                 pt,
                 mmio.base,
@@ -272,7 +284,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             "  L1 table at     0x{:x}",
             vivanta_arch_api::boot::mmu::mmu_root_addr(pt)
         );
-        for r in hardware.memory_map.regions() {
+        for r in memory_map.regions() {
             use vivanta_boot_common::MemoryRegionKind;
             if r.kind == MemoryRegionKind::Usable {
                 println!(
@@ -283,7 +295,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 );
             }
         }
-        for mmio in hardware.mmio_regions {
+        for mmio in mmio_regions {
             let kind_str = if mmio.kind.is_user_accessible() {
                 "user"
             } else {
@@ -305,19 +317,23 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
 
         // Build independent root tables for UserAS1/UserAS2
         let alloc_ctx_root: *mut () = mrm_ptr as *mut ();
-        let build_root = |label: &str, extra_va: u64, extra_pa: u64| -> RootPageTable {
+        let build_root = |label: &str,
+                          extra_va: u64,
+                          extra_pa: u64,
+                          user_pages: Option<(*const u8, usize, u64, u64)>|
+         -> RootPageTable {
             let uart = 0x0900_0000 as *mut u32;
             core::ptr::write_volatile(uart, b'X' as u32);
             let rpt = vivanta_arch_api::boot::mmu::mmu_init(alloc_ctx_root, boot_alloc_frame);
             core::ptr::write_volatile(uart, b'Y' as u32);
             // Map ALL usable RAM (not just available region) — kernel code/stack must be accessible
-            for r in hardware.memory_map.regions() {
+            for r in memory_map.regions() {
                 use vivanta_boot_common::MemoryRegionKind;
                 if r.kind == MemoryRegionKind::Usable {
                     vivanta_arch_api::boot::mmu::mmu_map_ram(rpt, r.start, r.start, r.size);
                 }
             }
-            for mmio in hardware.mmio_regions {
+            for mmio in mmio_regions {
                 vivanta_arch_api::boot::mmu::mmu_map_range(
                     rpt,
                     mmio.base,
@@ -329,44 +345,32 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             if extra_pa != 0 {
                 vivanta_arch_api::boot::mmu::mmu_map_range(rpt, extra_va, extra_pa, 0x1000, false);
             }
-            // M4.5.1: map user code + stack into UserAS1
-            if label == "UserAS1" {
-                let code_src = &raw const user_code_start as *const u8;
-                let code_len = (&raw const user_code_end as *const u8 as usize)
-                    - (&raw const user_code_start as *const u8 as usize);
-                const CODE_VA: u64 = 0x5E00_0000;
-                const STACK_VA: u64 = 0x5E01_0000;
+            // Map user code + stack when provided (demo, fault task and
+            // Phase-10 protection-fault scenarios all use this path).
+            if let Some((code_src, code_len, code_va, stack_va)) = user_pages {
                 vivanta_arch_api::boot::mmu::mmu_map_user_pages(
-                    rpt, CODE_VA, code_src, code_len, STACK_VA,
+                    rpt, code_va, code_src, code_len, stack_va,
                 );
-                println!("  UserAS1: code=0x{:x}, stack=0x{:x}", CODE_VA, STACK_VA);
-            }
-            // G3 fault-containment test: map the deliberately-faulting code into
-            // UserAS2 so a fault task can be spawned without disturbing the demo.
-            if label == "UserAS2" {
-                const FAULT_CODE_VA: u64 = 0x5F00_0000;
-                const FAULT_STACK_VA: u64 = 0x5F01_0000;
-                let code_src = &raw const fault_code_start as *const u8;
-                let code_len = (&raw const fault_code_end as *const u8 as usize)
-                    - (&raw const fault_code_start as *const u8 as usize);
-                vivanta_arch_api::boot::mmu::mmu_map_user_pages(
-                    rpt,
-                    FAULT_CODE_VA,
-                    code_src,
-                    code_len,
-                    FAULT_STACK_VA,
-                );
-                println!(
-                    "  UserAS2: fault code=0x{:x}, stack=0x{:x}",
-                    FAULT_CODE_VA, FAULT_STACK_VA
-                );
+                println!("  {}: code=0x{:x}, stack=0x{:x}", label, code_va, stack_va);
             }
             let ra = vivanta_arch_api::boot::mmu::mmu_root_addr(rpt);
             println!("  {} root table at 0x{:x}", label, ra);
             RootPageTable(ra as usize)
         };
-        let root1 = build_root("UserAS1", 0, 0);
-        let root2 = build_root("UserAS2", 0, 0);
+        let demo_user_pages = {
+            let code_src = &raw const user_code_start;
+            let code_len =
+                (&raw const user_code_end as usize) - (&raw const user_code_start as usize);
+            Some((code_src, code_len, 0x5E00_0000u64, 0x5E01_0000u64))
+        };
+        let fault_user_pages = {
+            let code_src = &raw const fault_code_start;
+            let code_len =
+                (&raw const fault_code_end as usize) - (&raw const fault_code_start as usize);
+            Some((code_src, code_len, 0x5F00_0000u64, 0x5F01_0000u64))
+        };
+        let root1 = build_root("UserAS1", 0, 0, demo_user_pages);
+        let root2 = build_root("UserAS2", 0, 0, fault_user_pages);
 
         // G3 W^X verification: read back the live leaf descriptors of both user
         // address spaces and assert user code is EL0 read-only+executable and
@@ -400,10 +404,10 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         vivanta_arch_api::boot::mmu::mmu_self_test();
 
         // ------- GIC Discovery & Initialisation --------------------------------
-        if hardware.dtb_ptr != 0 {
+        if dtb_addr != 0 {
             println!();
             println!("Interrupt Controller:");
-            vivanta_arch_api::boot::irq::irq_init(hardware.dtb_ptr);
+            vivanta_arch_api::boot::irq::irq_init(dtb_addr);
             vivanta_arch_api::boot::irq::irq_cpu_enable();
 
             // @@M4@@ Timer disabled for cooperative-only demo (re-enabled in M4.2)
@@ -455,6 +459,54 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             .expect("unmap MemoryObject");
         println!("  Unmapped   slot={}", slot);
         println!("MemoryObject test passed.");
+
+        // ------------------------------------------------------------------
+        // Phase-7/8 protection audit: permission transitions + TLB coherence
+        // on the ACTIVE kernel address space. The page is first written via
+        // its identity VA (establishing a live RW translation), then cycled
+        // RW -> RO -> RW through AddressSpace::protect. The final write is
+        // the discriminating assertion: a stale RO TLB entry from the RO
+        // phase would permission-fault here and panic the kernel.
+        // ------------------------------------------------------------------
+        println!("Protect/TLBI transition test:");
+        let probe = pmm.alloc_frame().expect("protect-test frame");
+        let kva: u64 = probe.addr;
+        core::ptr::write_volatile(kva as *mut u64, 0xA11CE);
+        {
+            let mrm = system_state.memory_manager_mut();
+            let mut pt_alloc = memory::MrmPageTableAllocator::new(mrm as *mut _);
+            let kas = vmm::kernel_address_space_mut();
+            use vivanta_arch_api::mmu::MappingFlags as ApiMFlags;
+            // Track the page in the shadow; splits the surrounding 2 MiB
+            // identity block into pages (map_pages split path).
+            kas.map_pages(
+                kva,
+                kva,
+                4096,
+                ApiMFlags::read_write(),
+                &mut pt_alloc,
+                0xF00D,
+            )
+            .expect("map protect-test page");
+            // RW -> RO: mapping must stay readable.
+            kas.protect(kva, 4096, ApiMFlags::from_bits(0), &mut pt_alloc)
+                .expect("protect RW->RO");
+            // Force a full TLB eviction (what a context switch does) so the
+            // read below repopulates the TLB from the NEW RO descriptor.
+            // Without this, a missed TLBI in protect would be masked by the
+            // still-cached RW entry from the initial write.
+            vivanta_arch_api::mmu::activate_address_space(kas.root);
+            let ro_val = core::ptr::read_volatile(kva as *const u64);
+            assert_eq!(ro_val, 0xA11CE, "RW->RO broke the mapping");
+            // RO -> RW: stale RO TLB entry would fault the write below.
+            kas.protect(kva, 4096, ApiMFlags::read_write(), &mut pt_alloc)
+                .expect("protect RO->RW");
+            core::ptr::write_volatile(kva as *mut u64, 0xB0B);
+            let val = core::ptr::read_volatile(kva as *const u64);
+            assert_eq!(val, 0xB0B, "stale TLB permissions survived RO->RW");
+        }
+        pmm.free_frame(probe);
+        println!("  Protect/TLBI transitions PASS (RW->RO->RW, write-after-restore ok)");
 
         println!();
         println!("Boot complete -- creating user thread");
@@ -527,6 +579,89 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         println!("  boot thread survived the faulting task (containment OK)");
         let (fa, fb) = (PREEMPT_COUNTER_A, PREEMPT_COUNTER_B);
         println!("  preempt counters before test: A={} B={}", fa, fb);
+
+        // ------------------------------------------------------------------
+        // Phase-10 protection audit: hardware-visible EL0 fault scenarios.
+        // Each scenario runs in its own address space; every blob faults on
+        // its FIRST instruction sequence. Expected outcomes are asserted
+        // against the recorded (ESR, FAR) of the actual exception:
+        //   exec-nx   : branch to XN stack page -> instruction abort
+        //               EC=0b100000(32), permission fault L3 (IFSC 0x0F)
+        //   kread     : load from kernel-only AP=00 block -> data abort,
+        //               permission fault L2 (DFSC 0x0E)
+        //   unmapped  : load where no descriptor exists -> data abort,
+        //               translation fault L2 (DFSC 0x06; translation faults
+        //               are 0x05/06/07 per level, permission 0x0D/0E/0F)
+        // A scenario whose fault is not delivered falls through to exit(7),
+        // which fails the exit_code assertion below.
+        // ------------------------------------------------------------------
+        println!("Phase-10 protection fault scenarios:");
+        const SCEN_CODE_VA: u64 = 0x5D00_0000;
+        const SCEN_STACK_VA: u64 = 0x5D01_0000;
+        let mut run_fault_scenario = |name: &str,
+                                      code_src: *const u8,
+                                      code_len: usize,
+                                      expect_ec: u64,
+                                      expect_dfsc: u64,
+                                      expect_far: u64| {
+            let root = build_root(
+                name,
+                0,
+                0,
+                Some((code_src, code_len, SCEN_CODE_VA, SCEN_STACK_VA)),
+            );
+            let as_id = vmm::register(root, vmm::AddressSpaceFlags::User);
+            let mut tm = scheduler::task_manager::TaskManager::new();
+            let tid = tm
+                .spawn_user(
+                    SCEN_CODE_VA as usize,
+                    (SCEN_STACK_VA + 4096) as usize,
+                    as_id,
+                    &mut pmm,
+                    system_state.memory_manager_mut(),
+                    scheduler::thread::Priority::Normal,
+                    None,
+                )
+                .expect("spawn fault-scenario task");
+            scheduler::yield_now();
+            scheduler::yield_now();
+            let task = tm.get(tid).expect("scenario task missing");
+            assert_eq!(
+                task.exit_code,
+                Some(-1),
+                "scenario {}: fault not delivered (exit_code={:?})",
+                name,
+                task.exit_code
+            );
+            let (esr, far) = vivanta_arch_api::boot::user::last_el0_fault();
+            let ec = (esr >> 26) & 0x3f;
+            let dfsc = esr & 0x3f;
+            assert_eq!(ec, expect_ec, "scenario {}: wrong EC", name);
+            assert_eq!(dfsc, expect_dfsc, "scenario {}: wrong DFSC", name);
+            assert_eq!(far, expect_far, "scenario {}: wrong FAR", name);
+            println!(
+                "  [FAULT] {}: EC={} DFSC={:#x} FAR={:#x} — PASS",
+                name, ec, dfsc, far
+            );
+            tm.reap_zombie(tid);
+        };
+        {
+            let src = &raw const exec_nx_code_start;
+            let len =
+                (&raw const exec_nx_code_end as usize) - (&raw const exec_nx_code_start as usize);
+            run_fault_scenario("exec-nx", src, len, 0b100000, 0x0F, SCEN_STACK_VA);
+        }
+        {
+            let src = &raw const kread_code_start;
+            let len = (&raw const kread_code_end as usize) - (&raw const kread_code_start as usize);
+            run_fault_scenario("kread", src, len, 0b100100, 0x0E, 0x4020_0000);
+        }
+        {
+            let src = &raw const unmapped_code_start;
+            let len =
+                (&raw const unmapped_code_end as usize) - (&raw const unmapped_code_start as usize);
+            run_fault_scenario("unmapped", src, len, 0b100100, 0x06, 0x7000_0000);
+        }
 
         // ------------------------------------------------------------------
         // M6 process-lifecycle demo: the demo user task (tid) already ran and

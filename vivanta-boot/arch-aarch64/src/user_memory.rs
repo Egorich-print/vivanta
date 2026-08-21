@@ -10,9 +10,13 @@ use crate::paging::descriptor::*;
 use crate::paging::mapper::PageTable;
 use vivanta_arch_api::user_memory::AccessType;
 
-/// AP[2:1] encodings (bits 7:6) used by this kernel's mapping code:
+/// AP[2:1] decodings (bits 7:6) mirroring the encoding produced by
+/// `paging::descriptor::ap_bits` — the single permission-policy source.
+/// These are readers, not encoders: they interpret descriptors for
+/// access_ok. If ap_bits ever changes, these must change with it
+/// (covered by the Phase-10 kread scenario, which faults only while
+/// kernel pages stay EL0-inaccessible).
 ///   00 = EL1 RW, 01 = EL0 RW, 10 = EL1 RO, 11 = EL0 RO.
-/// Any EL0-accessible page has bit 6 set.
 const AP_EL0_ACCESS: u64 = 1 << 6;
 const AP_EL0_RO: u64 = 1 << 7;
 

@@ -133,6 +133,72 @@ pub(crate) fn test_wx_encoding() {
         "W^X FAIL: paging user RX not EL0 read-only"
     );
 
+    // Full permission matrix (Phase-6 audit): every (writable, executable,
+    // privilege) combination across all three encoders.
+    // PageFlags path (has the privileged_executable axis).
+    let cases: &[(PageFlags, u64, u64, u64, &'static str)] = &[
+        // (flags, expected AP, expected XN, expected PXN, label)
+        (PageFlags::READ_ONLY, DESC_AP_RO_EL1, DESC_XN, 0, "kernel R"),
+        (
+            PageFlags::READ_WRITE,
+            DESC_AP_RW_EL1,
+            DESC_XN,
+            0,
+            "kernel RW",
+        ),
+        (
+            PageFlags {
+                writable: false,
+                executable: true,
+                user: false,
+                privileged_executable: true,
+                device: false,
+            },
+            DESC_AP_RO_EL1,
+            0,
+            0,
+            "kernel RX",
+        ),
+        (
+            PageFlags::USER_READ_EXEC,
+            DESC_AP_RO_EL0,
+            0,
+            DESC_PXN,
+            "user RX",
+        ),
+        (
+            PageFlags::USER_READ_WRITE,
+            DESC_AP_RW_EL0,
+            DESC_XN,
+            DESC_PXN,
+            "user RW",
+        ),
+        (
+            PageFlags {
+                writable: false,
+                executable: false,
+                user: true,
+                privileged_executable: false,
+                device: false,
+            },
+            DESC_AP_RO_EL0,
+            DESC_XN,
+            DESC_PXN,
+            "user R",
+        ),
+    ];
+    for (flags, ap, xn, pxn, label) in cases {
+        let d = block_or_page_desc(0x5000_0000, *flags, true);
+        assert_eq!(d & DESC_AP_MASK, *ap, "AP wrong for {}", label);
+        assert_eq!(d & DESC_XN, *xn, "XN wrong for {}", label);
+        assert_eq!(d & DESC_PXN, *pxn, "PXN wrong for {}", label);
+    }
+    // W^X rejection (user + writable + executable) is enforced by an assert
+    // in every encoder. It cannot be exercised in-process (panic=abort
+    // kernel profile); its active-coverage proof is the Phase-11 mutation
+    // run: flipping USER_READ_EXEC to writable boots into
+    // "W^X violation: user page requested as writable+executable".
+
     // leaf_with_permissions: pure rewrite preserves address/type/AF/SH/ATTR.
     let base = DESC_VALID
         | DESC_AF

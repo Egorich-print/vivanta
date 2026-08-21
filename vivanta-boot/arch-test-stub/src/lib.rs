@@ -92,6 +92,11 @@ pub unsafe extern "Rust" fn user_bootstrap(_pt: usize) -> usize {
 }
 
 #[unsafe(no_mangle)]
+pub extern "Rust" fn last_el0_fault() -> (u64, u64) {
+    (0, 0)
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn mmu_map_user_pages(
     _pt: usize,
     _code_va: u64,

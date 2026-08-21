@@ -101,6 +101,12 @@ impl MappingFlags {
     }
 
     pub(crate) fn to_descriptor_bits(self, phys: u64, is_block: bool) -> u64 {
+        // W^X kernel policy (M5.0 G3), enforced at the encoding choke point:
+        // a user page is never simultaneously writable and executable.
+        assert!(
+            !(self.perms.user && self.perms.writable && self.perms.executable),
+            "W^X violation: user page requested as writable+executable"
+        );
         let mut d = DESC_VALID | DESC_AF | DESC_SH_INNER | (self.mem_type.to_attr_index() << 2);
 
         if !is_block {

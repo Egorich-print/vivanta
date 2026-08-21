@@ -56,6 +56,21 @@ core::arch::global_asm!(
 );
 
 // ---------------------------------------------------------------------------
+// EL0 fault diagnostics — last synchronous EL0 fault (ESR, FAR).
+//
+// Recorded by el0_sync_handler before task termination; read by the boot
+// monitor to assert hardware-visible fault semantics per scenario
+// (Phase-10 protection audit). Single-core: no synchronisation needed.
+// ---------------------------------------------------------------------------
+static mut LAST_FAULT_ESR: u64 = 0;
+static mut LAST_FAULT_FAR: u64 = 0;
+
+#[unsafe(no_mangle)]
+pub extern "Rust" fn last_el0_fault() -> (u64, u64) {
+    unsafe { (LAST_FAULT_ESR, LAST_FAULT_FAR) }
+}
+
+// ---------------------------------------------------------------------------
 // Stage 6A — Minimal EL0 bootstrap (AArch64)
 // ---------------------------------------------------------------------------
 
@@ -138,6 +153,75 @@ unsafe extern "C" {
     static fault_code_end: u8;
 }
 
+// Phase-10 fault scenarios. Each blob triggers exactly one hardware fault;
+// if the fault were (incorrectly) not delivered, execution falls through to
+// exit(7) — distinguishable from both clean exit(0) and fault termination.
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
+    ".section .user.text.execnx, \"ax\"",
+    ".global exec_nx_code_start",
+    "exec_nx_code_start:",
+    // Branch to the user stack page (mapped XN) -> instruction abort.
+    "movz x0, #0x5D01, lsl #16",
+    "br   x0",
+    "mov  x8, #2",
+    "mov  x0, #7",
+    "svc  #0",
+    "b .",
+    ".global exec_nx_code_end",
+    "exec_nx_code_end:",
+);
+// Referenced by vivanta-kernel through its own extern declarations.
+#[allow(dead_code)]
+unsafe extern "C" {
+    static exec_nx_code_start: u8;
+    static exec_nx_code_end: u8;
+}
+
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
+    ".section .user.text.kread, \"ax\"",
+    ".global kread_code_start",
+    "kread_code_start:",
+    // Load from a kernel-only identity mapping (AP=00 at EL0) -> permission fault.
+    "movz x0, #0x4020, lsl #16",
+    "ldr  x1, [x0]",
+    "mov  x8, #2",
+    "mov  x0, #7",
+    "svc  #0",
+    "b .",
+    ".global kread_code_end",
+    "kread_code_end:",
+);
+// Referenced by vivanta-kernel through its own extern declarations.
+#[allow(dead_code)]
+unsafe extern "C" {
+    static kread_code_start: u8;
+    static kread_code_end: u8;
+}
+
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
+    ".section .user.text.unmapped, \"ax\"",
+    ".global unmapped_code_start",
+    "unmapped_code_start:",
+    // Load from an address with no descriptor at all -> translation fault.
+    "movz x0, #0x7000, lsl #16",
+    "ldr  x1, [x0]",
+    "mov  x8, #2",
+    "mov  x0, #7",
+    "svc  #0",
+    "b .",
+    ".global unmapped_code_end",
+    "unmapped_code_end:",
+);
+// Referenced by vivanta-kernel through its own extern declarations.
+#[allow(dead_code)]
+unsafe extern "C" {
+    static unmapped_code_start: u8;
+    static unmapped_code_end: u8;
+}
+
 /// Addresses used for the faulting user task.
 pub const FAULT_CODE_VA: u64 = 0x5F00_0000;
 pub const FAULT_STACK_VA: u64 = 0x5F01_0000;
@@ -146,8 +230,8 @@ pub const FAULT_STACK_VA: u64 = 0x5F01_0000;
 pub unsafe fn fault_code_pa(alloc: &mut dyn vivanta_arch_api::pmm::FrameAllocator) -> u64 {
     unsafe {
         let pa = alloc.alloc_frame().expect("fault code frame").addr;
-        let src = &raw const fault_code_start as *const u8;
-        let len = (&raw const fault_code_end as *const u8).offset_from(src) as usize;
+        let src = &raw const fault_code_start;
+        let len = (&raw const fault_code_end).offset_from(src) as usize;
         core::ptr::copy_nonoverlapping(src, pa as *mut u8, len);
         if len < 4096 {
             core::ptr::write_bytes((pa as *mut u8).add(len), 0u8, 4096 - len);
@@ -157,14 +241,11 @@ pub unsafe fn fault_code_pa(alloc: &mut dyn vivanta_arch_api::pmm::FrameAllocato
 }
 
 fn user_code_size() -> usize {
-    unsafe {
-        (&raw const user_code_end as *const u8).offset_from(&raw const user_code_start as *const u8)
-            as usize
-    }
+    unsafe { (&raw const user_code_end).offset_from(&raw const user_code_start) as usize }
 }
 
 fn user_code_src() -> *const u8 {
-    &raw const user_code_start as *const u8
+    &raw const user_code_start
 }
 
 // ---------------------------------------------------------------------------
@@ -248,10 +329,13 @@ pub unsafe extern "C" fn el0_sync_handler(
             // abort, undef, alignment, etc.) terminates the current task. We do
             // NOT skip the faulting instruction (`elr += 4`) — that would silently
             // mask faults. The kernel handles the fault as a task-fatal event.
+            LAST_FAULT_ESR = esr;
+            LAST_FAULT_FAR = far;
             vivanta_boot_common::println!(
-                "  EL0 fault: ESR={:#x} EC={} FAR={:#x} ELR={:#x} — terminating task",
+                "  EL0 fault: ESR={:#x} EC={} DFSC={:#x} FAR={:#x} ELR={:#x} — terminating task",
                 esr,
                 ec,
+                esr & 0x3f,
                 far,
                 frame.elr
             );

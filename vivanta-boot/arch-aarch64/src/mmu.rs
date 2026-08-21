@@ -93,6 +93,11 @@ fn table_desc(phys: u64) -> u64 {
 }
 
 pub(crate) fn block_or_page_desc(phys: u64, flags: PageFlags, is_page: bool) -> u64 {
+    // W^X kernel policy (M5.0 G3): user pages are never writable+executable.
+    assert!(
+        !(flags.user && flags.writable && flags.executable),
+        "W^X violation: user page requested as writable+executable"
+    );
     let attr_idx = if flags.device {
         DESC_ATTRIDX_DEVICE
     } else {
@@ -280,6 +285,11 @@ pub unsafe extern "Rust" fn activate_address_space(root: vivanta_arch_api::mmu::
 use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator, RootPageTable};
 
 pub(crate) fn flags_to_desc_bits(flags: MappingFlags, phys: u64) -> u64 {
+    // W^X kernel policy (M5.0 G3): user pages are never writable+executable.
+    assert!(
+        !(flags.is_user() && flags.is_read_write() && flags.is_executable()),
+        "W^X violation: user page requested as writable+executable"
+    );
     let mut d = DESC_VALID | DESC_TABLE | DESC_AF | DESC_SH_INNER | DESC_ATTRIDX_NORMAL;
 
     d |= ap_bits(flags.is_user(), flags.is_read_write());
@@ -492,8 +502,8 @@ pub unsafe extern "Rust" fn dump_critical_tables(root: u64) {
             static __kernel_start: u8;
             static __stack_top: u8;
         }
-        let ks = &raw const __kernel_start as *const u8 as u64;
-        let ke = &raw const __stack_top as *const u8 as u64;
+        let ks = &raw const __kernel_start as u64;
+        let ke = &raw const __stack_top as u64;
         dump_walk(root, ks, "kernel_start");
         dump_walk(root, ke, "stack_top");
 
