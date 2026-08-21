@@ -57,8 +57,27 @@ impl core::ops::BitOr for MappingFlags {
 ///
 /// Separates the MMU page-table walker from the memory source.
 /// Implementations can wrap PMM, MemoryObject, a bootstrap allocator, etc.
+///
+/// Ownership protocol (ADR-031): the architecture layer allocates a frame
+/// and installs it into a parent table; ownership is transferred to the
+/// caller's registry via [`PageTableAllocator::table_installed`]. A frame
+/// may be returned to the allocator only through
+/// [`PageTableAllocator::reclaim_page_table_frame`] after the caller has
+/// proven it unreachable (parent entry cleared + TLB invalidated).
 pub trait PageTableAllocator {
     fn alloc_page_table_frame(&mut self) -> u64;
+
+    /// Notification: the arch layer installed `frame` as a child table at
+    /// `index` of `parent_table`. `level` is 2 for L2 tables (holding 2 MiB
+    /// blocks / L3 pointers) and 3 for L3 tables (holding 4 KiB pages),
+    /// using this kernel's root=L1 naming.
+    /// Default: no-op (boot-era allocators keep the intentional-leak model).
+    fn table_installed(&mut self, _frame: u64, _parent_table: u64, _index: usize, _level: u8) {}
+
+    /// Return a previously-installed, provably-unreachable table frame to
+    /// the underlying memory source. Only called by the reclamation path.
+    /// Default: no-op (frame leaks — safe fallback).
+    fn reclaim_page_table_frame(&mut self, _frame: u64) {}
 }
 
 unsafe extern "Rust" {
@@ -124,4 +143,31 @@ unsafe extern "Rust" {
         flags: MappingFlags,
         alloc: &mut dyn PageTableAllocator,
     );
+
+    /// Count valid leaf descriptors in a table frame (mechanism primitive).
+    ///
+    /// Reads the 512 entries of the table at physical address `table_pa`
+    /// and returns how many are valid. Used by the kernel's reclamation
+    /// policy to prove a table is empty before unlinking it. Pure read.
+    pub fn mmu_table_valid_leaves(table_pa: u64) -> u32;
+
+    /// Read the raw leaf descriptor covering `va` in the table rooted at
+    /// `root_pa` (mechanism primitive). Returns 0 when no valid leaf exists.
+    /// Used by boot-time audits to assert descriptor attributes (AF, AP, XN)
+    /// that QEMU does not enforce.
+    pub fn mmu_leaf_descriptor(root_pa: u64, va: u64) -> u64;
+
+    /// Clear one descriptor entry in a table frame (mechanism primitive).
+    ///
+    /// Writes an invalid (0) descriptor at `table_pa[index]` with the
+    /// required barrier. Used to unlink an empty child table from its
+    /// parent. The caller must have invalidated any translations that
+    /// depended on the subtree being unlinked.
+    ///
+    /// # Safety
+    ///
+    /// - `table_pa` must be a live table frame recorded in the caller's
+    ///   ownership registry.
+    /// - `index` must be < 512.
+    pub unsafe fn mmu_clear_table_entry(table_pa: u64, index: usize);
 }

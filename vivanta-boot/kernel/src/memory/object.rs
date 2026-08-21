@@ -32,6 +32,69 @@ impl PageTableAllocator for MrmPageTableAllocator {
     }
 }
 
+/// Address-space-scoped page-table allocator (ADR-031 ownership protocol).
+///
+/// Unlike [`MrmPageTableAllocator`] (intentional leak), this allocator
+/// records every installed table frame in the kernel's ownership registry
+/// and can take frames back once the caller proves them unreachable.
+pub struct AsPageTableAllocator {
+    mrm: *mut crate::memory::MemoryResourceManager,
+    /// Backend that owns the physical storage of allocated frames.
+    backend: *mut dyn crate::memory::resource::MemoryBackend,
+    as_id: u64,
+}
+
+impl AsPageTableAllocator {
+    pub unsafe fn new(
+        mrm: *mut crate::memory::MemoryResourceManager,
+        backend: *mut dyn crate::memory::resource::MemoryBackend,
+        as_id: u64,
+    ) -> Self {
+        AsPageTableAllocator {
+            mrm,
+            backend,
+            as_id,
+        }
+    }
+}
+
+impl PageTableAllocator for AsPageTableAllocator {
+    fn alloc_page_table_frame(&mut self) -> u64 {
+        use crate::memory::AllocationRequirements;
+        let req = AllocationRequirements::new(4096);
+        // SAFETY: mrm outlives the boot flow; single-core access.
+        let obj = unsafe { (*self.mrm).allocate(&req, 0) }.expect("alloc_page_table_frame: OOM");
+        let pa = obj.phys_addr.expect("alloc_page_table_frame: no phys addr");
+        // Storage ownership moves to the registry entry created by
+        // `table_installed`; the object is forgotten so its Drop cannot
+        // deallocate a live table (mission-2 defect, df5702b).
+        core::mem::forget(obj);
+        pa
+    }
+
+    fn table_installed(&mut self, frame: u64, parent_table: u64, index: usize, level: u8) {
+        let recorded = crate::vmm::tables::record(crate::vmm::tables::TableEntry {
+            frame,
+            as_id: self.as_id,
+            level,
+            parent_table,
+            parent_index: index,
+            backend: self.backend,
+        });
+        if !recorded {
+            // Registry full: frame stays reachable but is never reclaimed
+            // (safe-leak degradation, deterministic).
+            vivanta_boot_common::println!("  [VM] table registry full — frame leaked");
+        }
+    }
+
+    fn reclaim_page_table_frame(&mut self, frame: u64) {
+        // Registry entry must already be taken by the reclamation policy
+        // before this is called; storage returns to the owning backend.
+        unsafe { (*self.backend).deallocate(frame, 4096) };
+    }
+}
+
 pub type MemoryObjectId = u64;
 
 /// Maximum number of simultaneous virtual mappings per object.

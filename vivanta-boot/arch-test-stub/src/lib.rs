@@ -140,6 +140,19 @@ pub unsafe extern "Rust" fn mmu_unmap(
 }
 
 #[unsafe(no_mangle)]
+pub extern "Rust" fn mmu_table_valid_leaves(_table_pa: u64) -> u32 {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub extern "Rust" fn mmu_leaf_descriptor(_root_pa: u64, _va: u64) -> u64 {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn mmu_clear_table_entry(_table_pa: u64, _index: usize) {}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn mmu_protect(
     _pt: RootPageTable,
     _vaddr: u64,
@@ -154,3 +167,6 @@ pub unsafe extern "Rust" fn mmu_self_test() {}
 
 #[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn wx_verify_user_as(_root_pa: u64, _code_va: u64, _stack_va: u64) {}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn dump_walk(_root: u64, _va: u64, _label: &str) {}

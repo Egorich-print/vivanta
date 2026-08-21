@@ -329,6 +329,26 @@ pub unsafe extern "Rust" fn mmu_map_object(
                     } => {
                         let frame_paddr = alloc.alloc_page_table_frame();
                         split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
+                        // Ownership transfer (ADR-031): the new L3 table is
+                        // now reachable from its parent; record it in the
+                        // caller's registry so it can be reclaimed only when
+                        // provably unreachable.
+                        alloc.table_installed(frame_paddr, l2_table_addr, l2_index, 3);
+                    }
+                    WalkResult::MissingL2 { l1_table, l1_index } => {
+                        // Allocator-backed mapping may create missing
+                        // intermediate tables; ownership transfers via
+                        // table_installed (ADR-031).
+                        let frame_paddr = alloc.alloc_page_table_frame();
+                        core::ptr::write_bytes(frame_paddr as *mut u8, 0, 4096);
+                        install_child_table(l1_table, l1_index, frame_paddr);
+                        alloc.table_installed(frame_paddr, l1_table, l1_index, 2);
+                    }
+                    WalkResult::MissingL3 { l2_table, l2_index } => {
+                        let frame_paddr = alloc.alloc_page_table_frame();
+                        core::ptr::write_bytes(frame_paddr as *mut u8, 0, 4096);
+                        install_child_table(l2_table, l2_index, frame_paddr);
+                        alloc.table_installed(frame_paddr, l2_table, l2_index, 3);
                     }
                 }
             }
@@ -363,6 +383,16 @@ pub unsafe extern "Rust" fn mmu_unmap(
                     } => {
                         let frame_paddr = alloc.alloc_page_table_frame();
                         split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
+                        // Ownership transfer (ADR-031): the new L3 table is
+                        // now reachable from its parent; record it in the
+                        // caller's registry so it can be reclaimed only when
+                        // provably unreachable.
+                        alloc.table_installed(frame_paddr, l2_table_addr, l2_index, 3);
+                    }
+                    // Strict contract for unmap/protect: the range must
+                    // already be mapped. Missing intermediates are a caller bug.
+                    WalkResult::MissingL2 { .. } | WalkResult::MissingL3 { .. } => {
+                        panic!("intermediate table missing (range not mapped)");
                     }
                 }
             }
@@ -409,6 +439,16 @@ pub unsafe extern "Rust" fn mmu_protect(
                         // permission change can apply at page granularity.
                         let frame_paddr = alloc.alloc_page_table_frame();
                         split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
+                        // Ownership transfer (ADR-031): the new L3 table is
+                        // now reachable from its parent; record it in the
+                        // caller's registry so it can be reclaimed only when
+                        // provably unreachable.
+                        alloc.table_installed(frame_paddr, l2_table_addr, l2_index, 3);
+                    }
+                    // Strict contract for unmap/protect: the range must
+                    // already be mapped. Missing intermediates are a caller bug.
+                    WalkResult::MissingL2 { .. } | WalkResult::MissingL3 { .. } => {
+                        panic!("intermediate table missing (range not mapped)");
                     }
                 }
             }
@@ -416,6 +456,33 @@ pub unsafe extern "Rust" fn mmu_protect(
         }
         tlbi_range(vaddr, size);
     }
+}
+
+#[unsafe(no_mangle)]
+pub extern "Rust" fn mmu_table_valid_leaves(table_pa: u64) -> u32 {
+    let mut valid = 0u32;
+    for i in 0..512u64 {
+        let desc = read_desc(table_pa + i * 8);
+        if desc_is_valid(desc) {
+            valid += 1;
+        }
+    }
+    valid
+}
+
+#[unsafe(no_mangle)]
+pub extern "Rust" fn mmu_leaf_descriptor(root_pa: u64, va: u64) -> u64 {
+    let pt = crate::paging::mapper::PageTable::new(root_pa & ADDR_MASK);
+    pt.leaf_descriptor(va).unwrap_or(0)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn mmu_clear_table_entry(table_pa: u64, index: usize) {
+    debug_assert!(index < 512);
+    write_desc(table_pa + (index as u64) * 8, 0);
+    // The cleared entry can no longer be reached by a table walk once this
+    // becomes visible; DSB orders the write before any subsequent TLBI.
+    barrier_write();
 }
 
 // ---------------------------------------------------------------------------

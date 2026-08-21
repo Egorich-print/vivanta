@@ -17,25 +17,42 @@ pub enum WalkResult {
         l2_index: usize,
         block_desc: u64,
     },
+    /// L1 entry invalid or not a table: the caller may allocate and
+    /// install an L2 table there (map path only).
+    MissingL2 {
+        l1_table: u64,
+        l1_index: usize,
+    },
+    /// L2 entry invalid: the caller may allocate and install an L3 table
+    /// there (map path only).
+    MissingL3 {
+        l2_table: u64,
+        l2_index: usize,
+    },
 }
 
+/// Non-fatal walk used by the map path: reports what is missing instead of
+/// panicking, so an allocator-backed mapper can create intermediate tables.
 pub fn walk_to_l3(pt_root: u64, vaddr: u64) -> WalkResult {
     let l1_idx = ((vaddr >> 30) & 0x1FF) as usize;
     let l2_idx = ((vaddr >> 21) & 0x1FF) as usize;
     let l3_idx = ((vaddr >> 12) & 0x1FF) as usize;
 
     let l1_entry = read_desc(pt_root + (l1_idx as u64) * 8);
-    if !desc_is_valid(l1_entry) {
-        panic!("walk_to_l3: L1 entry missing at idx {}", l1_idx);
-    }
-    if !desc_is_table(l1_entry) {
-        panic!("walk_to_l3: L1 entry is not a table at idx {}", l1_idx);
+    if !desc_is_valid(l1_entry) || !desc_is_table(l1_entry) {
+        return WalkResult::MissingL2 {
+            l1_table: pt_root,
+            l1_index: l1_idx,
+        };
     }
     let l2_table = l1_entry & ADDR_MASK;
 
     let l2_entry = read_desc(l2_table + (l2_idx as u64) * 8);
     if !desc_is_valid(l2_entry) {
-        panic!("walk_to_l3: L2 entry missing at idx {}", l2_idx);
+        return WalkResult::MissingL3 {
+            l2_table,
+            l2_index: l2_idx,
+        };
     }
     if desc_is_block(l2_entry) {
         return WalkResult::NeedsSplit {
@@ -46,6 +63,19 @@ pub fn walk_to_l3(pt_root: u64, vaddr: u64) -> WalkResult {
     }
     let l3_table = l2_entry & ADDR_MASK;
     WalkResult::ExistingL3(l3_table, l3_idx)
+}
+
+/// Install a freshly zeroed child table descriptor into `parent[index]`.
+/// Mechanism primitive: no allocation, barriers included.
+///
+/// # Safety
+/// - `frame_paddr` must be a valid, zeroed 4 KiB table frame.
+/// - `parent`/`index` must designate a live table slot.
+pub unsafe fn install_child_table(parent: u64, index: usize, frame_paddr: u64) {
+    write_desc(
+        parent + (index as u64) * 8,
+        DESC_VALID | DESC_TABLE | (frame_paddr & ADDR_MASK),
+    );
 }
 
 // ── Block split ──────────────────────────────────────────────────────────────
