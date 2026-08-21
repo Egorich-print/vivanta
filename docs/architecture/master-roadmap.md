@@ -383,6 +383,20 @@ The first genuine isolated EL0 process. Not just a jump — a runtime environmen
 
 *Every roadmap modification must update this section.*
 
+### 2026-08-21
+-   **W^X enforced for AArch64 user pages** (WX-001): user read-only pages
+    previously encoded AP=01 (EL0 *writable*), making user code RWX in
+    practice despite the M5.0 G3 "user code = RX" claim. Fixed via single
+    `ap_bits()` encoder + boot-time `[WX]` descriptor readback + EL0
+    store-to-code-page negative test
+    (`vivanta-boot/docs/investigations/WX-user-code-ap-encoding.md`).
+-   **VMM protect() implemented** (was `todo!()`): arch-api `mmu_protect`
+    contract + arch-aarch64 implementation (page-granular permission rewrite,
+    2 MiB block splitting, TLBI) + `AddressSpace::protect` wiring
+    (whole-mapping granularity). ADR-019 amended accordingly.
+-   INV-002 fix (console-lock IRQ guard + ThreadContext at stack bottom)
+    committed to main after re-verification.
+
 ### 2026-08-11
 -   **M5.0 GREEN BASELINE — PASS/CLOSED** (`vivanta-boot/docs/milestones/M5.0-green-baseline.md`).
 -   **M6 Process Lifecycle — PASS/CLOSED** (`vivanta-boot/docs/milestones/M6-process-lifecycle.md`).

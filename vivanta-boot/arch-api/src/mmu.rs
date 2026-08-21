@@ -100,4 +100,28 @@ extern "Rust" {
     /// - `pt` must be a valid root page table.
     /// - The virtual range must be currently mapped.
     pub fn mmu_unmap(pt: RootPageTable, vaddr: u64, size: u64, alloc: &mut dyn PageTableAllocator);
+
+    /// Change the permissions of an already-mapped virtual range.
+    ///
+    /// Rewrites the permission bits (access permission, execute-never) of
+    /// every leaf descriptor covering `[vaddr, vaddr + size)` to `flags`,
+    /// preserving physical addressing, memory type, shareability and the
+    /// access flag. Where a 2 MiB block descriptor covers only part of the
+    /// requested change, it is split into 4 KiB pages first (`alloc` supplies
+    /// the L3 frame). TLB entries for the range are invalidated before return.
+    ///
+    /// The range must be page-aligned and cover whole pages. Physical frames
+    /// are never allocated for data — only for split page tables.
+    ///
+    /// # Safety
+    ///
+    /// - `pt` must be a valid root page table.
+    /// - Every page in the range must currently be mapped.
+    pub fn mmu_protect(
+        pt: RootPageTable,
+        vaddr: u64,
+        size: u64,
+        flags: MappingFlags,
+        alloc: &mut dyn PageTableAllocator,
+    );
 }

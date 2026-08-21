@@ -92,7 +92,7 @@ fn table_desc(phys: u64) -> u64 {
     DESC_VALID | DESC_TABLE | (phys & ADDR_MASK)
 }
 
-fn block_or_page_desc(phys: u64, flags: PageFlags, is_page: bool) -> u64 {
+pub(crate) fn block_or_page_desc(phys: u64, flags: PageFlags, is_page: bool) -> u64 {
     let attr_idx = if flags.device {
         DESC_ATTRIDX_DEVICE
     } else {
@@ -107,11 +107,10 @@ fn block_or_page_desc(phys: u64, flags: PageFlags, is_page: bool) -> u64 {
     if is_page {
         d |= DESC_TABLE;
     }
-    if flags.user {
-        d |= 1 << 6;
-    } else if !flags.writable {
-        d |= 2 << 6;
-    }
+    // W^X: ap_bits() is the single source of truth for AP encoding. User
+    // read-only pages (USER_READ_EXEC) must encode AP=11 (EL0 RO), never
+    // AP=01 (EL0 RW) — see docs/investigations/WX-user-code-ap-encoding.md.
+    d |= ap_bits(flags.user, flags.writable);
     if !flags.privileged_executable {
         d |= DESC_PXN;
     }
@@ -276,14 +275,10 @@ pub unsafe extern "Rust" fn activate_address_space(root: vivanta_arch_api::mmu::
 
 use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator, RootPageTable};
 
-fn flags_to_desc_bits(flags: MappingFlags, phys: u64) -> u64 {
+pub(crate) fn flags_to_desc_bits(flags: MappingFlags, phys: u64) -> u64 {
     let mut d = DESC_VALID | DESC_TABLE | DESC_AF | DESC_SH_INNER | DESC_ATTRIDX_NORMAL;
 
-    if flags.is_user() {
-        d |= 1 << 6;
-    } else if !flags.is_read_write() {
-        d |= 2 << 6;
-    }
+    d |= ap_bits(flags.is_user(), flags.is_read_write());
 
     if !flags.is_executable() {
         d |= DESC_PXN | DESC_XN;
@@ -349,6 +344,50 @@ pub unsafe extern "Rust" fn mmu_unmap(
                     l2_index,
                     block_desc,
                 } => {
+                    let frame_paddr = alloc.alloc_page_table_frame();
+                    split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
+                }
+            }
+        }
+        offset += 0x1000;
+    }
+    tlbi_range(vaddr, size);
+}
+
+#[no_mangle]
+pub unsafe extern "Rust" fn mmu_protect(
+    pt: RootPageTable,
+    vaddr: u64,
+    size: u64,
+    flags: MappingFlags,
+    alloc: &mut dyn PageTableAllocator,
+) {
+    let root = pt.0 as u64;
+    let user = flags.is_user();
+    let writable = flags.is_read_write();
+    let executable = flags.is_executable();
+    let mut offset = 0u64;
+    while offset < size {
+        let va = vaddr + offset;
+        loop {
+            match walk_to_l3(root, va) {
+                WalkResult::ExistingL3(l3_table, l3_idx) => {
+                    let addr = l3_table + (l3_idx as u64) * 8;
+                    // SAFETY (contract): every page in the range is mapped,
+                    // so the leaf descriptor is a valid L3 page entry.
+                    let old = read_desc(addr);
+                    let new = leaf_with_permissions(old, user, writable, executable);
+                    write_desc(addr, new);
+                    break;
+                }
+                WalkResult::NeedsSplit {
+                    l2_table_addr,
+                    l2_index,
+                    block_desc,
+                } => {
+                    // A 2 MiB block covers this page: split it into 4 KiB
+                    // pages (inheriting the block's attributes) so the
+                    // permission change can apply at page granularity.
                     let frame_paddr = alloc.alloc_page_table_frame();
                     split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
                 }

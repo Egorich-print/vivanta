@@ -377,6 +377,21 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     let root1 = build_root("UserAS1", 0, 0);
     let root2 = build_root("UserAS2", 0, 0);
 
+    // G3 W^X verification: read back the live leaf descriptors of both user
+    // address spaces and assert user code is EL0 read-only+executable and
+    // user stacks are EL0 read-write, non-executable.
+    println!("  W^X permission verification:");
+    const WX_CODE_VA: u64 = 0x5E00_0000;
+    const WX_STACK_VA: u64 = 0x5E01_0000;
+    vivanta_arch_api::boot::mmu::wx_verify_user_as(root1.0 as u64, WX_CODE_VA, WX_STACK_VA);
+    const WX_FAULT_CODE_VA: u64 = 0x5F00_0000;
+    const WX_FAULT_STACK_VA: u64 = 0x5F01_0000;
+    vivanta_arch_api::boot::mmu::wx_verify_user_as(
+        root2.0 as u64,
+        WX_FAULT_CODE_VA,
+        WX_FAULT_STACK_VA,
+    );
+
     // Debug: dump UserAS1 page table for UART address
     println!("  UserAS1 UART mapping check:");
     unsafe {

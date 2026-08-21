@@ -53,6 +53,32 @@ pub const DESC_AP_RW_EL1: u64 = 0 << 6;
 pub const DESC_AP_RO_EL1: u64 = 2 << 6;
 pub const DESC_AP_RW_EL0: u64 = 1 << 6;
 pub const DESC_AP_RO_EL0: u64 = 3 << 6;
+pub const DESC_AP_MASK: u64 = 0b11 << 6;
+
+/// AP[2:1] access-permission bits for a (privilege, writability) pair.
+///
+/// Single source of truth for permission-bit encoding across all descriptor
+/// builders in this crate (G3 W^X invariant):
+///
+/// ```text
+///   EL1 RW → 0b00   EL1 RO → 0b10
+///   EL0 RW → 0b01   EL0 RO → 0b11
+/// ```
+///
+/// History: before 2026-08-21 the encoders mapped every `user` page to
+/// AP=01 regardless of writability, silently making user code pages
+/// EL0-*writable*+executable (RWX) and violating the M5.0 G3 acceptance
+/// criterion "user code = RX". See
+/// `docs/investigations/WX-user-code-ap-encoding.md`.
+#[inline]
+pub const fn ap_bits(user: bool, writable: bool) -> u64 {
+    match (user, writable) {
+        (false, false) => DESC_AP_RO_EL1,
+        (false, true) => DESC_AP_RW_EL1,
+        (true, false) => DESC_AP_RO_EL0,
+        (true, true) => DESC_AP_RW_EL0,
+    }
+}
 
 // ── Execute permissions ──────────────────────────────────────────────────────
 

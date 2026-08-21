@@ -79,6 +79,31 @@ pub unsafe fn split_l2_block(
     );
 }
 
+// ── Permission rewrite (pure mechanism) ─────────────────────────────────────
+
+/// Rewrite the permission bits of a leaf descriptor (L2 block or L3 page).
+///
+/// Preserves validity, type, output address, AF, shareability and ATTRIDX;
+/// replaces AP[2:1] (via `ap_bits`) and XN/PXN. Pure bit transformation —
+/// never reads or writes memory, never allocates (ADR-030 §4).
+///
+/// Note: `executable` grants EL0 execution (XN=0); PXN is always set for
+/// user-executable pages so EL1 can never fetch from them. Kernel mappings
+/// keep PXN clear only when `executable` is requested for EL1 — the runtime
+/// mmu layer never maps EL1-executable user pages, so a single XN/PXN pair
+/// covers both cases: `!executable → XN|PXN`, `executable → XN cleared,
+/// PXN set iff user`.
+pub fn leaf_with_permissions(desc: u64, user: bool, writable: bool, executable: bool) -> u64 {
+    let mut d = desc & !(DESC_AP_MASK | DESC_PXN | DESC_XN);
+    d |= ap_bits(user, writable);
+    if !executable {
+        d |= DESC_PXN | DESC_XN;
+    } else if user {
+        d |= DESC_PXN;
+    }
+    d
+}
+
 // ── Barriers ─────────────────────────────────────────────────────────────────
 
 pub fn barrier_write() {

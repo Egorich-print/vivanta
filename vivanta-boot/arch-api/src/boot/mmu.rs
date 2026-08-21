@@ -43,6 +43,16 @@ extern "Rust" {
     /// Panics on failure.
     pub fn mmu_self_test();
 
+    /// Verify the W^X permission encoding of a user address space (G3).
+    ///
+    /// Walks the page table rooted at `root_pa` and asserts that the leaf
+    /// descriptor of `code_va` is EL0 read-only + executable (AP=11, XN=0,
+    /// PXN=1) and the leaf of `stack_va` is EL0 read-write, non-executable
+    /// (AP=01, XN=1). Prints machine-checkable `[WX]` lines and panics on
+    /// any violation. Reads only physical table memory — safe before or
+    /// after MMU activation.
+    pub fn wx_verify_user_as(root_pa: u64, code_va: u64, stack_va: u64);
+
     /// Debug: dump page table entries for critical addresses.
     /// Must be called BEFORE mmu_activate.
     pub fn dump_critical_tables(root: u64);

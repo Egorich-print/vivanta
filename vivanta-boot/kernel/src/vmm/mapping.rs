@@ -89,6 +89,14 @@ impl MappingSet {
         }
     }
 
+    pub fn get_mut(&mut self, slot: usize) -> Option<&mut Mapping> {
+        if slot < self.count {
+            self.mappings[slot].as_mut()
+        } else {
+            None
+        }
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = &Mapping> {
         self.mappings[..self.count]
             .iter()

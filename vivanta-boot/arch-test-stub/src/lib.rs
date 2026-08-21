@@ -135,4 +135,17 @@ pub unsafe extern "Rust" fn mmu_unmap(
 }
 
 #[no_mangle]
+pub unsafe extern "Rust" fn mmu_protect(
+    _pt: RootPageTable,
+    _vaddr: u64,
+    _size: u64,
+    _flags: MappingFlags,
+    _alloc: &mut dyn PageTableAllocator,
+) {
+}
+
+#[no_mangle]
 pub unsafe extern "Rust" fn mmu_self_test() {}
+
+#[no_mangle]
+pub unsafe extern "Rust" fn wx_verify_user_as(_root_pa: u64, _code_va: u64, _stack_va: u64) {}

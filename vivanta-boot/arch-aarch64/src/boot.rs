@@ -136,6 +136,11 @@ pub unsafe extern "Rust" fn mmu_self_test() {
     crate::paging::self_test::run_smoke_test();
 }
 
+#[no_mangle]
+pub unsafe extern "Rust" fn wx_verify_user_as(root_pa: u64, code_va: u64, stack_va: u64) {
+    crate::paging::self_test::wx_verify_user_as(root_pa, code_va, stack_va);
+}
+
 // ---------------------------------------------------------------------------
 // irq
 // ---------------------------------------------------------------------------

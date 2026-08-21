@@ -1,7 +1,8 @@
 # ADR-019: User Page Permissions and EL0 Memory Model
 
 ## Status
-Proposed
+Proposed (amended 2026-08-21: AP encoding table corrected for user
+read-only pages; see §1a and docs/investigations/WX-user-code-ap-encoding.md)
 
 ## Date
 2026-07-17
@@ -45,11 +46,29 @@ descriptor bits:
 | `executable=false` | UXN = 1 (non-executable)   |
 | `privileged_executable=true` | PXN = 0 (EL1-executable) |
 | `privileged_executable=false`| PXN = 1 (EL1-non-executable) |
-| `user=true`        | AP[2:1] = 01 (EL0 RW)      |
-| `user=false`       | AP[2:1] = 00 (EL1 only)    |
+| `user=true, writable=true`   | AP[2:1] = 01 (EL0 RW) |
+| `user=true, writable=false`  | AP[2:1] = 11 (EL0 RO) — **amended 2026-08-21** |
+| `user=false, writable=true`  | AP[2:1] = 00 (EL1 RW) |
+| `user=false, writable=false` | AP[2:1] = 10 (EL1 RO) |
 
 When a RISCV64 or ARMv7 backend is added, the same `PageFlags` fields
 produce the corresponding page-table entries for those ISAs.
+
+### 1a. Amendment (2026-08-21): user read-only encoding and W^X
+
+The original table mapped every `user=true` page to AP=01 (EL0 RW) and
+listed `USER_READ_WRITE_EXEC` as the user-code flag. The M5.0 G3 W^X
+policy ("user code → RX; no writable+executable user mappings") superseded
+that policy, but the encoding could not express user read-only at all:
+`writable=false` was silently dropped for user pages, leaving user code
+pages EL0-writable (RWX in practice).
+
+The encoding is now routed through a single source of truth
+(`paging/descriptor.rs::ap_bits`), and `USER_READ_EXEC` is the user-code
+flag: AP=11 (EL0 read-only), UXN=0, PXN=1. Verified by boot-time
+descriptor readback (`wx_verify_user_as`) and by the G3 fault task's
+store-to-own-code-page negative test. Details:
+`docs/investigations/WX-user-code-ap-encoding.md`.
 
 ### 2. PageFlags model
 
@@ -70,7 +89,10 @@ Pre-defined constants:
 | `READ_WRITE` | true | false | false | true | kernel data, stacks |
 | `READ_WRITE_EXEC` | true | true | false | true | kernel code |
 | `USER_READ_WRITE` | true | false | true | false | user stack |
-| `USER_READ_WRITE_EXEC` | true | true | true | false | user code |
+| `USER_READ_EXEC` | false | true | true | false | user code (W^X, amended 2026-08-21) |
+
+`USER_READ_WRITE_EXEC` is rejected by the M5.0 G3 W^X policy: no
+writable+executable user mappings are permitted.
 
 Key invariants for user pages:
 

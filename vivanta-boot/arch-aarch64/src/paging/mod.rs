@@ -100,18 +100,14 @@ impl MappingFlags {
         MappingFlags::normal(Permissions::kernel_rwx())
     }
 
-    fn to_descriptor_bits(self, phys: u64, is_block: bool) -> u64 {
+    pub(crate) fn to_descriptor_bits(self, phys: u64, is_block: bool) -> u64 {
         let mut d = DESC_VALID | DESC_AF | DESC_SH_INNER | (self.mem_type.to_attr_index() << 2);
 
         if !is_block {
             d |= DESC_TABLE;
         }
 
-        if self.perms.user {
-            d |= 1 << 6;
-        } else if !self.perms.writable {
-            d |= 2 << 6;
-        }
+        d |= ap_bits(self.perms.user, self.perms.writable);
 
         if !self.perms.executable {
             d |= DESC_PXN | DESC_XN;

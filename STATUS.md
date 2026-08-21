@@ -1,6 +1,6 @@
 # Vivanta Status
 
-> Last updated: 2026-08-11
+> Last updated: 2026-08-21
 
 ## Current milestone
 
@@ -26,8 +26,12 @@ deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
 - Memory Resource Manager — ✅ reclamation proven (Drop→deallocate, churn delta=0)
 - Kernel heap — ✅ free-list allocator with reclamation (was bump-leak-all)
 - Scheduler — ✅ ThreadId-based current, Running invariant, timer preemption
-- VMM (AddressSpace) — ⚠️ `protect()` still `todo!` (needs arch-api mmu_protect);
-  no VA allocator (post-M5)
+- VMM (AddressSpace) — ✅ map/unmap/protect (protect added 2026-08-21 via
+  arch-api mmu_protect; whole-mapping granularity; VA allocator post-M5)
+- W^X (user pages) — ✅ enforced 2026-08-21 (was silently broken: user code
+  pages were EL0-writable; see
+  `vivanta-boot/docs/investigations/WX-user-code-ap-encoding.md`;
+  boot-time `[WX]` readback verification + EL0 store-to-code-page negative test)
 - Identity — ⚠️ nominal only (counter-based UUID; no crypto/Ed25519 — scope fence)
 - Process Model — ⚠️ lifecycle incomplete: `Task::exit()` never called,
   `running_count()` always 0, exit_code/zombie/reap are dead APIs (candidate M6)

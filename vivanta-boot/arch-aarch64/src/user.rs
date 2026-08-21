@@ -99,8 +99,16 @@ extern "C" {
     static user_code_end: u8;
 }
 
-// Faulting user code — placed in `.user.text.fault`. Deliberately stores to
-// address 0 (a kernel/unmapped VA) to trigger a synchronous EL0 data abort.
+// Faulting user code — placed in `.user.text.fault`. Two deliberate faults:
+//
+// 1. Store to its OWN code page (W^X negative test, G3): user code pages are
+//    mapped EL0 read-only, so this store must data-abort with
+//    FAR == the code page VA. If the W^X AP encoding ever regresses to
+//    AP=01 (EL0 writable), this store SUCCEEDS and execution falls through
+//    to fault 2 — the recorded FAR (code page vs 0) distinguishes pass from
+//    regression.
+// 2. Store to unmapped VA 0 -> Data Abort (EC=0b100100).
+//
 // Used by the G3 fault-containment test: the faulting task must be
 // terminated and other threads must continue.
 #[cfg(target_os = "none")]
@@ -108,10 +116,15 @@ core::arch::global_asm!(
     ".section .user.text.fault, \"ax\"",
     ".global fault_code_start",
     "fault_code_start:",
-    // Attempt to write to unmapped VA 0 -> Data Abort (EC=0b100100)
+    // 1. W^X negative test: write to own (read-only) code page.
+    "adr  x0, fault_code_start",
+    "str  wzr, [x0]",
+    // 2. If the store above were (incorrectly) allowed, fall through to a
+    //    write at unmapped VA 0 — still faults, but FAR=0 marks the W^X
+    //    regression.
     "mov  x0, #0",
     "str  wzr, [x0]",
-    // If the fault were (incorrectly) skipped, fall through to exit.
+    // If both faults were (incorrectly) skipped, exit non-zero.
     "mov  x8, #2",
     "mov  x0, #1",
     "svc  #0",

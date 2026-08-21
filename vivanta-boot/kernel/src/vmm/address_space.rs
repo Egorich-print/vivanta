@@ -87,17 +87,48 @@ impl AddressSpace {
             .find(|m| vaddr >= m.virt_range.base && vaddr < m.virt_range.end())
     }
 
-    /// Change permissions on an existing mapping.
+    /// Change permissions on an existing mapping (whole-mapping granularity).
     ///
-    /// TODO: Requires arch-api mmu_protect() for efficient permission change.
-    /// Currently deferred — unmap + remap with new flags as workaround.
+    /// The range must exactly match one existing mapping of this address
+    /// space; otherwise `VmmError::NotMapped` is returned and neither the
+    /// hardware nor the software shadow is touched. Partial-range protection
+    /// would desynchronise `MappingSet` from the hardware and requires
+    /// software mapping splitting — deferred until a VA allocator exists
+    /// (post-M5 backlog).
+    ///
+    /// Transactional ordering mirrors `map_pages`: validate first, then
+    /// program the MMU, then commit the software shadow. `mmu_protect`
+    /// panics on OOM during a block split (boot/runtime-fatal, same policy
+    /// as page-table allocation in `map_pages`), so no rollback path exists
+    /// after validation succeeds.
+    ///
+    /// Transient visibility: single-core, per-descriptor rewrites mean a
+    /// concurrent reader observes either the old or the new permission set,
+    /// never a torn mapping. That is inherent to permission transitions and
+    /// safe for both widening and narrowing.
     pub fn protect(
         &mut self,
-        _vaddr: u64,
-        _size: u64,
-        _new_flags: MappingFlags,
+        vaddr: u64,
+        size: u64,
+        new_flags: MappingFlags,
+        alloc: &mut dyn PageTableAllocator,
     ) -> Result<(), VmmError> {
-        todo!("protect() requires arch-api mmu_protect()")
+        let slot = (0..self.mappings.len())
+            .find(|&s| {
+                self.mappings
+                    .get(s)
+                    .is_some_and(|m| m.virt_range.base == vaddr && m.virt_range.size == size)
+            })
+            .ok_or(VmmError::NotMapped)?;
+        // SAFETY: `slot` proves [vaddr, vaddr+size) is an exact mapping in
+        // this address space, satisfying mmu_protect's contract.
+        unsafe {
+            vivanta_arch_api::mmu::mmu_protect(self.root, vaddr, size, new_flags, alloc);
+        }
+        if let Some(m) = self.mappings.get_mut(slot) {
+            m.permissions = new_flags;
+        }
+        Ok(())
     }
 }
 
