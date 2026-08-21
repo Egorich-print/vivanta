@@ -5,6 +5,12 @@
 //   - Single context_switch() replaces context_switch_coop/preempt.
 //   - ExceptionFrame is never copied between thread stacks.
 //   - ExecutionLevel determines SPSR at thread creation.
+//
+// INV-002 fix: the per-thread ThreadContext lives at the BOTTOM of the kernel
+// stack (stack_bottom). The stack grows down from stack_top, so the saved
+// context can never be clobbered by stack usage or by exception frames pushed
+// onto a shallow stack. The synthetic ExceptionFrame (used only by
+// eret_to_user_stub on first entry to EL0) stays at stack_top - FRAME_SIZE.
 // ---------------------------------------------------------------------------
 
 use crate::exceptions::ExceptionFrame;
@@ -19,17 +25,20 @@ const _: () = assert!(core::mem::align_of::<ExceptionFrame>() == 8);
 const _: () = assert!(core::mem::size_of::<ThreadContext>() == 104);
 const _: () = assert!(core::mem::align_of::<ThreadContext>() == 8);
 
-/// Combined block: ThreadContext followed by ExceptionFrame frame area.
-/// Layout matches per-stack layout so tc_loc() on either kind returns a
-/// valid ThreadContext address.
+#[repr(C)]
+struct ThreadContext {
+    x19_x30: [u64; 12], // x19 through x30
+    sp: u64,
+}
+
+/// Boot thread's context block (static, not on any stack).
+/// ArchContext points directly at `thread_ctx`.
 #[repr(C, align(16))]
 struct BootThreadBlock {
     thread_ctx: ThreadContext,
     frame: [u8; FRAME_SIZE],
 }
 
-/// Boot thread's context block.
-/// `tc_loc(&raw mut BOOT_BLOCK.frame as usize) == &raw mut BOOT_BLOCK.thread_ctx`
 static mut BOOT_BLOCK: BootThreadBlock = BootThreadBlock {
     thread_ctx: ThreadContext {
         x19_x30: [0; 12],
@@ -37,24 +46,6 @@ static mut BOOT_BLOCK: BootThreadBlock = BootThreadBlock {
     },
     frame: [0; FRAME_SIZE],
 };
-
-// ---------------------------------------------------------------------------
-// Per-thread context layout (on the vivanta_kernel stack):
-//   [Synthetic Initial Frame]   ← ArchContext points here (ExceptionFrame layout)
-//   [ThreadContext]             ← below, for save/restore
-// ---------------------------------------------------------------------------
-
-#[repr(C)]
-struct ThreadContext {
-    x19_x30: [u64; 12], // x19 through x30
-    sp: u64,
-}
-
-/// Compute pointer to ThreadContext below a synthetic frame.
-/// arch_arch_raw is the raw usize from ArchContext::as_raw().
-fn tc_loc(raw: usize) -> *mut ThreadContext {
-    (raw - core::mem::size_of::<ThreadContext>()) as *mut ThreadContext
-}
 
 extern "C" {
     fn context_switch_asm(current: *mut ThreadContext, next: *const ThreadContext);
@@ -73,7 +64,7 @@ pub fn idle_entry() -> ! {
 }
 
 // ---------------------------------------------------------------------------
-// context_init — create synthetic initial frame + ThreadContext
+// context_init — create ThreadContext (bottom) + synthetic frame (top)
 // ---------------------------------------------------------------------------
 
 // Reference to the EL1→EL0 trampoline defined in the user module.
@@ -84,6 +75,7 @@ extern "C" {
 #[no_mangle]
 pub unsafe extern "Rust" fn context_init(
     stack_top: usize,
+    stack_bottom: usize,
     user_stack_top: usize,
     entry: usize,
     level: ExecutionLevel,
@@ -113,21 +105,26 @@ pub unsafe extern "Rust" fn context_init(
         ExecutionLevel::User => user_stack_top as u64,
     };
 
-    let frame_loc = (stack_top - FRAME_SIZE) as *mut ExceptionFrame;
-    let x = [0u64; 31];
-    frame_loc.write(ExceptionFrame {
-        x,
-        sp: sp_el0,
-        elr: actual_entry as u64,
-        spsr,
-    });
-
-    let tc = tc_loc(frame_loc as usize);
+    // ThreadContext lives at the BOTTOM of the kernel stack region.
+    let tc = stack_bottom as *mut ThreadContext;
     core::ptr::write_bytes(tc as *mut u8, 0, core::mem::size_of::<ThreadContext>());
     (*tc).x19_x30[11] = entry_x30; // x30 = trampoline or stub
     (*tc).sp = stack_top as u64; // SP_EL1 = vivanta_kernel stack top
 
-    ArchContext::from_raw(frame_loc as usize)
+    // Synthetic initial frame: needed only for user threads (eret_to_user_stub
+    // reads it at [SP_EL1 - FRAME_SIZE, SP_EL1) on first entry to EL0).
+    if level == ExecutionLevel::User {
+        let frame_loc = (stack_top - FRAME_SIZE) as *mut ExceptionFrame;
+        let x = [0u64; 31];
+        frame_loc.write(ExceptionFrame {
+            x,
+            sp: sp_el0,
+            elr: actual_entry as u64,
+            spsr,
+        });
+    }
+
+    ArchContext::from_raw(tc as usize)
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +133,7 @@ pub unsafe extern "Rust" fn context_init(
 
 #[no_mangle]
 pub unsafe extern "Rust" fn context_capture_current() -> ArchContext {
-    ArchContext::from_raw(&raw mut BOOT_BLOCK.frame as *mut u8 as usize)
+    ArchContext::from_raw(&raw mut BOOT_BLOCK.thread_ctx as *mut ThreadContext as usize)
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +142,7 @@ pub unsafe extern "Rust" fn context_capture_current() -> ArchContext {
 
 #[no_mangle]
 pub unsafe extern "Rust" fn context_switch(old: *mut ArchContext, new: ArchContext) {
-    let old_raw = (*old).as_raw();
-    let new_raw = new.as_raw();
-    context_switch_asm(tc_loc(old_raw), tc_loc(new_raw))
+    let old_tc = (*old).as_raw() as *mut ThreadContext;
+    let new_tc = new.as_raw() as *const ThreadContext;
+    context_switch_asm(old_tc, new_tc)
 }

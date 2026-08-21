@@ -33,6 +33,7 @@ dependencies = [
 name = "vivanta-boot-common"
 version = "0.1.0"
 dependencies = [
+ "vivanta-arch-api",
  "vivanta-boot-info",
 ]
 

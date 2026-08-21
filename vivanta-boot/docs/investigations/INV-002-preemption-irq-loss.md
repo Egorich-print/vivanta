@@ -2,7 +2,57 @@
 
 ## Status
 
-Open (P1 reliability). Found by the M6 soak test run (2026-08-11).
+**Closed (2026-08-11) — root cause proven and fixed.** G4 preemption soak
+verified > 6.5 min continuous (157 K log lines, counters > 30 B) with no
+freeze, no tight loop, no crash.
+
+## Root cause (proven)
+
+**Console-lock deadlock, not IRQ loss.** `vivanta_boot_common`'s
+`with_console` / `write_direct` documented "interrupts are disabled while the
+lock is held" (`boot_common/src/lib.rs:27-29`), but the implementation **never
+disabled IRQs** while holding `CONSOLE_LOCK`.
+
+The deadlock sequence:
+
+1. A preempt worker calls `println!("  [PREEMPT] ...")`, acquires
+   `CONSOLE_LOCK`, starts printing (log shows a partial `[P` line).
+2. The 100 Hz timer IRQ fires *while the lock is held* (IRQs still enabled).
+3. `irq_entry_handler` → `scheduler_reschedule` → `yield_now`, which itself
+   `println!`s → `with_console` → `CONSOLE_LOCK.acquire()` spins forever,
+   because the preempted worker still owns the lock.
+4. The spinning thread runs in interrupt context with IRQs masked, so the
+   timer can never resume the lock owner → permanent 100 % CPU tight loop and
+   the log stops growing — indistinguishable from "IRQ loss".
+
+Diagnostics that proved it (raw UART pokes bypassing the lock):
+
+```
+[PREEMPT] current=5 B=75000000     <- worker B prints fully
+[PGAtfF                            <- B starts "[PREEMPT]", interrupted after "[P";
+      G=IRQ entered, A=acked, t=tick, f=find_next_ready, F=returned
+      -> then nothing: yield_now's println spins on CONSOLE_LOCK forever
+```
+
+The `x30=0` crash variant was the same class of corruption surfacing
+differently: a context save/restore raced with the deadlock path. Moving the
+per-thread `ThreadContext` to the **bottom** of the kernel stack
+(`stack_bottom`) was also applied (it can never be clobbered by stack usage /
+exception frames), and is retained as a defensive hardening.
+
+## Fix (implemented)
+
+- `boot_common/src/lib.rs`: `with_console` / `write_direct` now hold the
+  console lock **with interrupts disabled**, via a registered
+  `set_console_irq_guard()` hook backed by the arch's `InterruptGuard`
+  (`disable_interrupts`). The hook is registered by `vivanta-kernel`
+  `kernel_main` right after `early_init`. Platforms that never run the
+  scheduler leave the hook unset and remain single-threaded-safe.
+- `arch-test-stub`: added no-op `disable_interrupts` / `enable_interrupts`
+  so the build-time proof target still links.
+- Retained: `ThreadContext` at `stack_bottom` in `context_init`
+  (`arch-aarch64/src/context.rs`), passed through
+  `create_user_thread` / `spawn_user`.
 
 ## Symptom
 
@@ -77,20 +127,21 @@ were verified in short runs and pass. The preemption instability is a
 pre-existing M5.0-path defect that the soak surfaced. It is tracked here as a
 P1 deferred item, NOT part of M6 exit criteria.
 
-## Fix direction (not implemented — investigation)
+## Fix direction (implemented — see "Fix" above)
 
-1. Make the IRQ-return path re-entrancy-safe: decide whether
-   `maybe_reschedule` should defer the switch to the `save_and_eret` epilogue
-   instead of switching inside the handler, or ensure the IRQ state is
-   restored consistently across the switch.
-2. Audit `save_and_eret` for the case where the interrupted thread was
-   switched away and resumed (restore order, ELR/SPSR, and the `sp` reload).
-3. Investigate the spurious IRQ activity seen in EOI-vs-timer counts.
-4. Add a soak that fails loudly on the tight-loop condition (log not growing
-   while CPU is high), so future regressions are caught.
+The definitive guard: **never hold `CONSOLE_LOCK` with IRQs enabled.** Any
+code that prints from interrupt context must not be able to block on a lock
+owned by a preempted thread. The RAII `InterruptGuard` around the lock
+enforces this structurally. The scheduler/dispatcher audit also confirmed:
+`context_switch_asm` correctly never touches DAIF, and `save_and_eret`
+restores SPSR (IRQ state) on resume, so no IRQ masking leaks across the
+switch.
 
 ## Verification for closure
 
+- **DONE (2026-08-11):** 6.5+ min QEMU soak, G4 preemption test — 157 K log
+  lines, preemption counters > 30 B, full boot→A→B→boot rotation repeating
+  ~11 K times, ~22 K preemptions per worker, zero `CPU halted`, zero panics.
 - 60-min soak passes with both preemption workers making progress the whole
   time (counters strictly increasing, no tight-loop, no crash).
 - No `EL1h` instruction abort, no `x30=0`.

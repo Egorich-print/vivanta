@@ -16,7 +16,7 @@ use task::{TaskId, TaskState};
 use thread::{Priority, Thread, ThreadEntry, ThreadId, ThreadState};
 use vivanta_arch_api::pmm::FrameAllocator;
 
-const KERNEL_STACK_SIZE: usize = 16384;
+pub const KERNEL_STACK_SIZE: usize = 16384;
 
 static mut RUNQUEUE: Option<RunQueue> = None;
 static mut PROCESS_TABLE: Option<ProcessTable> = None;
@@ -149,6 +149,7 @@ pub fn register(thread: Thread) {
 
 pub fn create_user_thread(
     kernel_stack_top: usize,
+    kernel_stack_bottom: usize,
     user_stack_top: usize,
     entry: usize,
     address_space: AddressSpaceId,
@@ -157,6 +158,7 @@ pub fn create_user_thread(
     let ctx = unsafe {
         vivanta_arch_api::context::context_init(
             kernel_stack_top,
+            kernel_stack_bottom,
             user_stack_top,
             entry,
             vivanta_arch_api::context::ExecutionLevel::User,
@@ -193,9 +195,11 @@ pub fn create_kernel_thread(
         .expect("kernel stack contiguous alloc failed")
         .addr;
     let stack_top = (stack_base as usize) + KERNEL_STACK_SIZE;
+    let stack_bottom = stack_base as usize;
     let ctx = unsafe {
         vivanta_arch_api::context::context_init(
             stack_top,
+            stack_bottom,
             0, // user_stack_top — vivanta_kernel threads don't use EL0
             thread_trampoline as *const () as usize,
             vivanta_arch_api::context::ExecutionLevel::Kernel,
@@ -490,9 +494,11 @@ pub fn init_boot() {
 
         // Create idle thread
         let idle_id = rq().alloc_id();
-        let idle_top = (&mut IDLE_STACK[0] as *mut u8 as usize) + KERNEL_STACK_SIZE;
+        let idle_bottom = &mut IDLE_STACK[0] as *mut u8 as usize;
+        let idle_top = idle_bottom + KERNEL_STACK_SIZE;
         let idle_ctx = vivanta_arch_api::context::context_init(
             idle_top,
+            idle_bottom,
             0, // user_stack_top — idle thread never enters EL0
             0,
             vivanta_arch_api::context::ExecutionLevel::Kernel,

@@ -84,6 +84,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     println!();
     println!("CPU Init:");
     vivanta_arch_api::boot::cpu::early_init();
+    vivanta_boot_common::set_console_irq_guard(|| unsafe {
+        vivanta_arch_api::interrupts::disable_interrupts()
+    });
     println!("  Early init done.");
 
     // ------- Memory Map -----------------------------------------------------

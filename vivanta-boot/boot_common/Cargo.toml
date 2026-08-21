@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 vivanta-boot-info = { path = "../boot-info" }
+vivanta-arch-api = { path = "../arch-api" }

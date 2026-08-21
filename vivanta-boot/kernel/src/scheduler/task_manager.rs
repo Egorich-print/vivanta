@@ -38,10 +38,10 @@ impl TaskManager {
         parent: Option<TaskId>,
     ) -> Result<TaskId, &'static str> {
         let stack_base = alloc
-            .alloc_contiguous(16384 / 4096)
+            .alloc_contiguous(crate::scheduler::KERNEL_STACK_SIZE / 4096)
             .ok_or("kernel stack contiguous alloc failed")?
             .addr;
-        let kernel_stack_top = (stack_base as usize) + 16384;
+        let kernel_stack_top = (stack_base as usize) + crate::scheduler::KERNEL_STACK_SIZE;
 
         let user_stack = mrm
             .allocate(&AllocationRequirements::new(4096), 0)
@@ -49,6 +49,7 @@ impl TaskManager {
 
         let thread_id = scheduler::create_user_thread(
             kernel_stack_top,
+            stack_base as usize,
             user_stack_va,
             code_entry,
             address_space,

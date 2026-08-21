@@ -49,6 +49,10 @@ extern "Rust" {
     /// and execution level.
     ///
     /// `stack_top` — top of the vivanta_kernel stack (SP_EL1 value after restore).
+    /// `stack_bottom` — lowest address of the vivanta_kernel stack region. The
+    ///   per-thread ThreadContext is placed here, at the bottom, so the growing
+    ///   stack (from `stack_top` downward) and exception frames pushed on it can
+    ///   never overwrite the saved context (INV-002 fix).
     /// `user_stack_top` — top of the user stack (SP_EL0 value), 0 for vivanta_kernel threads.
     /// `entry` — entry point address (thread_trampoline for vivanta_kernel, user code for user).
     /// `level` — ExecutionLevel::Kernel or ExecutionLevel::User.
@@ -56,6 +60,7 @@ extern "Rust" {
     /// Returns an opaque ArchContext token stored in the Thread struct.
     pub fn context_init(
         stack_top: usize,
+        stack_bottom: usize,
         user_stack_top: usize,
         entry: usize,
         level: ExecutionLevel,

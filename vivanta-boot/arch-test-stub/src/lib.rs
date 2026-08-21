@@ -52,6 +52,16 @@ pub unsafe extern "Rust" fn irq_init(_dtb: usize) {}
 #[no_mangle]
 pub unsafe extern "Rust" fn irq_cpu_enable() {}
 
+// interrupts (needed by boot_common console lock G4)
+use vivanta_arch_api::interrupts::InterruptGuard;
+#[no_mangle]
+pub extern "Rust" fn disable_interrupts() -> InterruptGuard {
+    fn restore(_daif: usize) {}
+    InterruptGuard::new(0, restore)
+}
+#[no_mangle]
+pub extern "Rust" fn enable_interrupts() {}
+
 // timer
 #[no_mangle]
 pub unsafe extern "Rust" fn timer_init() {}
@@ -61,6 +71,7 @@ use vivanta_arch_api::context::{ArchContext, ExecutionLevel};
 #[no_mangle]
 pub unsafe extern "Rust" fn context_init(
     _stack_top: usize,
+    _stack_bottom: usize,
     _user_stack_top: usize,
     _entry: usize,
     _level: ExecutionLevel,

@@ -55,6 +55,32 @@ impl ConsoleLock {
 
 static CONSOLE_LOCK: ConsoleLock = ConsoleLock::new();
 
+/// IRQ-disable hook for the console lock (G4).
+///
+/// The console lock serialises output across threads and IRQ contexts. To
+/// prevent a timer IRQ handler (which may itself print) from self-deadlocking
+/// on the lock, the lock must be held with interrupts disabled. The arch layer
+/// registers its `disable_interrupts` here; platforms that never run the
+/// scheduler leave it unset (single-threaded bring-up still works).
+static CONSOLE_IRQ_GUARD: core::sync::atomic::AtomicPtr<()> =
+    core::sync::atomic::AtomicPtr::new(core::ptr::null_mut());
+
+/// Register the arch's `disable_interrupts` as the console IRQ guard factory.
+pub fn set_console_irq_guard(f: fn() -> vivanta_arch_api::interrupts::InterruptGuard) {
+    CONSOLE_IRQ_GUARD.store(f as *mut (), core::sync::atomic::Ordering::Relaxed);
+}
+
+fn console_guard() -> Option<vivanta_arch_api::interrupts::InterruptGuard> {
+    let p = CONSOLE_IRQ_GUARD.load(core::sync::atomic::Ordering::Relaxed);
+    if p.is_null() {
+        None
+    } else {
+        Some(unsafe {
+            core::mem::transmute::<*mut (), fn() -> vivanta_arch_api::interrupts::InterruptGuard>(p)
+        }())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // EarlyPlatformInfo — platform-provided constants for early boot debug output.
 // Must be set by adapter_main before console initialization.
@@ -170,6 +196,7 @@ pub fn set_console(c: &'static dyn Console) {
 }
 
 pub fn write_direct(s: &str) {
+    let _guard = console_guard();
     CONSOLE_LOCK.acquire();
     unsafe {
         if let Some(c) = (*GLOBAL_CONSOLE.inner.get()).as_ref() {
@@ -183,6 +210,7 @@ pub fn with_console<F, R>(f: F) -> R
 where
     F: FnOnce(&dyn Console) -> R,
 {
+    let _guard = console_guard();
     CONSOLE_LOCK.acquire();
     let p = GLOBAL_CONSOLE.inner.get();
     let opt = unsafe { (*p).as_ref() };
