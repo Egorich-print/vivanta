@@ -32,7 +32,9 @@ SECTIONS
 
     . = ALIGN(16);
     __stack_bottom = .;
-    . += 32768;
+    /* 64 KiB: kernel_main locals + large AddressSpace temporaries
+     * (VaAllocator grew the struct; M6 precedent: 16->32 KiB). */
+    . += 65536;
     __stack_top = .;
 
     /DISCARD/ : {

@@ -333,6 +333,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     vivanta_arch_api::boot::mmu::mmu_map_ram(rpt, r.start, r.start, r.size);
                 }
             }
+            core::ptr::write_volatile(uart, b'R' as u32);
             for mmio in mmio_regions {
                 vivanta_arch_api::boot::mmu::mmu_map_range(
                     rpt,
@@ -347,6 +348,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             }
             // Map user code + stack when provided (demo, fault task and
             // Phase-10 protection-fault scenarios all use this path).
+            core::ptr::write_volatile(uart, b'M' as u32);
             if let Some((code_src, code_len, code_va, stack_va)) = user_pages {
                 vivanta_arch_api::boot::mmu::mmu_map_user_pages(
                     rpt, code_va, code_src, code_len, stack_va,
@@ -662,6 +664,224 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 (&raw const unmapped_code_end as usize) - (&raw const unmapped_code_start as usize);
             run_fault_scenario("unmapped", src, len, 0b100100, 0x06, 0x7000_0000);
         }
+
+        // ------------------------------------------------------------------
+        // M5.1/M5.2 VM lifecycle test: VA allocator + range mapping +
+        // partial protect + table reclamation + alias safety, exercised
+        // against the live MMU in a dedicated address space.
+        //
+        // The test address space is ACTIVATED for the duration; IRQs are
+        // masked so no scheduler switch can observe the non-kernel TTBR0
+        // (the scheduler skips re-activation when next_as == current_as).
+        // ------------------------------------------------------------------
+        println!("VM lifecycle test:");
+        let vm_root = build_root("VmTestAS", 0, 0, None);
+        let vm_as = vmm::register(vm_root, vmm::AddressSpaceFlags::User);
+        {
+            let mrm = system_state.memory_manager_mut();
+            let mut as_alloc = memory::AsPageTableAllocator::new(
+                mrm as *mut _,
+                &raw mut pmm_backend as *mut dyn memory::MemoryBackend,
+                vm_as,
+            );
+            let kas_root = vmm::lookup_root(crate::vmm::KERNEL_ADDRESS_SPACE_ID);
+            // ---- activate test AS, IRQs off -----------------------------
+            let _irq = vivanta_arch_api::interrupts::disable_interrupts();
+            vivanta_arch_api::mmu::activate_address_space(vm_root);
+
+            // 1. allocate + map 3 pages from the VA allocator.
+            let frame = pmm.alloc_frame().expect("vm-test frame");
+            let va0 = vmm::address_space_mut_by(vm_as)
+                .map_new_range(
+                    frame.addr,
+                    3 * 4096,
+                    vivanta_arch_api::mmu::MappingFlags::read_write(),
+                    777,
+                    4096,
+                    &mut as_alloc,
+                )
+                .expect("map_new_range");
+            assert_eq!(va0 % 4096, 0);
+            assert!(va0 >= vmm::USER_VA_BASE && va0 < vmm::USER_VA_END);
+
+            // Write via the new VAs — proves real translation. Frames from
+            // the PMM are NOT zeroed, so values are written before any read.
+            core::ptr::write_volatile(va0 as *mut u64, 0x1111);
+            core::ptr::write_volatile((va0 + 4096) as *mut u64, 0x2222);
+            core::ptr::write_volatile((va0 + 8192) as *mut u64, 0x3333);
+            assert_eq!(core::ptr::read_volatile(va0 as *const u64), 0x1111);
+
+            // 2. partial-range protect: middle page only -> shadow splits.
+            vmm::address_space_mut_by(vm_as)
+                .protect(
+                    va0 + 4096,
+                    4096,
+                    vivanta_arch_api::mmu::MappingFlags::from_bits(0),
+                    &mut as_alloc,
+                )
+                .expect("protect middle page");
+            assert_eq!(
+                core::ptr::read_volatile((va0 + 4096) as *const u64),
+                0x2222,
+                "RO page must stay readable with its old content"
+            );
+            core::ptr::write_volatile((va0 + 8192) as *mut u64, 0x3334);
+            {
+                let aspace = vmm::address_space_mut_by(vm_as);
+                let head = aspace.query(va0).expect("head piece");
+                let mid = aspace.query(va0 + 4096).expect("covered piece");
+                let tail = aspace.query(va0 + 8192).expect("tail piece");
+                assert_ne!(head.virt_range.base, mid.virt_range.base);
+                assert_ne!(mid.virt_range.base, tail.virt_range.base);
+                assert!(head.permissions.is_read_write());
+                assert!(!mid.permissions.is_read_write(), "covered piece not RO");
+                assert!(tail.permissions.is_read_write());
+            }
+
+            // 3. restore RW (TLBI proof: stale RO entry would fault).
+            vmm::address_space_mut_by(vm_as)
+                .protect(
+                    va0 + 4096,
+                    4096,
+                    vivanta_arch_api::mmu::MappingFlags::read_write(),
+                    &mut as_alloc,
+                )
+                .expect("restore RW");
+            core::ptr::write_volatile((va0 + 4096) as *mut u64, 0x2222);
+            assert_eq!(core::ptr::read_volatile((va0 + 4096) as *const u64), 0x2222);
+
+            // 4. alias regression: same PA at two VAs; unmapping one must
+            //    not affect the other nor free the physical frame.
+            let va_alias = vmm::address_space_mut_by(vm_as)
+                .map_new_range(
+                    frame.addr,
+                    4096,
+                    vivanta_arch_api::mmu::MappingFlags::read_write(),
+                    778,
+                    4096,
+                    &mut as_alloc,
+                )
+                .expect("alias map");
+            core::ptr::write_volatile(va_alias as *mut u64, 0xABCD);
+            assert_eq!(
+                core::ptr::read_volatile(va0 as *const u64),
+                0xABCD,
+                "alias does not share translations"
+            );
+            vmm::address_space_mut_by(vm_as)
+                .unmap_range(va_alias, 4096, &mut as_alloc)
+                .unwrap();
+            assert_eq!(
+                core::ptr::read_volatile(va0 as *const u64),
+                0xABCD,
+                "unmap of alias broke original mapping"
+            );
+
+            // 5. unmap everything -> runtime-created tables become empty
+            //    and are reclaimed. Only the L3 is registry-tracked here:
+            //    the containing L2 was created at boot (MMIO identity) and
+            //    belongs to the intentional-leak model.
+            let free_before_unmap = pmm.free_count();
+            let tracked_pre = vmm::tables::count_for_as(vm_as);
+            vmm::address_space_mut_by(vm_as)
+                .unmap_range(va0, 3 * 4096, &mut as_alloc)
+                .unwrap();
+            let reclaimed_now = tracked_pre - vmm::tables::count_for_as(vm_as);
+            let free_delta = pmm.free_count() - free_before_unmap;
+            println!(
+                "  [VM] unmap reclaimed {} table frames (PMM +{})",
+                reclaimed_now, free_delta
+            );
+            assert!(reclaimed_now >= 1, "expected at least the L3 reclaimed");
+            assert_eq!(free_delta, reclaimed_now, "reclaimed frames not in PMM");
+
+            // 6. block-split case: map INTO an identity block region, then
+            //    unmap. The L3 keeps 511 split-inherited entries -> must NOT
+            //    be reclaimed ("no leaf mappings" != "unreachable").
+            let split_va = frame.addr; // identity VA inside a 2 MiB block
+            {
+                let aspace = vmm::address_space_mut_by(vm_as);
+                aspace
+                    .map_pages(
+                        split_va,
+                        split_va,
+                        4096,
+                        vivanta_arch_api::mmu::MappingFlags::read_write(),
+                        &mut as_alloc,
+                        779,
+                    )
+                    .expect("block-split map");
+                // Descriptor audit of the split-inherited page: QEMU does
+                // not enforce AF, so assert the attribute bits directly.
+                let desc = vivanta_arch_api::mmu::mmu_leaf_descriptor(
+                    vmm::lookup_root(vm_as).0 as u64,
+                    split_va,
+                );
+                assert!(desc & 1 == 1, "split leaf invalid");
+                assert!(
+                    desc & 0x400 != 0,
+                    "split leaf lost AF (access flag): desc={desc:#x}"
+                );
+                // Neighbor page is purely split-inherited (its leaf comes
+                // from split_l2_block, not from the mapping write).
+                let nb = vivanta_arch_api::mmu::mmu_leaf_descriptor(
+                    vmm::lookup_root(vm_as).0 as u64,
+                    split_va + 0x1000,
+                );
+                assert!(nb & 1 == 1, "split neighbor invalid");
+                assert!(
+                    nb & 0x400 != 0,
+                    "split-inherited neighbor lost AF: desc={nb:#x}"
+                );
+                let tables_mid = vmm::tables::total();
+                aspace
+                    .unmap_pages(split_va, 4096, &mut as_alloc)
+                    .expect("block-split unmap");
+                assert_eq!(
+                    vmm::tables::total(),
+                    tables_mid,
+                    "split-inherited table was wrongly reclaimed"
+                );
+            }
+
+            // 7. remap after full unmap — allocator handed the range back.
+            //    Structural invariant: the remap MUST install fresh tables
+            //    through the ownership registry. If a previous reclamation
+            //    skipped the parent unlink, the walk would silently reuse
+            //    the freed table and no registry entry would appear.
+            {
+                let aspace = vmm::address_space_mut_by(vm_as);
+                let tables_pre_remap = vmm::tables::count_for_as(vm_as);
+                let va_re = aspace
+                    .map_new_range(
+                        frame.addr,
+                        4096,
+                        vivanta_arch_api::mmu::MappingFlags::read_write(),
+                        780,
+                        4096,
+                        &mut as_alloc,
+                    )
+                    .expect("remap after unmap");
+                // Registry must show a freshly installed table while the
+                // mapping is live; a skipped parent unlink would have made
+                // the walk silently reuse the freed frame instead.
+                assert!(
+                    vmm::tables::count_for_as(vm_as) > tables_pre_remap,
+                    "remap reused a stale (unlinked-or-freed) table: registry entry missing"
+                );
+                core::ptr::write_volatile(va_re as *mut u64, 0x5555);
+                assert_eq!(core::ptr::read_volatile(va_re as *const u64), 0x5555);
+                aspace.unmap_range(va_re, 4096, &mut as_alloc).unwrap();
+            }
+
+            pmm.free_frame(frame);
+
+            // ---- back to kernel AS, IRQs back on ------------------------
+            vivanta_arch_api::mmu::activate_address_space(kas_root);
+        }
+        // 8. teardown: unregister reclaims any remaining tracked tables.
+        vmm::unregister(vm_as).expect("unregister vm test AS");
+        println!("  [VM] lifecycle PASS");
 
         // ------------------------------------------------------------------
         // M6 process-lifecycle demo: the demo user task (tid) already ran and

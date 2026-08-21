@@ -155,6 +155,12 @@ pub unsafe extern "Rust" fn wx_verify_user_as(root_pa: u64, code_va: u64, stack_
     crate::paging::self_test::wx_verify_user_as(root_pa, code_va, stack_va);
 }
 
+#[unsafe(no_mangle)]
+pub extern "Rust" fn dump_walk(root: u64, va: u64, label: &str) {
+    // SAFETY: pure descriptor reads through the identity mapping.
+    unsafe { crate::mmu::dump_walk(root, va, label) };
+}
+
 // ---------------------------------------------------------------------------
 // irq
 // ---------------------------------------------------------------------------
@@ -273,13 +279,29 @@ pub unsafe extern "Rust" fn mmu_map_user_pages(
             addr += 64;
         }
         core::arch::asm!("dsb sy");
+        {
+            let uart = 0x0900_0000 as *mut u32;
+            core::ptr::write_volatile(uart, b'c' as u32);
+        }
         builder.map(code_va, code_pa, 4096, PageFlags::USER_READ_EXEC);
+        {
+            let uart = 0x0900_0000 as *mut u32;
+            core::ptr::write_volatile(uart, b'1' as u32);
+        }
         // Allocate and map user stack page
         let stack_pa = builder
             .alloc_frame()
             .expect("mmu_map_user_pages: no frame for stack")
             .addr;
+        {
+            let uart = 0x0900_0000 as *mut u32;
+            core::ptr::write_volatile(uart, b'2' as u32);
+        }
         builder.map(stack_va, stack_pa, 4096, PageFlags::USER_READ_WRITE);
+        {
+            let uart = 0x0900_0000 as *mut u32;
+            core::ptr::write_volatile(uart, b'3' as u32);
+        }
     }
 }
 

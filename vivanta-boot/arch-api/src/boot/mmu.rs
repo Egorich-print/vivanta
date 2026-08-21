@@ -56,4 +56,7 @@ unsafe extern "Rust" {
     /// Debug: dump page table entries for critical addresses.
     /// Must be called BEFORE mmu_activate.
     pub fn dump_critical_tables(root: u64);
+
+    /// Debug: walk `root` for `va` and print the descriptor chain.
+    pub unsafe fn dump_walk(root: u64, va: u64, label: &str);
 }

@@ -103,7 +103,19 @@ impl MappingSet {
             .filter_map(|m| m.as_ref())
     }
 
+    /// Iterate live mappings together with their slot indices.
+    pub fn iter_with_slots(&self) -> impl Iterator<Item = (usize, &Mapping)> {
+        self.mappings[..self.count]
+            .iter()
+            .enumerate()
+            .filter_map(|(i, m)| m.as_ref().map(|m| (i, m)))
+    }
+
     pub fn len(&self) -> usize {
         self.count
+    }
+
+    pub const fn capacity() -> usize {
+        MAX_MAPPINGS
     }
 }
