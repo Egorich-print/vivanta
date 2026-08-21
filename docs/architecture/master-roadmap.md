@@ -383,6 +383,23 @@ The first genuine isolated EL0 process. Not just a jump — a runtime environmen
 
 *Every roadmap modification must update this section.*
 
+### 2026-08-21 (mission 2)
+-   **Toolchain:** whole workspace migrated to Rust 1.98.0 stable +
+    edition 2024 (`rust-toolchain.toml` pin, resolver 3). unsafe-extern /
+    unsafe(no_mangle) / static-mut-ref rework across all members.
+-   **Protection audit (post-M5):** full permission matrix asserted on all
+    three encoders; W^X rejection assert at every encoder; kernel-AS
+    RW->RO->RW protect + TLBI transition test; three hardware-visible EL0
+    fault scenarios (exec-NX, kernel-read, unmapped) with ESR/FAR asserts;
+    five-mutation battery run.
+-   **FIXED (critical):** `MrmPageTableAllocator` freed page-table frames
+    while the MMU walked them (MemoryObject dropped -> PMM deallocate ->
+    frame reused as data). Latent since M5 runtime mapper; frames now leak
+    deliberately like boot tables until refcounted table teardown exists.
+-   Known limitation: a removed TLBI after permission *widening* is not
+    observable under QEMU (re-walk on permission miss); narrowing-side
+    staleness is bounded by tlbi_all_sync on every address-space switch.
+
 ### 2026-08-21
 -   **W^X enforced for AArch64 user pages** (WX-001): user read-only pages
     previously encoded AP=01 (EL0 *writable*), making user code RWX in

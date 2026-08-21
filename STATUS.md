@@ -1,6 +1,13 @@
 # Vivanta Status
 
-> Last updated: 2026-08-21
+> Last updated: 2026-08-21 (mission 2)
+
+## Toolchain
+
+**Rust 1.98.0 stable, edition 2024** for the whole workspace, pinned via
+`vivanta-boot/rust-toolchain.toml` (includes the `aarch64-unknown-none`
+target). No nightly features; host tests, clippy and the freestanding
+kernel build share one compiler.
 
 ## Current milestone
 

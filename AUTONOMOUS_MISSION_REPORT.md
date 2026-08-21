@@ -1,205 +1,194 @@
-# AUTONOMOUS MISSION REPORT — Vivanta Long-Run Engineering Session
+# AUTONOMOUS MISSION REPORT — Rust 1.98 / Edition 2024 Migration + Post-M5 Protection Audit
 
-**Date:** 2026-08-21
+**Date:** 2026-08-21 (mission 2)
 **Repository:** https://github.com/Egorich-print/vivanta (`main`)
 **Workspace root:** `/Users/egorich/ai-workstation/Projects/Vivanta`
 
+Classification tags: `FIXED` / `VERIFIED` / `KNOWN LIMITATION` / `BACKLOG` / `NOT TESTED`.
+
 ---
 
-## 1. Executive Summary
+## 1. Baseline
 
-The session found and fixed a **proven security/correctness defect in the
-kernel's page-permission model**: all three AArch64 descriptor encoders mapped
-every user page as EL0-*writable* (AP=01) regardless of the requested
-writability, so user code pages declared "read-only + executable" were in fact
-**RWX from EL0** — directly violating the ratified M5.0 G3 acceptance criteria
-("user code = RX; no RWX") that had been declared PASS. The defect was fixed at
-its root (single-source-of-truth AP encoder), the missing `mmu_protect`
-mechanism was implemented end-to-end (arch-api contract → AArch64 policy →
-paging mechanism → VMM wiring), the `todo!()` landmine in
-`AddressSpace::protect()` was removed, and three independent verification
-layers were added (boot-time descriptor readback, encoder regression matrix,
-EL0 behavioral negative test). A pre-existing but uncommitted INV-002 fix was
-re-verified and committed first to establish a clean baseline.
+- Start: `3109aad` (mission-1 report), tree clean except pre-existing
+  untracked research docs and one pre-existing modification to
+  `docs/plan-next-phase-2026-08-01.md` (left untouched, not committed).
+- Toolchain at start: rustc 1.94.0; all 23 workspace members edition 2021;
+  no `rust-toolchain.toml`; no CI toolchain pins found.
+- Baseline on 1.94: build/test/fmt green; QEMU W^X ×2 PASS, M6 OK, G4 = 1.
+- Baseline re-captured on 1.98.0 before migration: check ✅, tests 6/6 ✅,
+  clippy 45 warning-lines (pre-existing style), fmt ✅, QEMU ✅.
 
-## 2. Selected Task
+## 2. Rust 1.98.0 migration — VERIFIED
 
-**W^X enforcement for AArch64 user pages + mmu_protect/VMM protect mechanism.**
+- `rustup update stable` → **rustc 1.98.0 (88d9e12ae 2026-08-18)**,
+  cargo 1.98.0. Confirmed via `rustc --version` / `cargo --version`.
+- `vivanta-boot/rust-toolchain.toml` created: `channel = "1.98.0"` +
+  `targets = ["aarch64-unknown-none"]` → reproducible single toolchain for
+  host tests, clippy and the freestanding kernel build. No nightly/beta
+  pins existed; none needed.
+- README quick-start updated (toolchain auto-installs via the pin).
 
-Why this task over the alternatives (SYS_READ stub, VA allocator, signals):
+## 3. Edition 2024 migration — VERIFIED
 
-1. **Proven doc/code divergence.** STATUS.md claimed "User memory boundary ✅ /
-   W^X" while the encoding could not express user read-only at all. This is
-   exactly the class of latent defect the project's own gate process exists to
-   prevent — and it sat at the heart of the memory-permission model.
-2. **Kernel landmine.** `AddressSpace::protect()` was `todo!()`: any caller
-   would panic the kernel.
-3. **Architectural leverage.** Permission rewriting is a prerequisite for COW,
-   mprotect-style syscalls and hardened W^X; implementing it per ADR-030's
-   mechanism/policy split strengthens the whole VMM stack.
-4. **Fully validatable here.** QEMU boot evidence is achievable; no physical
-   hardware required.
+- All 23 workspace members → `edition = "2024"`; workspace `resolver = "3"`.
+- `cargo fix --edition --broken-code` + manual review for the rest:
+  - `extern` → `unsafe extern` (all `"Rust"` arch-api boundary blocks,
+    `"C"` blocks in arch/targets).
+  - `#[no_mangle]` → `#[unsafe(no_mangle)]` (~35 sites).
+  - `static_mut_refs` hard errors fixed with `&raw mut`/`&raw const`
+    (mmu-test page tables, kernel boot symbols).
+  - unsafe-fn bodies wrapped in explicit `unsafe {}` blocks
+    (`kernel_main`, target `adapter_main`/`boot_entry`, rk3568 helpers);
+    redundant inner blocks removed afterwards.
+  - `disable_interrupts` is safe-ABI (unsafe contained in its impl);
+    stale `unsafe {}` at call sites removed.
+  - Frozen `kernel-memory-frozen` crate left untouched (not a member).
+- No blanket `allow(...)` suppressions were added.
 
-## 3. Initial State
+## 4. Compiler / lint audit (Rust 1.98) — VERIFIED
 
-- Baseline commit `f2af711` (docs: RPi3B+ UART bring-up).
-- M5.0 PASS/CLOSED, M6 PASS/CLOSED per docs; INV-002 marked "Closed" in its
-  investigation doc — **but the actual fix was sitting uncommitted in the
-  working tree** (12 modified files). Last commits were docs-only.
-- Working tree also contained pre-existing untracked research docs
-  (ADR-031…039, distributed/, current-architecture.md) and one uncommitted
-  doc modification (`plan-next-phase-2026-08-01.md`, Pixel target decision).
-- Validation baseline: workspace build ✅, host tests 6/6 ✅, clippy warnings
-  pre-existing (~197, mostly `static_mut_refs` style), QEMU boot + M6 demo +
-  G4 preemption ✅.
+- `invalid_runtime_symbol_definitions` (deny) and
+  `suspicious_runtime_symbol_definitions` (warn): explicitly enabled via
+  RUSTFLAGS on both host and `aarch64-unknown-none` — **zero diagnostics**.
+- Runtime-symbol inventory: the kernel binary's `memcpy/memset/memcmp` come
+  from `compiler_builtins` (local `t` symbols, nm-verified); Vivanta defines
+  none itself. Kernel-side glue = `#[panic_handler]` per target binary +
+  `#[global_allocator]` in vivanta-kernel; `panic = "abort"` in dev profile
+  (no unwinding runtime needed). No global lint suppressions.
 
-## 4. Implementation
+## 5. Unsafe semantic audit — FIXED / VERIFIED
 
-| Layer | Change |
-|-------|--------|
-| `arch-aarch64/src/paging/descriptor.rs` | `DESC_AP_MASK`; `ap_bits(user, writable)` const fn — single source of truth (EL1 RW=00, EL1 RO=10, EL0 RW=01, EL0 RO=11) |
-| `arch-aarch64/src/paging/mod.rs` | `MappingFlags::to_descriptor_bits` routes through `ap_bits` (was lossy if/else) |
-| `arch-aarch64/src/mmu.rs` | `block_or_page_desc` + `flags_to_desc_bits` route through `ap_bits`; new `mmu_protect` runtime entry point (walk → split L2 blocks when needed → rewrite leaf permission bits → TLBI range) |
-| `arch-aarch64/src/paging/walker.rs` | `leaf_with_permissions()` pure mechanism helper: rewrites AP/XN/PXN preserving PA/type/AF/SH/ATTRIDX |
-| `arch-api/src/mmu.rs` | `mmu_protect` contract with safety docs |
-| `arch-api/src/boot/mmu.rs` | `wx_verify_user_as` contract |
-| `arch-test-stub/src/lib.rs` | no-op `mmu_protect`, `wx_verify_user_as` |
-| `kernel/src/vmm/address_space.rs` | `AddressSpace::protect()` implemented: exact-match mapping validation → hardware rewrite → software shadow commit; returns `NotMapped` otherwise |
-| `kernel/src/vmm/mapping.rs` | `MappingSet::get_mut` |
-| `kernel/src/lib.rs` | `[WX]` verification of both user address spaces during boot |
-| `arch-aarch64/src/paging/self_test.rs` | `test_wx_encoding` regression matrix (all three encoders + `ap_bits` truth table + rewrite preservation); `wx_verify_user_as` implementation |
-| `arch-aarch64/src/user.rs` | G3 fault task now stores to its **own code page** first (W^X negative test); store-to-VA-0 kept as fallback marker |
+- All address-of-extern-static patterns converted from
+  `&sym as *const u8` to `&raw const sym` (17 sites: kernel boot symbols,
+  user/fault code bounds, exception vectors, EL0 trampoline, armv7a BSS) —
+  no reference materialization, provenance-clean. `FIXED` (hygiene).
+- Boot/MMU/PMM/VMM/scheduler/GIC/timer/usercopy diffs reviewed line-by-line:
+  cargo-fix changes were mechanical (wrapping), semantics preserved;
+  QEMU behaviour identical. `VERIFIED`.
 
-Docs: new investigation `vivanta-boot/docs/investigations/WX-user-code-ap-encoding.md`;
-ADR-019 amended (user-RO encoding row, `USER_READ_EXEC` as user-code flag,
-W^X amendment section); STATUS.md and master-roadmap changelog synced.
+## 6. Memory protection audit (Phases 5–12) — VERIFIED
 
-## 5. Architecture Fit
+- **Permission matrix (Phase 6):** full (writable, executable, privilege)
+  matrix now asserted for **all three** AArch64 encoders in the boot MMU
+  smoke test; `ap_bits()` remains the single policy source; `user_memory`
+  AP decoding documented as a reader tied to `ap_bits`; `early_mmu` and
+  `split_l2_block` write no independent permission policy.
+- **W^X rejection:** every encoder now asserts `!(user && writable &&
+  executable)` at the choke point.
+- **`AddressSpace::protect()` (Phase 7):** audited for alignment (exact-match
+  implies page granularity), overflow (no arithmetic on unvalidated ranges),
+  non-present mappings (`NotMapped` before any mutation), repeated/idempotent
+  protects, block-split behaviour, OOM policy (panic, documented), shadow
+  ordering (hardware first, shadow commit after).
+- **TLBI (Phase 8):** kernel-AS transition test RW→RO→RW with a forced full
+  TLB eviction between transitions; the post-restore write is the
+  discriminating assertion. `VERIFIED` in QEMU.
+- **Aliasing (Phase 9):** no VA aliasing of one physical page exists in the
+  current kernel (MemoryObject map/unmap is 1:1, user ASes map distinct
+  frames); W^X bypass via a second mapping is structurally excluded today.
+  Aliasing policy documentation + enforcement = `BACKLOG` (with VA allocator).
+- **Fault paths (Phase 10):** three new hardware-visible EL0 scenarios with
+  (EC, DFSC, FAR) asserted against the recorded exception:
+  | scenario | expected | observed |
+  |---|---|---|
+  | exec-nx (branch to XN stack) | instr abort, perm L3, FAR=stack | EC=32, DFSC=0xF, FAR=0x5D010000 ✅ |
+  | kread (load from AP=00 kernel) | data abort, perm L2, FAR=0x40200000 | EC=36, DFSC=0xE, FAR=0x40200000 ✅ |
+  | unmapped (no descriptor) | data abort, transl L2, FAR=0x70000000 | EC=36, DFSC=0x6, FAR=0x70000000 ✅ |
+  (plus the existing S1: EL0 write to RX code page → EC=36, DFSC=0xF,
+  FAR=0x5F000000.) Empirical DFSC correction: translation faults are
+  0x05/06/07 per level, permission 0x0D/0E/0F — my initial 0x16 guess was
+  wrong and was corrected against observed hardware behaviour.
 
-- Follows ADR-030's mechanism/policy split exactly: bit-level descriptor
-  transformation lives in `paging/` (pure, allocation-free), allocation-aware
-  orchestration in `mmu.rs`, kernel-side bookkeeping in `vmm/`.
-- No architectural decision was overturned. ADR-019 was *amended* (it was
-  status "Proposed" and its AP table predated the M5.0 W^X policy that
-  superseded it — the code had followed the stale table).
-- Transactional ordering mirrors `map_pages`: validate → program MMU → commit
-  shadow; OOM during block split panics (same boot/runtime-fatal policy as
-  existing page-table allocation — verified `MrmPageTableAllocator` panics).
+## 7. Bugs discovered
 
-## 6. Invariants
+1. **CRITICAL, `FIXED`: page-table frames freed while in use.**
+   `MrmPageTableAllocator::alloc_page_table_frame` dropped the freshly
+   allocated `MemoryObject`; `Drop` → `deallocate()` → the L3 table frame
+   returned to the PMM while descriptors pointed into it. The next
+   allocation reused the frame and overwrote live translation entries
+   (observed: EL1 translation fault L3 on a previously valid identity page
+   after a block split). Latent since the M5 runtime mapper; the new audit
+   flow created the first reuse pattern that exposed it. Fix:
+   `core::mem::forget(obj)` (same deliberate-leak pattern as
+   `boot_alloc_frame`); real reclamation needs refcounted table teardown
+   (`BACKLOG`).
+2. **Minor, `FIXED`:** wrong expected DFSC in the unmapped scenario (my test
+   expectation, not kernel behaviour — corrected to 0x06).
 
-- **W^X:** no user mapping is simultaneously writable and executable; user
-  code is EL0 RO+X with PXN=1 (EL1 cannot fetch it either).
-- **Shadow consistency:** `Mapping.permissions` always reflects programmed
-  hardware after `protect()` returns; validation failure mutates nothing.
-- **Rewrite purity:** permission rewrites never move a physical address nor
-  alter type/AF/shareability/ATTRIDX; applied to an invalid descriptor the
-  result stays invalid (no accidental mapping creation).
-- **Encoding regression immunity:** any future encoder bypassing `ap_bits` is
-  caught by the boot smoke test before the kernel proceeds.
+## 8. Mutation evidence (Phase 11)
 
-## 7. Tests
+| mutation | expected failure | observed failure |
+|---|---|---|
+| M1: restore AP=01 for user RO | [WX] readback panic | `PANIC: [WX] FAIL: user code is NOT EL0 read-only (AP=0b1)` ✅ |
+| M2: drop XN on non-exec pages | [WX] stack check / exec-nx | `PANIC: [WX] FAIL: user stack is executable (W^X violation)` ✅ |
+| M3/6: kernel pages EL0-accessible | kread no-fault → exit(7) assert | boot hang at MMU activation (smoke gate fails) ✅ |
+| M4: remove TLBI from mmu_protect | stale-perm write fault | **not detected** — `KNOWN LIMITATION` (see §10) |
+| M5: revert api encoder to AP=01 | encoder matrix panic | `PANIC: W^X FAIL: api user+RO+X not EL0 read-only` ✅ |
+| M7: user code writable (RWX) | encoder W^X assert | `PANIC: W^X violation: user page requested as writable+executable` ✅ |
 
-| Check | Result |
-|-------|--------|
-| `cargo build --workspace` | ✅ 0 errors |
-| All 6 bootable targets build (qemu-aarch64, rk3568, rpi3b-plus, lavender, suma-q5, x96q) | ✅ |
-| `cargo test --workspace --target aarch64-apple-darwin` | ✅ 6/6 pass |
-| `cargo clippy --workspace` | ✅ no new warnings from changed code |
-| `cargo fmt -- --check` | ✅ clean |
-| `git diff --check` | ✅ clean |
-| QEMU boot: `[WX]` readback both user ASes | ✅ code AP=0b11/XN=0/PXN=1; stack AP=0b01/XN=1 |
-| QEMU boot: EL0 store to own code page | ✅ aborts, ESR DFSC=0b001111 (permission fault L3), FAR=0x5f000000 |
-| QEMU boot: demo/M6 lifecycle/fault containment/G4 preemption | ✅ unchanged, exit codes correct |
-| 95 s soak | ✅ 37 K log lines, zero panics, both preempt workers ~7×10⁹ iterations |
-| **Mutation test** (reintroduced bug in one encoder) | ✅ caught — `test_wx_encoding` panicked at the exact assertion; live-mapping readback correctly unaffected (different path) |
+All mutations fully reverted afterwards; final tree verified clean
+(git diff contains only intended changes).
 
-## 8. QEMU / Hardware
+## 9. Tests / regression (Phase 13)
 
-**Verified in QEMU (cortex-a53):** full boot path, W^X descriptor readback,
-behavioral permission-fault evidence, M6 lifecycle, fault containment,
-preemption stability, soak.
+- `cargo check --workspace` (host + aarch64-unknown-none): 0 errors,
+  0 warnings. `VERIFIED`
+- `cargo test --workspace`: 6/6 pass. `VERIFIED`
+- `cargo clippy --workspace --all-targets`: no new warnings from changed
+  code (pointer-cast noise introduced by the audit was fixed; remaining
+  warnings are pre-existing style debt). `VERIFIED`
+- `cargo fmt --all -- --check`: clean. `VERIFIED`
+- All 6 bootable targets build (qemu-aarch64, rk3568, rpi3b-plus,
+  lavender, suma-q5, x96q). `VERIFIED`
+- QEMU: boot → WX ×2 PASS → protect/TLBI PASS → 3 fault scenarios PASS →
+  EL0 demo + M6 lifecycle + containment + G4 preemption unchanged;
+  95-second stress: 37K log lines, 0 panics, both preempt workers ~7×10⁹
+  iterations. `VERIFIED`
+- Demo/M6/preemption/containment behaviour: unchanged. `VERIFIED`
 
-**Not verifiable without physical hardware:** absolute descriptor semantics on
-real silicon. Note: AP-bit semantics are architecturally defined (VMSAv8-64)
-and orthogonal to the deferred L1/L2 table-descriptor encoding question
-(`table_desc` 0b11 vs spec 0b10), which remains tracked in
-`MMU-descriptor-encoding-hardware-validation.md`.
+## 10. Remaining limitations
 
-## 9. Regression Analysis
+- `KNOWN LIMITATION`: a removed TLBI after permission *widening* (RO→RW) is
+  not observable under QEMU — the emulator re-walks tables on a write
+  permission miss instead of faulting from the stale entry. Narrowing-side
+  staleness (RW→RO) would require a deliberate EL1 fault harness. TLBI
+  correctness currently rests on code-path review (desc writes → DSB →
+  `tlbi vaae1is` per page → DSB → ISB) plus the architectural bound that
+  every address-space switch executes `tlbi_all_sync`. True verification
+  needs physical hardware or a QEMU model change. `NOT TESTED` on silicon.
+- Page-table frames are deliberately leaked (no teardown) — `BACKLOG`.
+- VA aliasing policy documentation/enforcement — `BACKLOG` (with VA allocator).
+- Pre-existing clippy style debt (missing `# Safety` docs etc.) — untouched.
+- Real-hardware MMU validation (descriptor encoding question) — pre-existing
+  deferral, unchanged.
 
-- **All descriptor writers audited:** every AP-bit write routes through the
-  three fixed encoders; no other writer exists (`grep '<< 6'` across arch
-  crates).
-- **Kernel mappings bit-identical:** only the user+RO case changed encoding;
-  kernel RW/RO and user RW are unchanged. `MemoryObject::map` uses kernel
-  flags — unaffected (smoke test passes).
-- **access_ok consistency:** `descriptor_allows(Write)` already keyed off AP
-  bit 7 — now correctly denies writes to code pages (previously allowed).
-- **Indirect consumers checked:** usercopy, faults.rs, scheduler, task_manager,
-  early_mmu (identity map = kernel RWX, unchanged), split_l2_block attr
-  inheritance, all platform/target crates link.
+## 11. Documentation changes
 
-## 10. Remaining Risks
+- `STATUS.md`: toolchain section (Rust 1.98.0 / edition 2024).
+- `docs/architecture/master-roadmap.md`: mission-2 changelog entry.
+- `README.md`: quick-start toolchain note.
+- `vivanta-boot/rust-toolchain.toml`: new, pins 1.98.0 + target.
+- This report.
 
-1. `mmu_protect` splits even fully-covered 2 MiB blocks (correct, wasteful) —
-   optimization follow-up.
-2. Partial-range protect requires software mapping splitting → blocked on the
-   post-M5 VA allocator; API deliberately rejects non-exact ranges.
-3. Pre-existing clippy debt (~197 warnings, mostly `static_mut_refs`) and
-   `static mut` addressing-space registry remain untouched (out of scope).
-4. Real-hardware MMU validation still pending (pre-existing deferral).
-
-## 11. Follow-up Work
-
-1. VA allocator (post-M5 backlog) → unlocks partial-range protect + mmap.
-2. SYS_READ implementation (UART RX + blocking semantics).
-3. mprotect-style syscall once the syscall-number scope fence lifts.
-4. 60-minute soak run as a standing reliability gate.
-
-## 12. Files Changed
-
-Code: `arch-aarch64/src/{mmu.rs, boot.rs, user.rs, paging/descriptor.rs,
-paging/mod.rs, paging/walker.rs, paging/self_test.rs}`,
-`arch-api/src/{mmu.rs, boot/mmu.rs}`, `arch-test-stub/src/lib.rs`,
-`kernel/src/lib.rs`, `kernel/src/vmm/{address_space.rs, mapping.rs}`.
-Docs: `docs/investigations/WX-user-code-ap-encoding.md` (new),
-`docs/adr/ADR-019-user-page-permissions.md`, `STATUS.md`,
-`docs/architecture/master-roadmap.md`.
-
-## 13. Git
+## 12. Commits
 
 ```text
-branch:       main
-base commit:  f2af711  (docs: RPi3B+ UART bring-up)
-final commit: <see git log> 
-history:
-  4a46ceb fix: close INV-002 — console lock held with IRQs disabled,
-          ThreadContext at stack bottom
-          (pre-existing verified-but-uncommitted work; re-verified:
-          QEMU smoke 25 s, counters >2B, zero panics — then committed)
-  67d5b87 fix: enforce W^X for AArch64 user pages; implement mmu_protect
-          + VMM protect()
+branch: main
+base:   3109aad (mission-1 final)
+a094ce9 chore(toolchain): migrate workspace to Rust 1.98.0 and edition 2024
+65b8979→5861d8f fix(unsafe): address-of extern statics via &raw const
+df5702b fix(mmu): page-table frames were freed while the MMU walked them
+9c0aa6e test(mmu): post-M5 protection audit — matrix, TLBI, fault scenarios
+<docs commit> docs: synchronize status and toolchain policy (this commit)
 ```
 
-Left untouched (pre-existing, not mine): uncommitted edit to
-`vivanta-boot/docs/plan-next-phase-2026-08-01.md` (Pixel target decision) and
-untracked research docs (ADR-031…039, `docs/architecture/current-architecture.md`,
-`docs/distributed/`, evolution-plan/execution-context).
+The pre-existing `plan-next-phase-2026-08-01.md` modification and untracked
+research docs (ADR-031…039, distributed/, current-architecture.md) were left
+exactly as found.
 
----
+## 13. Final git status
 
-## Definition of Done
-
-- [x] Repository researched deeply enough (boot→PMM→MMU→VMM→IRQ→sched→syscalls)
-- [x] Self-selected technically significant task, rationale recorded
-- [x] Working solution implemented (not a skeleton)
-- [x] Integrated into existing architecture (ADR-030 split respected, ADR-019 amended)
-- [x] Tests added/extended (encoder matrix, boot readback, EL0 negative test)
-- [x] QEMU-side validation executed (incl. mutation test + soak)
-- [x] Adversarial self-review performed (12 scenarios analyzed; 1 mutation test)
-- [x] Regression search beyond edited files
-- [x] Documentation synchronized
-- [x] Working tree clean of session artifacts
-- [x] Final report created
-- [x] Git history coherent (two purposeful commits)
+Modified (pre-existing, not mine): `vivanta-boot/docs/plan-next-phase-2026-08-01.md`.
+Untracked (pre-existing): research docs listed above. Everything else
+committed; working tree clean of session artifacts.

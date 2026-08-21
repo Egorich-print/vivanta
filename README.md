@@ -42,7 +42,8 @@ Details: [STATUS.md](STATUS.md) · [M5.0 baseline](vivanta-boot/docs/milestones/
 
 ## Quick start (QEMU AArch64)
 
-Prerequisites: Rust toolchain, the `aarch64-unknown-none` target, and QEMU.
+Prerequisites: Rust 1.98.0 stable (pinned via `vivanta-boot/rust-toolchain.toml`,
+rustup installs it automatically) and QEMU.
 
 ```bash
 rustup target add aarch64-unknown-none   # one-time
