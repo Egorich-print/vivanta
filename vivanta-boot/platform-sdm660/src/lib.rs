@@ -4,7 +4,7 @@
 
 #![no_std]
 
-use vivanta_boot_common::{set_console, Console};
+use vivanta_boot_common::{Console, set_console};
 
 const UART_BASE: *mut u8 = 0x0C17_0000 as *mut u8;
 

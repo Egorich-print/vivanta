@@ -5,7 +5,7 @@ pub type AllocFn = unsafe extern "Rust" fn(ctx: *mut ()) -> u64;
 /// Opaque context passed through to the alloc callback.
 pub type AllocCtx = *mut ();
 
-extern "Rust" {
+unsafe extern "Rust" {
     /// Initialise page tables. Returns a handle (root table physical address).
     pub fn mmu_init(alloc_ctx: AllocCtx, alloc: AllocFn) -> usize;
 

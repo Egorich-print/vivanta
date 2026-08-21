@@ -5,7 +5,7 @@
 pub mod dispatcher;
 pub mod gic;
 
-pub use dispatcher::{register_irq, IrqHandler};
+pub use dispatcher::{IrqHandler, register_irq};
 pub use gic::{Gic, GicVersion};
 
 use crate::barrier;
@@ -31,7 +31,7 @@ fn restore_interrupts(daif: usize) {
     }
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "Rust" fn disable_interrupts() -> vivanta_arch_api::interrupts::InterruptGuard {
     let saved: u64;
     unsafe {
@@ -41,7 +41,7 @@ pub extern "Rust" fn disable_interrupts() -> vivanta_arch_api::interrupts::Inter
     vivanta_arch_api::interrupts::InterruptGuard::new(saved as usize, restore_interrupts)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "Rust" fn enable_interrupts() {
     enable();
 }

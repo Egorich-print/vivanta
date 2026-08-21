@@ -5,7 +5,7 @@
 use crate::error::{KernelError, KernelResult};
 use crate::scheduler::current_thread_address_space;
 pub use vivanta_arch_api::user_memory::AccessType as Access;
-use vivanta_arch_api::user_memory::{access_ok, AccessType};
+use vivanta_arch_api::user_memory::{AccessType, access_ok};
 
 /// A validated user-space pointer wrapper representing a buffer of type `T`.
 pub struct UserPtr<T> {

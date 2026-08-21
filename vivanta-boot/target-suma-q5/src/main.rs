@@ -92,84 +92,88 @@ core::arch::global_asm!(
 );
 
 /// Platform entry point called from ASM _start.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn adapter_main() -> ! {
-    let dtb_addr = vivanta_boot_common::BOOT_CONTEXT.dtb as *const u8;
+    unsafe {
+        let dtb_addr = vivanta_boot_common::BOOT_CONTEXT.dtb as *const u8;
 
-    // Configure early platform info for boot debug output (UART_AO @ 0xc81004e0)
-    vivanta_platform_amlogic::init_early_platform();
+        // Configure early platform info for boot debug output (UART_AO @ 0xc81004e0)
+        vivanta_platform_amlogic::init_early_platform();
 
-    // Platform init: console from FDT (when Meson UART driver is ready)
-    let _fdt_console = vivanta_platform_amlogic::init_console_from_fdt(dtb_addr);
+        // Platform init: console from FDT (when Meson UART driver is ready)
+        let _fdt_console = vivanta_platform_amlogic::init_console_from_fdt(dtb_addr);
 
-    // FDT validation report and memory discovery
-    let (mem_map, cpu_count) = vivanta_platform_amlogic::build_memory_map(dtb_addr);
+        // FDT validation report and memory discovery
+        let (mem_map, cpu_count) = vivanta_platform_amlogic::build_memory_map(dtb_addr);
 
-    println!();
-    println!("\u{2500}\u{2500}\u{2500}\u{2500} Vivanta v0.1 \u{2500}\u{2500}\u{2500}\u{2500}");
-    println!("  Arch:      AArch64");
-    println!("  Platform:  Amlogic S905L/GXL (Sumavision Q5)");
+        println!();
+        println!("\u{2500}\u{2500}\u{2500}\u{2500} Vivanta v0.1 \u{2500}\u{2500}\u{2500}\u{2500}");
+        println!("  Arch:      AArch64");
+        println!("  Platform:  Amlogic S905L/GXL (Sumavision Q5)");
 
-    let total_mib = mem_map
-        .regions()
-        .iter()
-        .filter(|r| r.kind == vivanta_boot_common::MemoryRegionKind::Usable)
-        .map(|r| r.size >> 20)
-        .sum::<u64>();
-    println!(
-        "  Memory:    {} MiB across {} region(s)",
-        total_mib,
-        mem_map.regions().len()
-    );
-    println!("  CPUs:      {} core(s)", cpu_count);
-    println!("  DTB:       0x{:x}", dtb_addr as usize);
-    println!();
+        let total_mib = mem_map
+            .regions()
+            .iter()
+            .filter(|r| r.kind == vivanta_boot_common::MemoryRegionKind::Usable)
+            .map(|r| r.size >> 20)
+            .sum::<u64>();
+        println!(
+            "  Memory:    {} MiB across {} region(s)",
+            total_mib,
+            mem_map.regions().len()
+        );
+        println!("  CPUs:      {} core(s)", cpu_count);
+        println!("  DTB:       0x{:x}", dtb_addr as usize);
+        println!();
 
-    // Build MMIO regions for Amlogic S905L (GXL)
-    //   UART_AO:  0xc81004e0 (always-on debug UART)
-    //   GIC-400:  0xc4300000–0xc430ffff (distributor at +0x1000, CPU at +0x2000)
-    static MMIO_REGIONS: [MmioRegion; 2] = [
-        MmioRegion {
-            base: 0xc810_0000,
-            size: 0x1000,
-            kind: MmioKind::UserDevice,
-        },
-        MmioRegion {
-            base: 0xc430_0000,
-            size: 0x1000,
-            kind: MmioKind::Device,
-        },
-    ];
+        // Build MMIO regions for Amlogic S905L (GXL)
+        //   UART_AO:  0xc81004e0 (always-on debug UART)
+        //   GIC-400:  0xc4300000–0xc430ffff (distributor at +0x1000, CPU at +0x2000)
+        static MMIO_REGIONS: [MmioRegion; 2] = [
+            MmioRegion {
+                base: 0xc810_0000,
+                size: 0x1000,
+                kind: MmioKind::UserDevice,
+            },
+            MmioRegion {
+                base: 0xc430_0000,
+                size: 0x1000,
+                kind: MmioKind::Device,
+            },
+        ];
 
-    // Interrupt controller: GIC-400 (GICv2)
-    let interrupt_controller = InterruptControllerInfo {
-        compatible: "arm,cortex-a15-gic",
-        distributor_base: vivanta_platform_amlogic::GIC_DIST_BASE,
-        distributor_size: 0x1000,
-        redistributor_base: Some(vivanta_platform_amlogic::GIC_CPU_BASE),
-        redistributor_size: Some(0x1000),
-    };
+        // Interrupt controller: GIC-400 (GICv2)
+        let interrupt_controller = InterruptControllerInfo {
+            compatible: "arm,cortex-a15-gic",
+            distributor_base: vivanta_platform_amlogic::GIC_DIST_BASE,
+            distributor_size: 0x1000,
+            redistributor_base: Some(vivanta_platform_amlogic::GIC_CPU_BASE),
+            redistributor_size: Some(0x1000),
+        };
 
-    // Assemble BootInfo and pass to vivanta_kernel
-    let mut mem_map_buf: core::mem::MaybeUninit<vivanta_boot_common::MemoryMap> =
-        core::mem::MaybeUninit::uninit();
-    let mut boot_info_buf: core::mem::MaybeUninit<BootInfo> = core::mem::MaybeUninit::uninit();
+        // Assemble BootInfo and pass to vivanta_kernel
+        let mut mem_map_buf: core::mem::MaybeUninit<vivanta_boot_common::MemoryMap> =
+            core::mem::MaybeUninit::uninit();
+        let mut boot_info_buf: core::mem::MaybeUninit<BootInfo> = core::mem::MaybeUninit::uninit();
 
-    mem_map_buf.as_mut_ptr().write(mem_map);
-    let mem_map_ref: &'static vivanta_boot_common::MemoryMap = &*mem_map_buf.as_ptr();
+        mem_map_buf.as_mut_ptr().write(mem_map);
+        let mem_map_ref: &'static vivanta_boot_common::MemoryMap = &*mem_map_buf.as_ptr();
 
-    boot_info_buf.as_mut_ptr().write(BootInfo {
-        memory_map: mem_map_ref,
-        mmio_regions: &MMIO_REGIONS,
-        interrupt_controller: Some(interrupt_controller),
-        cpu_count,
-        dtb: Some(dtb_addr as usize),
-    });
+        boot_info_buf.as_mut_ptr().write(BootInfo {
+            memory_map: mem_map_ref,
+            mmio_regions: &MMIO_REGIONS,
+            interrupt_controller: Some(interrupt_controller),
+            cpu_count,
+            dtb: Some(dtb_addr as usize),
+        });
 
-    println!("\u{2500}\u{2500}\u{2500}\u{2500} Handing off to vivanta_kernel \u{2500}\u{2500}\u{2500}\u{2500}");
-    println!();
+        println!(
+            "\u{2500}\u{2500}\u{2500}\u{2500} Handing off to vivanta_kernel \u{2500}\u{2500}\u{2500}\u{2500}"
+        );
+        println!();
 
-    vivanta_kernel::kernel_main(&*boot_info_buf.as_ptr());
+        vivanta_kernel::kernel_main(&*boot_info_buf.as_ptr());
+    }
 }
 
 #[panic_handler]

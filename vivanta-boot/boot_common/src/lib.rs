@@ -113,7 +113,7 @@ pub struct BootContext {
     pub flags: usize,
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub static mut BOOT_CONTEXT: BootContext = BootContext { dtb: 0, flags: 0 };
 
 // ---------------------------------------------------------------------------

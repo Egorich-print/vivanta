@@ -72,7 +72,7 @@ pub fn ctl() -> u64 {
 }
 
 /// Global tick count.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "Rust" fn ticks() -> u64 {
     TICK_COUNT.load(Ordering::Relaxed)
 }
@@ -89,18 +89,22 @@ pub fn timer_handler(_irq: u32) {
 }
 /// Register the timer IRQ handler and start periodic ticks.
 pub unsafe fn init(gic: &crate::interrupts::Gic) {
-    let freq = frequency();
-    TVAL.store((freq / TICK_HZ) as u32, Ordering::Relaxed);
-    init_timer_only();
-    gic.enable_irq(30);
+    unsafe {
+        let freq = frequency();
+        TVAL.store((freq / TICK_HZ) as u32, Ordering::Relaxed);
+        init_timer_only();
+        gic.enable_irq(30);
+    }
 }
 
 /// Timer init without GIC dependency.
 /// Only sets up the timer hardware and registers the IRQ handler.
 /// Caller must enable IRQ 30 on the interrupt controller separately.
 pub unsafe fn init_timer_only() {
-    let tval = TVAL.load(Ordering::Relaxed);
-    set_tval(tval);
-    enable();
-    crate::interrupts::register_irq(30, timer_handler);
+    unsafe {
+        let tval = TVAL.load(Ordering::Relaxed);
+        set_tval(tval);
+        enable();
+        crate::interrupts::register_irq(30, timer_handler);
+    }
 }

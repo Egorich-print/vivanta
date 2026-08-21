@@ -215,39 +215,41 @@ impl<A: FrameAllocator> PageTableBuilder<A> {
 
 impl PageTableGuard {
     pub unsafe fn activate(&self) {
-        use core::arch::asm;
+        unsafe {
+            use core::arch::asm;
 
-        // 1. Set memory attributes
-        vivanta_boot_common::println!("    activate: root={:#x}", self.root);
-        asm!("msr mair_el1, {}", in(reg) 0x44_FF_u64);
+            // 1. Set memory attributes
+            vivanta_boot_common::println!("    activate: root={:#x}", self.root);
+            asm!("msr mair_el1, {}", in(reg) 0x44_FF_u64);
 
-        // 2. Set translation control
-        let tcr: u64 =
-            (25) | (0b01 << 8) | (0b01 << 10) | (0b11 << 12) | (0b00 << 14) | (3u64 << 32);
-        asm!("msr tcr_el1, {}", in(reg) tcr);
+            // 2. Set translation control
+            let tcr: u64 =
+                (25) | (0b01 << 8) | (0b01 << 10) | (0b11 << 12) | (0b00 << 14) | (3u64 << 32);
+            asm!("msr tcr_el1, {}", in(reg) tcr);
 
-        // 3. Flush TLB (from early identity map)
-        asm!("tlbi vmalle1is");
-        asm!("dsb sy");
-        asm!("isb");
-        vivanta_boot_common::println!("    activate: tcr+tlbi done");
+            // 3. Flush TLB (from early identity map)
+            asm!("tlbi vmalle1is");
+            asm!("dsb sy");
+            asm!("isb");
+            vivanta_boot_common::println!("    activate: tcr+tlbi done");
 
-        // 4. Set new page table
-        asm!("msr ttbr0_el1, {}", in(reg) self.root);
-        asm!("dsb sy");
-        asm!("isb");
-        vivanta_boot_common::println!("    activate: ttbr0 done");
+            // 4. Set new page table
+            asm!("msr ttbr0_el1, {}", in(reg) self.root);
+            asm!("dsb sy");
+            asm!("isb");
+            vivanta_boot_common::println!("    activate: ttbr0 done");
 
-        // 5. Enable MMU + caches
-        let mut sctlr: u64;
-        asm!("mrs {}, sctlr_el1", out(reg) sctlr);
-        sctlr |= (1 << 0) | (1 << 2) | (1 << 12);
-        asm!("msr sctlr_el1, {}", in(reg) sctlr);
+            // 5. Enable MMU + caches
+            let mut sctlr: u64;
+            asm!("mrs {}, sctlr_el1", out(reg) sctlr);
+            sctlr |= (1 << 0) | (1 << 2) | (1 << 12);
+            asm!("msr sctlr_el1, {}", in(reg) sctlr);
 
-        // 6. Sync
-        asm!("dsb sy");
-        asm!("isb");
-        vivanta_boot_common::println!("    activate: mmu on");
+            // 6. Sync
+            asm!("dsb sy");
+            asm!("isb");
+            vivanta_boot_common::println!("    activate: mmu on");
+        }
     }
 
     pub fn root_addr(&self) -> u64 {
@@ -258,15 +260,17 @@ impl PageTableGuard {
 /// Runtime address‑space activation: write TTBR0_EL1 + TLBI.
 /// Called by the scheduler when switching between threads with different
 /// address spaces.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn activate_address_space(root: vivanta_arch_api::mmu::RootPageTable) {
-    let ttbr = root.0 as u64;
-    // UART poke to verify we're switching address space
-    core::ptr::write_volatile(0x0900_0000 as *mut u32, b'S' as u32);
-    core::arch::asm!("msr TTBR0_EL1, {}", in(reg) ttbr);
-    tlbi_all_sync();
-    core::arch::asm!("ic ialluis");
-    core::arch::asm!("dsb sy; isb");
+    unsafe {
+        let ttbr = root.0 as u64;
+        // UART poke to verify we're switching address space
+        core::ptr::write_volatile(0x0900_0000 as *mut u32, b'S' as u32);
+        core::arch::asm!("msr TTBR0_EL1, {}", in(reg) ttbr);
+        tlbi_all_sync();
+        core::arch::asm!("ic ialluis");
+        core::arch::asm!("dsb sy; isb");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -287,7 +291,7 @@ pub(crate) fn flags_to_desc_bits(flags: MappingFlags, phys: u64) -> u64 {
     d | (phys & ADDR_MASK)
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn mmu_map_object(
     pt: RootPageTable,
     vaddr: u64,
@@ -296,65 +300,69 @@ pub unsafe extern "Rust" fn mmu_map_object(
     flags: MappingFlags,
     alloc: &mut dyn PageTableAllocator,
 ) {
-    let root = pt.0 as u64;
-    let mut offset = 0u64;
-    while offset < size {
-        let va = vaddr + offset;
-        loop {
-            match walk_to_l3(root, va) {
-                WalkResult::ExistingL3(l3_table, l3_idx) => {
-                    let desc = flags_to_desc_bits(flags, paddr + offset);
-                    write_desc(l3_table + (l3_idx as u64) * 8, desc);
-                    break;
-                }
-                WalkResult::NeedsSplit {
-                    l2_table_addr,
-                    l2_index,
-                    block_desc,
-                } => {
-                    let frame_paddr = alloc.alloc_page_table_frame();
-                    split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
+    unsafe {
+        let root = pt.0 as u64;
+        let mut offset = 0u64;
+        while offset < size {
+            let va = vaddr + offset;
+            loop {
+                match walk_to_l3(root, va) {
+                    WalkResult::ExistingL3(l3_table, l3_idx) => {
+                        let desc = flags_to_desc_bits(flags, paddr + offset);
+                        write_desc(l3_table + (l3_idx as u64) * 8, desc);
+                        break;
+                    }
+                    WalkResult::NeedsSplit {
+                        l2_table_addr,
+                        l2_index,
+                        block_desc,
+                    } => {
+                        let frame_paddr = alloc.alloc_page_table_frame();
+                        split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
+                    }
                 }
             }
+            offset += 0x1000;
         }
-        offset += 0x1000;
+        tlbi_range(vaddr, size);
     }
-    tlbi_range(vaddr, size);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn mmu_unmap(
     pt: RootPageTable,
     vaddr: u64,
     size: u64,
     alloc: &mut dyn PageTableAllocator,
 ) {
-    let root = pt.0 as u64;
-    let mut offset = 0u64;
-    while offset < size {
-        let va = vaddr + offset;
-        loop {
-            match walk_to_l3(root, va) {
-                WalkResult::ExistingL3(l3_table, l3_idx) => {
-                    write_desc(l3_table + (l3_idx as u64) * 8, 0);
-                    break;
-                }
-                WalkResult::NeedsSplit {
-                    l2_table_addr,
-                    l2_index,
-                    block_desc,
-                } => {
-                    let frame_paddr = alloc.alloc_page_table_frame();
-                    split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
+    unsafe {
+        let root = pt.0 as u64;
+        let mut offset = 0u64;
+        while offset < size {
+            let va = vaddr + offset;
+            loop {
+                match walk_to_l3(root, va) {
+                    WalkResult::ExistingL3(l3_table, l3_idx) => {
+                        write_desc(l3_table + (l3_idx as u64) * 8, 0);
+                        break;
+                    }
+                    WalkResult::NeedsSplit {
+                        l2_table_addr,
+                        l2_index,
+                        block_desc,
+                    } => {
+                        let frame_paddr = alloc.alloc_page_table_frame();
+                        split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
+                    }
                 }
             }
+            offset += 0x1000;
         }
-        offset += 0x1000;
+        tlbi_range(vaddr, size);
     }
-    tlbi_range(vaddr, size);
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn mmu_protect(
     pt: RootPageTable,
     vaddr: u64,
@@ -362,40 +370,42 @@ pub unsafe extern "Rust" fn mmu_protect(
     flags: MappingFlags,
     alloc: &mut dyn PageTableAllocator,
 ) {
-    let root = pt.0 as u64;
-    let user = flags.is_user();
-    let writable = flags.is_read_write();
-    let executable = flags.is_executable();
-    let mut offset = 0u64;
-    while offset < size {
-        let va = vaddr + offset;
-        loop {
-            match walk_to_l3(root, va) {
-                WalkResult::ExistingL3(l3_table, l3_idx) => {
-                    let addr = l3_table + (l3_idx as u64) * 8;
-                    // SAFETY (contract): every page in the range is mapped,
-                    // so the leaf descriptor is a valid L3 page entry.
-                    let old = read_desc(addr);
-                    let new = leaf_with_permissions(old, user, writable, executable);
-                    write_desc(addr, new);
-                    break;
-                }
-                WalkResult::NeedsSplit {
-                    l2_table_addr,
-                    l2_index,
-                    block_desc,
-                } => {
-                    // A 2 MiB block covers this page: split it into 4 KiB
-                    // pages (inheriting the block's attributes) so the
-                    // permission change can apply at page granularity.
-                    let frame_paddr = alloc.alloc_page_table_frame();
-                    split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
+    unsafe {
+        let root = pt.0 as u64;
+        let user = flags.is_user();
+        let writable = flags.is_read_write();
+        let executable = flags.is_executable();
+        let mut offset = 0u64;
+        while offset < size {
+            let va = vaddr + offset;
+            loop {
+                match walk_to_l3(root, va) {
+                    WalkResult::ExistingL3(l3_table, l3_idx) => {
+                        let addr = l3_table + (l3_idx as u64) * 8;
+                        // SAFETY (contract): every page in the range is mapped,
+                        // so the leaf descriptor is a valid L3 page entry.
+                        let old = read_desc(addr);
+                        let new = leaf_with_permissions(old, user, writable, executable);
+                        write_desc(addr, new);
+                        break;
+                    }
+                    WalkResult::NeedsSplit {
+                        l2_table_addr,
+                        l2_index,
+                        block_desc,
+                    } => {
+                        // A 2 MiB block covers this page: split it into 4 KiB
+                        // pages (inheriting the block's attributes) so the
+                        // permission change can apply at page granularity.
+                        let frame_paddr = alloc.alloc_page_table_frame();
+                        split_l2_block(l2_table_addr, l2_index, block_desc, frame_paddr);
+                    }
                 }
             }
+            offset += 0x1000;
         }
-        offset += 0x1000;
+        tlbi_range(vaddr, size);
     }
-    tlbi_range(vaddr, size);
 }
 
 // ---------------------------------------------------------------------------
@@ -405,117 +415,121 @@ pub unsafe extern "Rust" fn mmu_protect(
 /// Walk the page table at `root` for address `va` and print descriptors.
 /// Must be called BEFORE mmu_activate (uses early identity map for reads).
 pub unsafe fn dump_walk(root: u64, va: u64, label: &str) {
-    let l1_idx = ((va >> 30) & 0x1FF) as usize;
-    let l2_idx = ((va >> 21) & 0x1FF) as usize;
-    let l3_idx = ((va >> 12) & 0x1FF) as usize;
-    let page_offset = va & 0xFFF;
+    unsafe {
+        let l1_idx = ((va >> 30) & 0x1FF) as usize;
+        let l2_idx = ((va >> 21) & 0x1FF) as usize;
+        let l3_idx = ((va >> 12) & 0x1FF) as usize;
+        let page_offset = va & 0xFFF;
 
-    let l1_entry = core::ptr::read_volatile((root + (l1_idx as u64) * 8) as *const u64);
-    let l1_valid = l1_entry & DESC_VALID != 0;
-    vivanta_boot_common::println!(
-        "  {} VA={:#x}: L1[{}]={:#x} valid={} table={}",
-        label,
-        va,
-        l1_idx,
-        l1_entry,
-        l1_valid,
-        l1_entry & DESC_TABLE != 0
-    );
-
-    if !l1_valid || l1_entry & DESC_TABLE == 0 {
-        return;
-    }
-    let l2_table = l1_entry & ADDR_MASK;
-
-    let l2_entry = core::ptr::read_volatile((l2_table + (l2_idx as u64) * 8) as *const u64);
-    let l2_valid = l2_entry & DESC_VALID != 0;
-    let l2_is_table = l2_entry & DESC_TABLE != 0;
-    vivanta_boot_common::println!(
-        "    L2[{}]={:#x} valid={} table={}",
-        l2_idx,
-        l2_entry,
-        l2_valid,
-        l2_is_table
-    );
-
-    if !l2_valid {
-        return;
-    }
-
-    if !l2_is_table {
-        // L2 block — maps 2 MiB
-        let block_pa = l2_entry & ADDR_MASK_BLOCK;
+        let l1_entry = core::ptr::read_volatile((root + (l1_idx as u64) * 8) as *const u64);
+        let l1_valid = l1_entry & DESC_VALID != 0;
         vivanta_boot_common::println!(
-            "    -> BLOCK PA={:#x} (offset={:#x})",
-            block_pa | page_offset,
-            page_offset
+            "  {} VA={:#x}: L1[{}]={:#x} valid={} table={}",
+            label,
+            va,
+            l1_idx,
+            l1_entry,
+            l1_valid,
+            l1_entry & DESC_TABLE != 0
         );
-        return;
-    }
 
-    let l3_table = l2_entry & ADDR_MASK;
-    let l3_entry = core::ptr::read_volatile((l3_table + (l3_idx as u64) * 8) as *const u64);
-    let l3_valid = l3_entry & DESC_VALID != 0;
-    vivanta_boot_common::println!("    L3[{}]={:#x} valid={}", l3_idx, l3_entry, l3_valid);
+        if !l1_valid || l1_entry & DESC_TABLE == 0 {
+            return;
+        }
+        let l2_table = l1_entry & ADDR_MASK;
 
-    if l3_valid {
-        let page_pa = l3_entry & ADDR_MASK;
-        vivanta_boot_common::println!("    -> PAGE PA={:#x}", page_pa | page_offset);
+        let l2_entry = core::ptr::read_volatile((l2_table + (l2_idx as u64) * 8) as *const u64);
+        let l2_valid = l2_entry & DESC_VALID != 0;
+        let l2_is_table = l2_entry & DESC_TABLE != 0;
+        vivanta_boot_common::println!(
+            "    L2[{}]={:#x} valid={} table={}",
+            l2_idx,
+            l2_entry,
+            l2_valid,
+            l2_is_table
+        );
+
+        if !l2_valid {
+            return;
+        }
+
+        if !l2_is_table {
+            // L2 block — maps 2 MiB
+            let block_pa = l2_entry & ADDR_MASK_BLOCK;
+            vivanta_boot_common::println!(
+                "    -> BLOCK PA={:#x} (offset={:#x})",
+                block_pa | page_offset,
+                page_offset
+            );
+            return;
+        }
+
+        let l3_table = l2_entry & ADDR_MASK;
+        let l3_entry = core::ptr::read_volatile((l3_table + (l3_idx as u64) * 8) as *const u64);
+        let l3_valid = l3_entry & DESC_VALID != 0;
+        vivanta_boot_common::println!("    L3[{}]={:#x} valid={}", l3_idx, l3_entry, l3_valid);
+
+        if l3_valid {
+            let page_pa = l3_entry & ADDR_MASK;
+            vivanta_boot_common::println!("    -> PAGE PA={:#x}", page_pa | page_offset);
+        }
     }
 }
 
 /// Dump page table for several critical addresses.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn dump_critical_tables(root: u64) {
-    vivanta_boot_common::println!("=== Page Table Dump (root={:#x}) ===", root);
+    unsafe {
+        vivanta_boot_common::println!("=== Page Table Dump (root={:#x}) ===", root);
 
-    // Current PC
-    let pc: u64;
-    core::arch::asm!("adr {}, .", out(reg) pc);
-    dump_walk(root, pc, "PC");
+        // Current PC
+        let pc: u64;
+        core::arch::asm!("adr {}, .", out(reg) pc);
+        dump_walk(root, pc, "PC");
 
-    // Kernel start / end
-    extern "C" {
-        static __kernel_start: u8;
-        static __stack_top: u8;
-    }
-    let ks = &__kernel_start as *const u8 as u64;
-    let ke = &__stack_top as *const u8 as u64;
-    dump_walk(root, ks, "kernel_start");
-    dump_walk(root, ke, "stack_top");
+        // Kernel start / end
+        unsafe extern "C" {
+            static __kernel_start: u8;
+            static __stack_top: u8;
+        }
+        let ks = &__kernel_start as *const u8 as u64;
+        let ke = &__stack_top as *const u8 as u64;
+        dump_walk(root, ks, "kernel_start");
+        dump_walk(root, ke, "stack_top");
 
-    // VBAR_EL1
-    let vbar: u64;
-    core::arch::asm!("mrs {}, vbar_el1", out(reg) vbar);
-    dump_walk(root, vbar, "VBAR_EL1");
+        // VBAR_EL1
+        let vbar: u64;
+        core::arch::asm!("mrs {}, vbar_el1", out(reg) vbar);
+        dump_walk(root, vbar, "VBAR_EL1");
 
-    // RAM start
-    dump_walk(root, 0x4000_0000, "RAM_START");
+        // RAM start
+        dump_walk(root, 0x4000_0000, "RAM_START");
 
-    // User code VA
-    dump_walk(root, 0x5E00_0000, "USER_CODE");
+        // User code VA
+        dump_walk(root, 0x5E00_0000, "USER_CODE");
 
-    // UART
-    dump_walk(root, 0x0900_0000, "UART");
+        // UART
+        dump_walk(root, 0x0900_0000, "UART");
 
-    // Dump raw L2 block descriptor for kernel text (0x40200000-0x403FFFFF)
-    vivanta_boot_common::println!("--- Raw descriptor decode ---");
-    let l1_idx = ((0x4020_0000u64 >> 30) & 0x1FF) as usize;
-    let l2_idx = ((0x4020_0000u64 >> 21) & 0x1FF) as usize;
-    let l1_entry = core::ptr::read_volatile((root + (l1_idx as u64) * 8) as *const u64);
-    if l1_entry & DESC_TABLE != 0 {
-        let l2_table = l1_entry & ADDR_MASK;
-        let l2_entry = core::ptr::read_volatile((l2_table + (l2_idx as u64) * 8) as *const u64);
-        vivanta_boot_common::println!("  L2[{}] raw = {:#018x}", l2_idx, l2_entry);
-        vivanta_boot_common::println!("    Valid={}", (l2_entry & DESC_VALID) != 0);
-        vivanta_boot_common::println!("    Table={}", (l2_entry & DESC_TABLE) != 0);
-        vivanta_boot_common::println!("    AF={}", (l2_entry & DESC_AF) != 0);
-        vivanta_boot_common::println!("    SH={:#x}", (l2_entry >> 8) & 3);
-        vivanta_boot_common::println!("    AP={:#x}", (l2_entry >> 6) & 3);
-        vivanta_boot_common::println!("    AttrIdx={:#x}", (l2_entry >> 2) & 7);
-        vivanta_boot_common::println!("    PXN={}", (l2_entry >> 53) & 1);
-        vivanta_boot_common::println!("    UXN={}", (l2_entry >> 54) & 1);
-        vivanta_boot_common::println!("    OutputAddr={:#x}", l2_entry & ADDR_MASK_BLOCK);
+        // Dump raw L2 block descriptor for kernel text (0x40200000-0x403FFFFF)
+        vivanta_boot_common::println!("--- Raw descriptor decode ---");
+        let l1_idx = ((0x4020_0000u64 >> 30) & 0x1FF) as usize;
+        let l2_idx = ((0x4020_0000u64 >> 21) & 0x1FF) as usize;
+        let l1_entry = core::ptr::read_volatile((root + (l1_idx as u64) * 8) as *const u64);
+        if l1_entry & DESC_TABLE != 0 {
+            let l2_table = l1_entry & ADDR_MASK;
+            let l2_entry = core::ptr::read_volatile((l2_table + (l2_idx as u64) * 8) as *const u64);
+            vivanta_boot_common::println!("  L2[{}] raw = {:#018x}", l2_idx, l2_entry);
+            vivanta_boot_common::println!("    Valid={}", (l2_entry & DESC_VALID) != 0);
+            vivanta_boot_common::println!("    Table={}", (l2_entry & DESC_TABLE) != 0);
+            vivanta_boot_common::println!("    AF={}", (l2_entry & DESC_AF) != 0);
+            vivanta_boot_common::println!("    SH={:#x}", (l2_entry >> 8) & 3);
+            vivanta_boot_common::println!("    AP={:#x}", (l2_entry >> 6) & 3);
+            vivanta_boot_common::println!("    AttrIdx={:#x}", (l2_entry >> 2) & 7);
+            vivanta_boot_common::println!("    PXN={}", (l2_entry >> 53) & 1);
+            vivanta_boot_common::println!("    UXN={}", (l2_entry >> 54) & 1);
+            vivanta_boot_common::println!("    OutputAddr={:#x}", l2_entry & ADDR_MASK_BLOCK);
+        }
     }
 }
 

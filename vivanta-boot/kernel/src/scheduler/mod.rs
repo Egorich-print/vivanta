@@ -344,7 +344,7 @@ extern "C" fn thread_trampoline(_arg: usize) {
 /// Called from the arch EL0 fault handler (G3 fault containment): terminate
 /// the current task without returning to EL0. A fault is an abnormal exit
 /// (convention: negative code).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "Rust" fn user_fault_terminate() -> ! {
     thread_exit(-1)
 }
@@ -526,19 +526,19 @@ pub fn init_boot() {
 // ---------------------------------------------------------------------------
 
 /// Called from the arch timer handler via extern "Rust"
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn scheduler_tick() {
     schedule_tick();
 }
 
 /// Called from the arch IRQ dispatcher via extern "Rust"
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn scheduler_reschedule(frame: usize) {
     maybe_reschedule(frame);
 }
 
 /// Called from kernel_main via vivanta_arch_api::boot::sched::sched_init_boot()
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn sched_init_boot() {
     init_boot();
 }

@@ -6,7 +6,7 @@ mod exceptions;
 use core::arch::asm;
 use core::panic::PanicInfo;
 
-use vivanta_boot_common::{fdt::FdtScanner, ns16550::Ns16550, println, set_console, MemoryMap};
+use vivanta_boot_common::{MemoryMap, fdt::FdtScanner, ns16550::Ns16550, println, set_console};
 
 // ================================================================
 // ARM64 Image header + stack setup
@@ -118,64 +118,62 @@ core::arch::global_asm!(
 // ================================================================
 // Rust entry point
 // ================================================================
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn boot_entry(dtb: u64) -> ! {
-    disable_mmu_el2();
-    zero_bss();
-
-    // Console
-    static NS16550: Ns16550 = Ns16550::new(0xFE66_0000 as *mut u8, 2);
-    set_console(&NS16550);
-
-    println!();
-    println!("=== Vivanta RK3568 (EL2) ===");
-
-    // Install exception vectors
     unsafe {
+        disable_mmu_el2();
+        zero_bss();
+
+        // Console
+        static NS16550: Ns16550 = Ns16550::new(0xFE66_0000 as *mut u8, 2);
+        set_console(&NS16550);
+
+        println!();
+        println!("=== Vivanta RK3568 (EL2) ===");
+
+        // Install exception vectors
         exceptions::init();
-    }
 
-    // DTB
-    let dtb_ptr = if dtb > 0x100 && dtb < 0x1_0000_0000 {
-        dtb as *const u8
-    } else {
-        core::ptr::null()
-    };
+        // DTB
+        let dtb_ptr = if dtb > 0x100 && dtb < 0x1_0000_0000 {
+            dtb as *const u8
+        } else {
+            core::ptr::null()
+        };
 
-    if !dtb_ptr.is_null() {
-        let mut mem = MemoryMap::new();
-        unsafe {
-            let cpus = FdtScanner::report(dtb_ptr, &mut mem);
-            println!("CPU cores: {}", cpus);
-            println!("Memory:");
-            let mut usable = 0u64;
-            for r in mem.regions() {
-                if r.start == 0 && r.size == 0 {
-                    continue;
+        if !dtb_ptr.is_null() {
+            let mut mem = MemoryMap::new();
+            {
+                let cpus = FdtScanner::report(dtb_ptr, &mut mem);
+                println!("CPU cores: {}", cpus);
+                println!("Memory:");
+                let mut usable = 0u64;
+                for r in mem.regions() {
+                    if r.start == 0 && r.size == 0 {
+                        continue;
+                    }
+                    usable += 1;
+                    println!(
+                        "  {}. 0x{:016X} – 0x{:016X} ({} MiB)",
+                        usable,
+                        r.start,
+                        r.start + r.size - 1,
+                        r.size >> 20,
+                    );
                 }
-                usable += 1;
-                println!(
-                    "  {}. 0x{:016X} – 0x{:016X} ({} MiB)",
-                    usable,
-                    r.start,
-                    r.start + r.size - 1,
-                    r.size >> 20,
-                );
+                println!("  total: {} regions", usable);
             }
-            println!("  total: {} regions", usable);
+        } else {
+            println!("DTB: not provided");
         }
-    } else {
-        println!("DTB: not provided");
-    }
 
-    // === M0.9 Tests ===
-    println!();
-    println!("--- Exception Tests ---");
-    unsafe {
+        // === M0.9 Tests ===
+        println!();
+        println!("--- Exception Tests ---");
         exceptions::test_brk();
-    }
 
-    loop {}
+        loop {}
+    }
 }
 
 // ================================================================
@@ -183,17 +181,19 @@ pub unsafe extern "C" fn boot_entry(dtb: u64) -> ! {
 // ================================================================
 
 unsafe fn disable_mmu_el2() {
-    asm!("dsb sy; isb");
-    let sctlr: u64;
-    asm!("mrs {}, sctlr_el2", out(reg) sctlr);
-    asm!("msr sctlr_el2, {}", in(reg) sctlr & !0b101u64);
-    asm!("dsb sy; isb; tlbi alle2; dsb sy; isb");
-    asm!("msr CPTR_EL2, xzr");
-    asm!("msr CPACR_EL1, {}", in(reg) (0b11u64 << 20));
+    unsafe {
+        asm!("dsb sy; isb");
+        let sctlr: u64;
+        asm!("mrs {}, sctlr_el2", out(reg) sctlr);
+        asm!("msr sctlr_el2, {}", in(reg) sctlr & !0b101u64);
+        asm!("dsb sy; isb; tlbi alle2; dsb sy; isb");
+        asm!("msr CPTR_EL2, xzr");
+        asm!("msr CPACR_EL1, {}", in(reg) (0b11u64 << 20));
+    }
 }
 
 unsafe fn zero_bss() {
-    extern "C" {
+    unsafe extern "C" {
         static mut __bss_start: u8;
         static mut __bss_end: u8;
     }
@@ -201,7 +201,7 @@ unsafe fn zero_bss() {
     let end = core::ptr::addr_of_mut!(__bss_end) as *mut u64;
     let count = (end as usize - start as usize) / 8;
     for i in 0..count {
-        start.add(i).write_volatile(0);
+        unsafe { start.add(i).write_volatile(0) };
     }
 }
 

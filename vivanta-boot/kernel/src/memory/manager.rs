@@ -1,6 +1,6 @@
 use crate::memory::capability::{MemRights, MemoryCapability, OwnerId};
 use crate::memory::object::{MemoryObject, MemoryObjectId};
-use crate::memory::policy::{evaluate, AllocationRequirements};
+use crate::memory::policy::{AllocationRequirements, evaluate};
 use crate::memory::resource::{MemoryBackend, ResourceId};
 
 const MAX_BACKENDS: usize = 8;

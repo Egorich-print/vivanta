@@ -1,7 +1,7 @@
 [package]
 name = "vivanta-arch-aarch64"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Vivanta — AArch64 architecture implementation"
 
 # No host libtest harness: this crate is built for aarch64-unknown-none and

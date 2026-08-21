@@ -61,7 +61,7 @@ pub trait PageTableAllocator {
     fn alloc_page_table_frame(&mut self) -> u64;
 }
 
-extern "Rust" {
+unsafe extern "Rust" {
     /// Activate an address space by writing its root page table into the
     /// hardware register (TTBR0_EL1 on AArch64, CR3 on x86_64, SATP on RISC‑V).
     ///

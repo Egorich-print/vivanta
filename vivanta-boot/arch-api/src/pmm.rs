@@ -23,10 +23,6 @@ pub trait FrameAllocator {
     /// `None` unless the implementor provides real contiguity. Callers that
     /// need a contiguous range MUST use this method, never `alloc_frame` × n.
     fn alloc_contiguous(&mut self, n: usize) -> Option<PhysFrame> {
-        if n == 1 {
-            self.alloc_frame()
-        } else {
-            None
-        }
+        if n == 1 { self.alloc_frame() } else { None }
     }
 }

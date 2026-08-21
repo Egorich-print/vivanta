@@ -1,7 +1,7 @@
 [package]
 name = "vivanta-platform-amlogic"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Vivanta — Amlogic GXL/GXBB platform (S905L/S905M/S905X) — Meson UART, GIC-400, ARM Timer"
 
 [dependencies]

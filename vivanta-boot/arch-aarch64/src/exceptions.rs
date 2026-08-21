@@ -75,7 +75,7 @@ fn esr_class(esr: u64) -> &'static str {
 }
 
 /// Called from the assembly vector table.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn exception_handler(
     frame: &ExceptionFrame,
     kind: u64,
@@ -137,14 +137,16 @@ pub unsafe extern "C" fn exception_handler(
 
 /// Deliberately trigger a Data Abort for regression testing.
 pub unsafe fn trigger_fault() -> ! {
-    core::ptr::read_volatile(0x0 as *const u64);
-    loop {
-        core::hint::spin_loop();
+    unsafe {
+        core::ptr::read_volatile(0x0 as *const u64);
+        loop {
+            core::hint::spin_loop();
+        }
     }
 }
 
 pub fn init() {
-    extern "C" {
+    unsafe extern "C" {
         pub static exception_vectors: u8;
     }
     let vectors = unsafe { &exception_vectors as *const u8 as u64 };

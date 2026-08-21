@@ -46,7 +46,7 @@ fn read_ttbr0() -> u64 {
 /// `aspace` is accepted for API compatibility with the kernel's
 /// AddressSpaceId, but the check is performed against the live TTBR0 root,
 /// which is always the current thread's address space.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "Rust" fn access_ok(_aspace: usize, vaddr: u64, size: u64, access: AccessType) -> bool {
     if size == 0 {
         return true;
@@ -77,7 +77,7 @@ pub extern "Rust" fn access_ok(_aspace: usize, vaddr: u64, size: u64, access: Ac
 /// Copy `len` bytes from user space into `dst` after validating the whole
 /// range. Interrupts are disabled for the duration so a timer IRQ cannot
 /// switch address spaces mid-copy (single-core TOCTOU prevention).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn copy_from_user(dst: *mut u8, src: u64, len: usize) -> Result<(), ()> {
     if len == 0 {
         return Ok(());
@@ -115,7 +115,7 @@ pub unsafe extern "Rust" fn copy_from_user(dst: *mut u8, src: u64, len: usize) -
 /// Copy `len` bytes from `src` into user space at `dst` after validating the
 /// whole range. Interrupts disabled for the duration (single-core TOCTOU
 /// prevention).
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn copy_to_user(dst: u64, src: *const u8, len: usize) -> Result<(), ()> {
     if len == 0 {
         return Ok(());

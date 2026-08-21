@@ -59,14 +59,18 @@ pub unsafe fn init_console(node: &HardwareNode) {
 /// Discover console from FDT and initialise it.
 /// Returns the HardwareNode for the console.
 pub unsafe fn init_console_from_fdt(dtb_addr: *const u8) -> HardwareNode {
-    let node = FdtScanner::console(dtb_addr).expect("no console in FDT");
-    init_console(&node);
-    node
+    unsafe {
+        let node = FdtScanner::console(dtb_addr).expect("no console in FDT");
+        init_console(&node);
+        node
+    }
 }
 
 /// Build memory map and count CPUs from FDT.
 pub unsafe fn build_memory_map(dtb_addr: *const u8) -> (vivanta_boot_common::MemoryMap, usize) {
-    let mut mem_map = vivanta_boot_common::MemoryMap::new();
-    let cpu_count = FdtScanner::report(dtb_addr, &mut mem_map);
-    (mem_map, cpu_count)
+    unsafe {
+        let mut mem_map = vivanta_boot_common::MemoryMap::new();
+        let cpu_count = FdtScanner::report(dtb_addr, &mut mem_map);
+        (mem_map, cpu_count)
+    }
 }

@@ -9,7 +9,7 @@ pub const SYS_EXIT: u64 = 2;
 pub const SYS_YIELD: u64 = 3;
 pub const SYS_MMAP: u64 = 4;
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn syscall_dispatch(
     num: u64,
     arg0: u64,

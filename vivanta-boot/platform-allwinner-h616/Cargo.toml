@@ -1,7 +1,7 @@
 [package]
 name = "vivanta-platform-allwinner-h616"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Vivanta — Allwinner H616/H313/H618 platform (NS16550 UART)"
 
 [dependencies]

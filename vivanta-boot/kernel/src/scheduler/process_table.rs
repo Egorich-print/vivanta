@@ -39,7 +39,7 @@ impl ProcessTable {
     /// Lookup task by ID.
     pub fn lookup(&self, pid: TaskId) -> Option<&Task> {
         for slot in self.tasks.iter() {
-            if let Some(ref t) = slot {
+            if let Some(t) = slot {
                 if t.task_id == pid {
                     return Some(t);
                 }
@@ -51,7 +51,7 @@ impl ProcessTable {
     /// Lookup task by ID (mutable).
     pub fn lookup_mut(&mut self, pid: TaskId) -> Option<&mut Task> {
         for slot in self.tasks.iter_mut() {
-            if let Some(ref mut t) = slot {
+            if let Some(t) = slot {
                 if t.task_id == pid {
                     return Some(t);
                 }
@@ -63,7 +63,7 @@ impl ProcessTable {
     /// Remove task by ID.
     pub fn remove(&mut self, pid: TaskId) -> Option<Task> {
         for slot in self.tasks.iter_mut() {
-            if let Some(ref t) = slot {
+            if let &mut Some(ref t) = slot {
                 if t.task_id == pid {
                     return slot.take();
                 }

@@ -1,7 +1,7 @@
 [package]
 name = "vivanta-target-suma-q5"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Vivanta — Sumavision Q5 TV box (Amlogic S905L, GXL) target binary"
 
 [dependencies]

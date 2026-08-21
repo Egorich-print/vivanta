@@ -1,4 +1,4 @@
-extern "Rust" {
+unsafe extern "Rust" {
     /// Set up exception vectors, enable SIMD/FP, etc.
     /// Called once at the very start of kernel_main, before PMM.
     pub fn early_init();

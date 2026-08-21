@@ -64,70 +64,74 @@ core::arch::global_asm!(
 );
 
 /// Platform entry point called from ASM _start.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn adapter_main(dtb_addr: usize) -> ! {
-    let dtb_ptr = dtb_addr as *const u8;
+    unsafe {
+        let dtb_ptr = dtb_addr as *const u8;
 
-    // Configure early platform info for boot debug output
-    vivanta_boot_common::set_early_platform(vivanta_boot_common::EarlyPlatformInfo {
-        uart_base: 0x0900_0000,
-    });
+        // Configure early platform info for boot debug output
+        vivanta_boot_common::set_early_platform(vivanta_boot_common::EarlyPlatformInfo {
+            uart_base: 0x0900_0000,
+        });
 
-    // Platform init: console from FDT
-    let console_node = vivanta_platform_qemu::init_console_from_fdt(dtb_ptr);
+        // Platform init: console from FDT
+        let console_node = vivanta_platform_qemu::init_console_from_fdt(dtb_ptr);
 
-    // FDT validation report and memory discovery
-    let (mem_map, cpu_count) = vivanta_platform_qemu::build_memory_map(dtb_ptr);
+        // FDT validation report and memory discovery
+        let (mem_map, cpu_count) = vivanta_platform_qemu::build_memory_map(dtb_ptr);
 
-    println!();
-    println!("\u{2500}\u{2500}\u{2500}\u{2500} Vivanta Boot Adapter (AArch64/QEMU) \u{2500}\u{2500}\u{2500}\u{2500}");
-    println!("  DTB at 0x{:x}", dtb_addr);
-
-    let console_reg = console_node.reg.unwrap().addr;
-    if console_node.compatible.contains("pl011") {
+        println!();
         println!(
-            "  Console: {} @ 0x{:x} (class=PL011)",
-            console_node.compatible, console_reg
+            "\u{2500}\u{2500}\u{2500}\u{2500} Vivanta Boot Adapter (AArch64/QEMU) \u{2500}\u{2500}\u{2500}\u{2500}"
         );
-    } else {
-        println!(
-            "  Console: {} @ 0x{:x} (class=NS16550)",
-            console_node.compatible, console_reg
-        );
+        println!("  DTB at 0x{:x}", dtb_addr);
+
+        let console_reg = console_node.reg.unwrap().addr;
+        if console_node.compatible.contains("pl011") {
+            println!(
+                "  Console: {} @ 0x{:x} (class=PL011)",
+                console_node.compatible, console_reg
+            );
+        } else {
+            println!(
+                "  Console: {} @ 0x{:x} (class=NS16550)",
+                console_node.compatible, console_reg
+            );
+        }
+        println!();
+
+        // Build MMIO regions (QEMU virt: UART user-accessible, GIC vivanta_kernel-only)
+        static MMIO_REGIONS: [MmioRegion; 2] = [
+            MmioRegion {
+                base: 0x0900_0000,
+                size: 0x1000,
+                kind: MmioKind::UserDevice,
+            },
+            MmioRegion {
+                base: 0x0800_0000,
+                size: 0x10_0000,
+                kind: MmioKind::Device,
+            },
+        ];
+
+        // Assemble BootInfo
+        let mut mem_map_buf: core::mem::MaybeUninit<vivanta_boot_common::MemoryMap> =
+            core::mem::MaybeUninit::uninit();
+        let mut boot_info_buf: core::mem::MaybeUninit<BootInfo> = core::mem::MaybeUninit::uninit();
+
+        mem_map_buf.as_mut_ptr().write(mem_map);
+        let mem_map_ref: &'static vivanta_boot_common::MemoryMap = &*mem_map_buf.as_ptr();
+
+        boot_info_buf.as_mut_ptr().write(BootInfo {
+            memory_map: mem_map_ref,
+            mmio_regions: &MMIO_REGIONS,
+            interrupt_controller: None,
+            cpu_count,
+            dtb: Some(dtb_addr),
+        });
+
+        vivanta_kernel::kernel_main(&*boot_info_buf.as_ptr());
     }
-    println!();
-
-    // Build MMIO regions (QEMU virt: UART user-accessible, GIC vivanta_kernel-only)
-    static MMIO_REGIONS: [MmioRegion; 2] = [
-        MmioRegion {
-            base: 0x0900_0000,
-            size: 0x1000,
-            kind: MmioKind::UserDevice,
-        },
-        MmioRegion {
-            base: 0x0800_0000,
-            size: 0x10_0000,
-            kind: MmioKind::Device,
-        },
-    ];
-
-    // Assemble BootInfo
-    let mut mem_map_buf: core::mem::MaybeUninit<vivanta_boot_common::MemoryMap> =
-        core::mem::MaybeUninit::uninit();
-    let mut boot_info_buf: core::mem::MaybeUninit<BootInfo> = core::mem::MaybeUninit::uninit();
-
-    mem_map_buf.as_mut_ptr().write(mem_map);
-    let mem_map_ref: &'static vivanta_boot_common::MemoryMap = &*mem_map_buf.as_ptr();
-
-    boot_info_buf.as_mut_ptr().write(BootInfo {
-        memory_map: mem_map_ref,
-        mmio_regions: &MMIO_REGIONS,
-        interrupt_controller: None,
-        cpu_count,
-        dtb: Some(dtb_addr),
-    });
-
-    vivanta_kernel::kernel_main(&*boot_info_buf.as_ptr());
 }
 
 #[panic_handler]

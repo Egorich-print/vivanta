@@ -17,7 +17,7 @@ impl PmmBackend {
     }
 
     pub unsafe fn new_dram(pmm: *mut dyn FrameAllocator) -> Self {
-        Self::new(pmm, MemoryProperties::dram_4gb())
+        unsafe { Self::new(pmm, MemoryProperties::dram_4gb()) }
     }
 
     fn pmm(&mut self) -> &mut dyn FrameAllocator {

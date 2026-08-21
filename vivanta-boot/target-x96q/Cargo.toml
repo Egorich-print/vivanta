@@ -1,7 +1,7 @@
 [package]
 name = "vivanta-target-x96q"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Vivanta — X96Q TV box (Allwinner H313) target binary"
 
 [dependencies]

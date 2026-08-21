@@ -1,7 +1,7 @@
 [package]
 name = "vivanta-target-rpi3b-plus"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Vivanta — Raspberry Pi 3 B+ (BCM2837B0) target binary"
 
 [dependencies]

@@ -42,7 +42,7 @@ impl RunQueue {
     /// Remove a thread by ID.
     pub fn remove(&mut self, id: ThreadId) -> Option<Thread> {
         for slot in self.threads.iter_mut() {
-            if let Some(ref t) = slot {
+            if let &mut Some(ref t) = slot {
                 if t.id == id {
                     return slot.take();
                 }
@@ -54,7 +54,7 @@ impl RunQueue {
     /// Get a reference to a thread by ID.
     pub fn get(&self, id: ThreadId) -> Option<&Thread> {
         for slot in self.threads.iter() {
-            if let Some(ref t) = slot {
+            if let Some(t) = slot {
                 if t.id == id {
                     return Some(t);
                 }
@@ -66,7 +66,7 @@ impl RunQueue {
     /// Get a mutable reference to a thread by ID.
     pub fn get_mut(&mut self, id: ThreadId) -> Option<&mut Thread> {
         for slot in self.threads.iter_mut() {
-            if let Some(ref mut t) = slot {
+            if let Some(t) = slot {
                 if t.id == id {
                     return Some(t);
                 }
@@ -110,7 +110,7 @@ impl RunQueue {
         // Fallback to idle if not excluded
         if !exclude_idle {
             for slot in self.threads.iter() {
-                if let Some(ref t) = slot {
+                if let Some(t) = slot {
                     if t.state == ThreadState::Ready && t.priority == Priority::Idle {
                         return Some(t.id);
                     }
@@ -124,7 +124,7 @@ impl RunQueue {
     /// Set thread state by ID.
     pub fn set_state(&mut self, id: ThreadId, new_state: ThreadState) -> Result<(), RunQueueError> {
         for slot in self.threads.iter_mut() {
-            if let Some(ref mut t) = slot {
+            if let Some(t) = slot {
                 if t.id == id {
                     t.state = new_state;
                     return Ok(());

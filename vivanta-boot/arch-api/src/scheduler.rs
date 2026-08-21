@@ -7,7 +7,7 @@
 /// the scheduler no longer copies or owns exception frames.
 pub type InterruptFrameHandle = usize;
 
-extern "Rust" {
+unsafe extern "Rust" {
     /// Called from the timer IRQ handler in arch.
     /// Signals the scheduler that a tick has occurred.
     pub fn scheduler_tick();

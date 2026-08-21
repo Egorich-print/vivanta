@@ -1,7 +1,7 @@
 [package]
 name = "vivanta-target-qemu-armv7a"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Vivanta — QEMU ARMv7-A target binary"
 
 [dependencies]

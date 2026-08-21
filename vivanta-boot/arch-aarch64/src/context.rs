@@ -47,7 +47,7 @@ static mut BOOT_BLOCK: BootThreadBlock = BootThreadBlock {
     frame: [0; FRAME_SIZE],
 };
 
-extern "C" {
+unsafe extern "C" {
     fn context_switch_asm(current: *mut ThreadContext, next: *const ThreadContext);
 }
 
@@ -68,11 +68,11 @@ pub fn idle_entry() -> ! {
 // ---------------------------------------------------------------------------
 
 // Reference to the EL1→EL0 trampoline defined in the user module.
-extern "C" {
+unsafe extern "C" {
     static eret_to_user_stub: u8;
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn context_init(
     stack_top: usize,
     stack_bottom: usize,
@@ -80,69 +80,73 @@ pub unsafe extern "Rust" fn context_init(
     entry: usize,
     level: ExecutionLevel,
 ) -> ArchContext {
-    let actual_entry = if entry == 0 {
-        idle_entry as *const () as usize
-    } else {
-        entry
-    };
+    unsafe {
+        let actual_entry = if entry == 0 {
+            idle_entry as *const () as usize
+        } else {
+            entry
+        };
 
-    let spsr = match level {
-        ExecutionLevel::Kernel => 0x345u64, // EL1h, DAIF masked
-        ExecutionLevel::User => 0x000u64,   // EL0t
-    };
+        let spsr = match level {
+            ExecutionLevel::Kernel => 0x345u64, // EL1h, DAIF masked
+            ExecutionLevel::User => 0x000u64,   // EL0t
+        };
 
-    // x30 for context_switch_asm ret:
-    //   Kernel → entry (thread_trampoline calls the real entry)
-    //   User   → eret_to_user_stub (transitions to EL0)
-    let entry_x30: u64 = match level {
-        ExecutionLevel::Kernel => actual_entry as u64,
-        ExecutionLevel::User => &eret_to_user_stub as *const u8 as u64,
-    };
+        // x30 for context_switch_asm ret:
+        //   Kernel → entry (thread_trampoline calls the real entry)
+        //   User   → eret_to_user_stub (transitions to EL0)
+        let entry_x30: u64 = match level {
+            ExecutionLevel::Kernel => actual_entry as u64,
+            ExecutionLevel::User => &eret_to_user_stub as *const u8 as u64,
+        };
 
-    // SP_EL0 for user threads (0 for vivanta_kernel — unused in EL1h)
-    let sp_el0 = match level {
-        ExecutionLevel::Kernel => 0u64,
-        ExecutionLevel::User => user_stack_top as u64,
-    };
+        // SP_EL0 for user threads (0 for vivanta_kernel — unused in EL1h)
+        let sp_el0 = match level {
+            ExecutionLevel::Kernel => 0u64,
+            ExecutionLevel::User => user_stack_top as u64,
+        };
 
-    // ThreadContext lives at the BOTTOM of the kernel stack region.
-    let tc = stack_bottom as *mut ThreadContext;
-    core::ptr::write_bytes(tc as *mut u8, 0, core::mem::size_of::<ThreadContext>());
-    (*tc).x19_x30[11] = entry_x30; // x30 = trampoline or stub
-    (*tc).sp = stack_top as u64; // SP_EL1 = vivanta_kernel stack top
+        // ThreadContext lives at the BOTTOM of the kernel stack region.
+        let tc = stack_bottom as *mut ThreadContext;
+        core::ptr::write_bytes(tc as *mut u8, 0, core::mem::size_of::<ThreadContext>());
+        (*tc).x19_x30[11] = entry_x30; // x30 = trampoline or stub
+        (*tc).sp = stack_top as u64; // SP_EL1 = vivanta_kernel stack top
 
-    // Synthetic initial frame: needed only for user threads (eret_to_user_stub
-    // reads it at [SP_EL1 - FRAME_SIZE, SP_EL1) on first entry to EL0).
-    if level == ExecutionLevel::User {
-        let frame_loc = (stack_top - FRAME_SIZE) as *mut ExceptionFrame;
-        let x = [0u64; 31];
-        frame_loc.write(ExceptionFrame {
-            x,
-            sp: sp_el0,
-            elr: actual_entry as u64,
-            spsr,
-        });
+        // Synthetic initial frame: needed only for user threads (eret_to_user_stub
+        // reads it at [SP_EL1 - FRAME_SIZE, SP_EL1) on first entry to EL0).
+        if level == ExecutionLevel::User {
+            let frame_loc = (stack_top - FRAME_SIZE) as *mut ExceptionFrame;
+            let x = [0u64; 31];
+            frame_loc.write(ExceptionFrame {
+                x,
+                sp: sp_el0,
+                elr: actual_entry as u64,
+                spsr,
+            });
+        }
+
+        ArchContext::from_raw(tc as usize)
     }
-
-    ArchContext::from_raw(tc as usize)
 }
 
 // ---------------------------------------------------------------------------
 // context_capture_current — boot thread
 // ---------------------------------------------------------------------------
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn context_capture_current() -> ArchContext {
-    ArchContext::from_raw(&raw mut BOOT_BLOCK.thread_ctx as *mut ThreadContext as usize)
+    unsafe { ArchContext::from_raw(&raw mut BOOT_BLOCK.thread_ctx as *mut ThreadContext as usize) }
 }
 
 // ---------------------------------------------------------------------------
 // context_switch — unified context switch
 // ---------------------------------------------------------------------------
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn context_switch(old: *mut ArchContext, new: ArchContext) {
-    let old_tc = (*old).as_raw() as *mut ThreadContext;
-    let new_tc = new.as_raw() as *const ThreadContext;
-    context_switch_asm(old_tc, new_tc)
+    unsafe {
+        let old_tc = (*old).as_raw() as *mut ThreadContext;
+        let new_tc = new.as_raw() as *const ThreadContext;
+        context_switch_asm(old_tc, new_tc)
+    }
 }

@@ -32,7 +32,7 @@ impl Drop for InterruptGuard {
     }
 }
 
-extern "Rust" {
+unsafe extern "Rust" {
     /// Disable interrupts and return a RAII guard.
     /// Interrupts are restored when the guard is dropped.
     pub fn disable_interrupts() -> InterruptGuard;

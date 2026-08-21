@@ -44,7 +44,7 @@ pub enum ExecutionLevel {
     User,
 }
 
-extern "Rust" {
+unsafe extern "Rust" {
     /// Initialise a thread's vivanta_kernel stack with the given entry point
     /// and execution level.
     ///

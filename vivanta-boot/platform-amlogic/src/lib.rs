@@ -115,7 +115,9 @@ pub unsafe fn init_console_from_fdt(dtb_addr: *const u8) -> bool {
 
 /// Build memory map and count CPUs from FDT.
 pub unsafe fn build_memory_map(dtb_addr: *const u8) -> (vivanta_boot_common::MemoryMap, usize) {
-    let mut mem_map = vivanta_boot_common::MemoryMap::new();
-    let cpu_count = vivanta_boot_common::fdt::FdtScanner::report(dtb_addr, &mut mem_map);
-    (mem_map, cpu_count)
+    unsafe {
+        let mut mem_map = vivanta_boot_common::MemoryMap::new();
+        let cpu_count = vivanta_boot_common::fdt::FdtScanner::report(dtb_addr, &mut mem_map);
+        (mem_map, cpu_count)
+    }
 }

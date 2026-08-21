@@ -14,15 +14,17 @@ fn read_ttbr0() -> u64 {
 }
 
 pub unsafe fn run_smoke_test() {
-    let root_pa = read_ttbr0() & ADDR_MASK;
-    let pt = PageTable::new(root_pa);
+    unsafe {
+        let root_pa = read_ttbr0() & ADDR_MASK;
+        let pt = PageTable::new(root_pa);
 
-    test_descriptor_constants();
-    test_wx_encoding();
-    test_translate_known(&pt);
-    test_readback(&pt);
+        test_descriptor_constants();
+        test_wx_encoding();
+        test_translate_known(&pt);
+        test_readback(&pt);
 
-    println!("  MMU smoke test passed");
+        println!("  MMU smoke test passed");
+    }
 }
 
 unsafe fn test_translate_known(pt: &PageTable) {
@@ -37,9 +39,11 @@ unsafe fn test_translate_known(pt: &PageTable) {
 }
 
 unsafe fn test_readback(_pt: &PageTable) {
-    let test_addr = 0x4000_0000u64;
-    let val = core::ptr::read_volatile(test_addr as *const u64);
-    core::ptr::write_volatile(test_addr as *mut u64, val);
+    unsafe {
+        let test_addr = 0x4000_0000u64;
+        let val = core::ptr::read_volatile(test_addr as *const u64);
+        core::ptr::write_volatile(test_addr as *mut u64, val);
+    }
 }
 
 fn test_descriptor_constants() {
@@ -81,7 +85,7 @@ fn test_descriptor_constants() {
 /// — never AP=01 (EL0 read-write). Regression guard for
 /// docs/investigations/WX-user-code-ap-encoding.md.
 pub(crate) fn test_wx_encoding() {
-    use crate::mmu::{block_or_page_desc, flags_to_desc_bits, PageFlags};
+    use crate::mmu::{PageFlags, block_or_page_desc, flags_to_desc_bits};
     use vivanta_arch_api::mmu::MappingFlags as ApiFlags;
 
     // ap_bits truth table.

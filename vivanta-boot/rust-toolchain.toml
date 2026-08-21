@@ -1,0 +1,9 @@
+# Toolchain policy (ratified 2026-08-21)
+#
+# Vivanta targets Rust 1.98.0 stable across the whole workspace, including
+# the freestanding aarch64-unknown-none kernel targets. No nightly features
+# are used; pinning stable keeps host unit tests, clippy and the QEMU
+# kernel build on one reproducible compiler.
+[toolchain]
+channel = "1.98.0"
+targets = ["aarch64-unknown-none"]

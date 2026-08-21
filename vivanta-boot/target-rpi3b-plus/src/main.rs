@@ -49,7 +49,7 @@ core::arch::global_asm!(
 
 static UART: Pl011 = Pl011::new(PL011_BASE);
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn adapter_main() -> ! {
     init_uart_gpio();
     UART.init(250_000_000, 115_200);

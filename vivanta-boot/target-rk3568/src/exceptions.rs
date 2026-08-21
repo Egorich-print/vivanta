@@ -75,7 +75,7 @@ fn esr_class(esr: u64) -> &'static str {
 }
 
 /// Called from the assembly vector table.
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn exception_handler(
     frame: &ExceptionFrame,
     kind: u64,
@@ -134,26 +134,28 @@ pub unsafe extern "C" fn exception_handler(
 
 /// Install EL2 exception vectors from the asm table.
 pub unsafe fn init() {
-    let v: u64;
-    asm!(
-        "adrp {v}, exception_vectors",
-        "add {v}, {v}, :lo12:exception_vectors",
-        "msr VBAR_EL2, {v}",
-        "isb",
-        v = out(reg) v,
-    );
-    println!("[exn] VBAR_EL2 = 0x{:x}", v);
+    unsafe {
+        let v: u64;
+        asm!(
+            "adrp {v}, exception_vectors",
+            "add {v}, {v}, :lo12:exception_vectors",
+            "msr VBAR_EL2, {v}",
+            "isb",
+            v = out(reg) v,
+        );
+        println!("[exn] VBAR_EL2 = 0x{:x}", v);
+    }
 }
 
 /// Test: trigger synchronous exception via BRK #0.
 pub unsafe fn test_brk() {
     println!("[exn] triggering BRK #0 …");
-    asm!("brk #0");
+    unsafe { asm!("brk #0") };
 }
 
 /// Test: trigger Data Abort via invalid memory access.
 #[allow(dead_code)]
 pub unsafe fn test_fault() {
     println!("[exn] triggering Data Abort via null ptr read …");
-    core::ptr::read_volatile(core::ptr::null::<u64>());
+    unsafe { core::ptr::read_volatile(core::ptr::null::<u64>()) };
 }

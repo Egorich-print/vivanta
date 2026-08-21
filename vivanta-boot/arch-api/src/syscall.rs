@@ -6,7 +6,7 @@
 // passes it here unchanged. Do not redefine syscall numbers in this crate.
 // ---------------------------------------------------------------------------
 
-extern "Rust" {
+unsafe extern "Rust" {
     /// Dispatch a syscall from EL0.
     ///
     /// `num` is the syscall number (x8 in the Linux convention).

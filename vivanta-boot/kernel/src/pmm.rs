@@ -92,18 +92,20 @@ impl FrameAllocator for PmmBitmap {
 
 impl PmmBitmap {
     pub unsafe fn new(region: &AvailableRegion) -> Self {
-        assert!(
-            region.start % FRAME_SIZE == 0,
-            "PMM: region start ({:#x}) must be page-aligned",
-            region.start
-        );
-        let bitmap_start = region.start as *mut u8;
-        let region_size = region.end - region.start;
-        let mut pmm = Self::init(bitmap_start, region.start, region_size);
-        let bitmap_bytes = Self::bitmap_size(region_size);
-        let bitmap_pages = (bitmap_bytes as u64 + 0xFFF) / 0x1000;
-        pmm.reserve(region.start, bitmap_pages * 0x1000);
-        pmm
+        unsafe {
+            assert!(
+                region.start % FRAME_SIZE == 0,
+                "PMM: region start ({:#x}) must be page-aligned",
+                region.start
+            );
+            let bitmap_start = region.start as *mut u8;
+            let region_size = region.end - region.start;
+            let mut pmm = Self::init(bitmap_start, region.start, region_size);
+            let bitmap_bytes = Self::bitmap_size(region_size);
+            let bitmap_pages = (bitmap_bytes as u64 + 0xFFF) / 0x1000;
+            pmm.reserve(region.start, bitmap_pages * 0x1000);
+            pmm
+        }
     }
 
     /// Build a bitmap covering ALL available regions (G2: managed RAM >= 95%
@@ -120,48 +122,52 @@ impl PmmBitmap {
     ///   `memory_discovery::discover`).
     /// - `first.start` must be page-aligned.
     pub unsafe fn new_multi(regions: &[AvailableRegion]) -> Self {
-        assert!(!regions.is_empty(), "PMM: no available regions");
-        let first = &regions[0];
-        let last = &regions[regions.len() - 1];
-        assert!(
-            first.start % FRAME_SIZE == 0,
-            "PMM: region start ({:#x}) must be page-aligned",
-            first.start
-        );
-        assert!(
-            last.end % FRAME_SIZE == 0,
-            "PMM: region end ({:#x}) must be page-aligned",
-            last.end
-        );
+        unsafe {
+            assert!(!regions.is_empty(), "PMM: no available regions");
+            let first = &regions[0];
+            let last = &regions[regions.len() - 1];
+            assert!(
+                first.start % FRAME_SIZE == 0,
+                "PMM: region start ({:#x}) must be page-aligned",
+                first.start
+            );
+            assert!(
+                last.end % FRAME_SIZE == 0,
+                "PMM: region end ({:#x}) must be page-aligned",
+                last.end
+            );
 
-        let span_start = first.start;
-        let span_end = last.end;
-        let bitmap_start = span_start as *mut u8;
-        let mut pmm = Self::init(bitmap_start, span_start, span_end - span_start);
+            let span_start = first.start;
+            let span_end = last.end;
+            let bitmap_start = span_start as *mut u8;
+            let mut pmm = Self::init(bitmap_start, span_start, span_end - span_start);
 
-        // Reserve the bitmap itself (first region).
-        let bitmap_bytes = Self::bitmap_size(span_end - span_start);
-        let bitmap_pages = (bitmap_bytes as u64 + 0xFFF) / 0x1000;
-        pmm.reserve(span_start, bitmap_pages * 0x1000);
+            // Reserve the bitmap itself (first region).
+            let bitmap_bytes = Self::bitmap_size(span_end - span_start);
+            let bitmap_pages = (bitmap_bytes as u64 + 0xFFF) / 0x1000;
+            pmm.reserve(span_start, bitmap_pages * 0x1000);
 
-        // Reserve gaps between usable regions.
-        for w in regions.windows(2) {
-            pmm.reserve(w[0].end, w[1].start - w[0].end);
+            // Reserve gaps between usable regions.
+            for w in regions.windows(2) {
+                pmm.reserve(w[0].end, w[1].start - w[0].end);
+            }
+
+            pmm
         }
-
-        pmm
     }
 
     pub unsafe fn init(bitmap_start: *mut u8, region_start: u64, region_size: u64) -> Self {
-        let total_frames = (region_size / FRAME_SIZE) as usize;
-        let byte_len = Self::bitmap_size(region_size);
-        core::ptr::write_bytes(bitmap_start, 0, byte_len);
-        PmmBitmap {
-            bitmap: bitmap_start,
-            total_frames,
-            region_start,
-            allocated_count: 0,
-            reserved_count: 0,
+        unsafe {
+            let total_frames = (region_size / FRAME_SIZE) as usize;
+            let byte_len = Self::bitmap_size(region_size);
+            core::ptr::write_bytes(bitmap_start, 0, byte_len);
+            PmmBitmap {
+                bitmap: bitmap_start,
+                total_frames,
+                region_start,
+                allocated_count: 0,
+                reserved_count: 0,
+            }
         }
     }
 

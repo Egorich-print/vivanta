@@ -81,21 +81,21 @@ core::arch::global_asm!(
     rust_main = sym rust_main,
 );
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub extern "C" fn rust_main() -> ! {
     // 1. Zero page tables
     unsafe {
-        core::ptr::write_bytes(&mut L1_TABLE as *mut PageTable as *mut u8, 0, 4096);
-        core::ptr::write_bytes(&mut L2_TABLE_0 as *mut PageTable as *mut u8, 0, 4096);
-        core::ptr::write_bytes(&mut L2_TABLE_1 as *mut PageTable as *mut u8, 0, 4096);
+        core::ptr::write_bytes(&raw mut L1_TABLE as *mut PageTable as *mut u8, 0, 4096);
+        core::ptr::write_bytes(&raw mut L2_TABLE_0 as *mut PageTable as *mut u8, 0, 4096);
+        core::ptr::write_bytes(&raw mut L2_TABLE_1 as *mut PageTable as *mut u8, 0, 4096);
     }
 
     // 2. Build L1 table
     //    L1[0] → L2_TABLE_0 (covers 0x0000_0000 – 0x3FFF_FFFF)
     //    L1[1] → L2_TABLE_1 (covers 0x4000_0000 – 0x7FFF_FFFF)
     unsafe {
-        L1_TABLE.0[0] = table_desc(&L2_TABLE_0 as *const PageTable as u64);
-        L1_TABLE.0[1] = table_desc(&L2_TABLE_1 as *const PageTable as u64);
+        L1_TABLE.0[0] = table_desc(&raw const L2_TABLE_0 as *const PageTable as u64);
+        L1_TABLE.0[1] = table_desc(&raw const L2_TABLE_1 as *const PageTable as u64);
     }
 
     // 3. Build L2_TABLE_0: map UART at 0x0900_0000 as 2MB Device block
@@ -143,7 +143,7 @@ pub extern "C" fn rust_main() -> ! {
     }
 
     // 8. Set TTBR0_EL1 to L1 table
-    let l1_addr = unsafe { &L1_TABLE as *const PageTable as u64 };
+    let l1_addr = &raw const L1_TABLE as *const PageTable as u64;
     unsafe {
         core::arch::asm!("msr ttbr0_el1, {}", in(reg) l1_addr);
     }

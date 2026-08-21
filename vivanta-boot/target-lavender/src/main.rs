@@ -64,7 +64,7 @@ core::arch::global_asm!(
     "b 3b",
 );
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn adapter_main() -> ! {
     vivanta_platform_sdm660::init_console();
 

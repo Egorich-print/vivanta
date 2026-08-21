@@ -94,7 +94,7 @@ core::arch::global_asm!(
     "user_code_end:",
 );
 
-extern "C" {
+unsafe extern "C" {
     static user_code_start: u8;
     static user_code_end: u8;
 }
@@ -133,7 +133,7 @@ core::arch::global_asm!(
     "fault_code_end:",
 );
 
-extern "C" {
+unsafe extern "C" {
     static fault_code_start: u8;
     static fault_code_end: u8;
 }
@@ -144,14 +144,16 @@ pub const FAULT_STACK_VA: u64 = 0x5F01_0000;
 
 /// Copy the faulting code into a fresh physical frame and return its address.
 pub unsafe fn fault_code_pa(alloc: &mut dyn vivanta_arch_api::pmm::FrameAllocator) -> u64 {
-    let pa = alloc.alloc_frame().expect("fault code frame").addr;
-    let src = &fault_code_start as *const u8;
-    let len = (&fault_code_end as *const u8).offset_from(src) as usize;
-    core::ptr::copy_nonoverlapping(src, pa as *mut u8, len);
-    if len < 4096 {
-        core::ptr::write_bytes((pa as *mut u8).add(len), 0u8, 4096 - len);
+    unsafe {
+        let pa = alloc.alloc_frame().expect("fault code frame").addr;
+        let src = &fault_code_start as *const u8;
+        let len = (&fault_code_end as *const u8).offset_from(src) as usize;
+        core::ptr::copy_nonoverlapping(src, pa as *mut u8, len);
+        if len < 4096 {
+            core::ptr::write_bytes((pa as *mut u8).add(len), 0u8, 4096 - len);
+        }
+        pa
     }
-    pa
 }
 
 fn user_code_size() -> usize {
@@ -209,7 +211,7 @@ impl UserBootstrap {
 // SVC handler — called from exception vector for lower_aarch64_sync
 // ---------------------------------------------------------------------------
 
-extern "Rust" {
+unsafe extern "Rust" {
     fn syscall_dispatch(
         num: u64,
         arg0: u64,
@@ -221,42 +223,44 @@ extern "Rust" {
     ) -> u64;
 }
 
-#[no_mangle]
+#[unsafe(no_mangle)]
 pub unsafe extern "C" fn el0_sync_handler(
     frame: &mut ExceptionFrame,
     _kind: u64,
     esr: u64,
     far: u64,
 ) {
-    let ec = (esr >> 26) & 0x3f;
-    if ec == 0b010101 {
-        // SVC (AArch64) from EL0 — dispatch syscall.
-        // ARM: for SVC, ELR_EL1 points to the instruction AFTER the SVC
-        // (the SVC is architecturally executed), so we return it unchanged.
-        let ret = syscall_dispatch(
-            frame.x[8], frame.x[0], frame.x[1], frame.x[2], frame.x[3], frame.x[4], frame.x[5],
-        );
-        frame.x[0] = ret;
-    } else {
-        // G3 fault containment: any other synchronous EL0 exception (data
-        // abort, undef, alignment, etc.) terminates the current task. We do
-        // NOT skip the faulting instruction (`elr += 4`) — that would silently
-        // mask faults. The kernel handles the fault as a task-fatal event.
-        vivanta_boot_common::println!(
-            "  EL0 fault: ESR={:#x} EC={} FAR={:#x} ELR={:#x} — terminating task",
-            esr,
-            ec,
-            far,
-            frame.elr
-        );
-        // Terminate the current task and switch to the next runnable thread.
-        // This function does not return (context switch to another thread).
-        user_fault_terminate();
+    unsafe {
+        let ec = (esr >> 26) & 0x3f;
+        if ec == 0b010101 {
+            // SVC (AArch64) from EL0 — dispatch syscall.
+            // ARM: for SVC, ELR_EL1 points to the instruction AFTER the SVC
+            // (the SVC is architecturally executed), so we return it unchanged.
+            let ret = syscall_dispatch(
+                frame.x[8], frame.x[0], frame.x[1], frame.x[2], frame.x[3], frame.x[4], frame.x[5],
+            );
+            frame.x[0] = ret;
+        } else {
+            // G3 fault containment: any other synchronous EL0 exception (data
+            // abort, undef, alignment, etc.) terminates the current task. We do
+            // NOT skip the faulting instruction (`elr += 4`) — that would silently
+            // mask faults. The kernel handles the fault as a task-fatal event.
+            vivanta_boot_common::println!(
+                "  EL0 fault: ESR={:#x} EC={} FAR={:#x} ELR={:#x} — terminating task",
+                esr,
+                ec,
+                far,
+                frame.elr
+            );
+            // Terminate the current task and switch to the next runnable thread.
+            // This function does not return (context switch to another thread).
+            user_fault_terminate();
+        }
     }
 }
 
 // Kernel-provided hook: terminate the task that caused an EL0 fault.
 // Implemented by vivanta_kernel as `thread_exit`; never returns.
-extern "Rust" {
+unsafe extern "Rust" {
     fn user_fault_terminate() -> !;
 }
