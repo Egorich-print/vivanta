@@ -690,7 +690,10 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             vivanta_arch_api::mmu::activate_address_space(vm_root);
 
             // 1. allocate + map 3 pages from the VA allocator.
-            let frame = pmm.alloc_frame().expect("vm-test frame");
+            // OWNERSHIP RULE: mapping 3 pages requires owning 3 frames.
+            let frame = pmm
+                .alloc_contiguous(3)
+                .expect("vm-test contiguous 3 frames");
             let va0 = vmm::address_space_mut_by(vm_as)
                 .map_new_range(
                     frame.addr,
@@ -884,6 +887,247 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         println!("  [VM] lifecycle PASS");
 
         // ------------------------------------------------------------------
+        // M6.0 lazy VM test: demand-fill, page-granular materialization,
+        // mprotect-before-fault, munmap ownership, OOM rollback.
+        // ------------------------------------------------------------------
+        println!("Lazy VM test:");
+        vmm::faults::set_backing_context(
+            system_state.memory_manager_mut() as *mut _,
+            &raw mut pmm_backend as *mut dyn memory::MemoryBackend,
+        );
+        let lz_root = build_root("VmLazyAS", 0, 0, None);
+        let lz_as = vmm::register(lz_root, vmm::AddressSpaceFlags::User);
+        {
+            let mrm = system_state.memory_manager_mut();
+            let mut as_alloc = memory::AsPageTableAllocator::new(
+                mrm as *mut _,
+                &raw mut pmm_backend as *mut dyn memory::MemoryBackend,
+                lz_as,
+            );
+            let kas_root = vmm::lookup_root(crate::vmm::KERNEL_ADDRESS_SPACE_ID);
+            let _irq = vivanta_arch_api::interrupts::disable_interrupts();
+            vivanta_arch_api::mmu::activate_address_space(lz_root);
+
+            use vivanta_arch_api::mmu::MappingFlags as ApiMFlags;
+            // 1. reserve 16 KiB lazy RW.
+            let va = vmm::address_space_mut_by(lz_as)
+                .reserve_lazy(16 * 4096, ApiMFlags::read_write(), 900, 4096)
+                .expect("reserve_lazy");
+            assert!(va >= vmm::USER_VA_BASE && va < vmm::USER_VA_END);
+            vmm::address_space_mut_by(lz_as)
+                .verify_hardware_consistency()
+                .expect("lazy reservation must have no hardware image");
+
+            // 2. read page 0 -> translation fault -> demand fill -> retry.
+            let v0 = core::ptr::read_volatile(va as *const u64);
+            assert_eq!(v0, 0, "demand-filled page must be zero-initialized");
+
+            // 3. exactly one page materialized (page-granular, Phase 9).
+            {
+                let aspace = vmm::address_space_mut_by(lz_as);
+                aspace
+                    .verify_hardware_consistency()
+                    .expect("post-fill verify");
+                assert!(
+                    aspace
+                        .query(va)
+                        .is_some_and(|m| m.backing == vmm::mapping::Backing::Present),
+                    "faulted page must be Present"
+                );
+                assert!(
+                    aspace
+                        .query(va + 4096)
+                        .is_some_and(|m| m.backing == vmm::mapping::Backing::LazyAnonymous),
+                    "rest of range must stay Lazy"
+                );
+            }
+
+            // 4. write page 2 -> second demand fill.
+            core::ptr::write_volatile((va + 8192) as *mut u64, 0xCAFE);
+            assert_eq!(core::ptr::read_volatile((va + 8192) as *const u64), 0xCAFE);
+
+            // 5. mprotect the WHOLE range to RO before page 1 is touched:
+            //    metadata changes for Lazy pieces, hardware for Present ones.
+            vmm::address_space_mut_by(lz_as)
+                .protect(va, 16 * 4096, ApiMFlags::from_bits(0), &mut as_alloc)
+                .expect("mprotect RO");
+            // 6. read page 1 -> fill must use CURRENT (RO) permissions.
+            let _v1 = core::ptr::read_volatile((va + 4096) as *const u64);
+            {
+                let desc = vivanta_arch_api::mmu::mmu_leaf_descriptor(
+                    vmm::lookup_root(lz_as).0 as u64,
+                    va + 4096,
+                );
+                let expected = vivanta_arch_api::mmu::mmu_permission_bits(ApiMFlags::from_bits(0));
+                assert_eq!(
+                    desc & expected,
+                    expected,
+                    "demand fill must apply post-mprotect permissions"
+                );
+                // Privilege policy: anonymous fills are kernel-only in M6.0
+                // — no EL0 access may appear regardless of mapping flags.
+                assert!(
+                    desc & (1 << 6) == 0,
+                    "demand fill must not grant EL0 access: desc={desc:#x}"
+                );
+            }
+            vmm::address_space_mut_by(lz_as)
+                .verify_hardware_consistency()
+                .expect("verify after RO fill");
+
+            // 7. munmap everything: Anonymous frames return to PMM, Lazy
+            //    pieces vanish without allocation.
+            let free_pre = pmm.free_count();
+            let tables_pre = vmm::tables::count_for_as(lz_as);
+            vmm::address_space_mut_by(lz_as)
+                .unmap_range(va, 16 * 4096, &mut as_alloc)
+                .expect("munmap lazy range");
+            let delta = pmm.free_count() - free_pre;
+            // 3 anonymous frames (pages 0/1/2) + reclaimed fill-time tables.
+            let tables_reclaimed = tables_pre - vmm::tables::count_for_as(lz_as);
+            assert_eq!(
+                delta,
+                3 + tables_reclaimed,
+                "munmap must return anon frames + reclaimed tables"
+            );
+            vmm::address_space_mut_by(lz_as)
+                .verify_hardware_consistency()
+                .expect("no ghost leaves after munmap");
+
+            // 8. OOM rollback (deterministic): failing allocator must leave
+            //    the mapping Lazy and untouched.
+            struct OomAlloc;
+            impl vivanta_arch_api::mmu::PageTableAllocator for OomAlloc {
+                fn alloc_page_table_frame(&mut self) -> u64 {
+                    panic!("infallible alloc must not be reached on the fault path")
+                }
+                fn try_alloc_page_table_frame(&mut self) -> Option<u64> {
+                    None
+                }
+            }
+            let va2 = vmm::address_space_mut_by(lz_as)
+                .reserve_lazy(4096, ApiMFlags::read_write(), 901, 4096)
+                .expect("reserve for oom test");
+            let mut oom = OomAlloc;
+            assert!(
+                !vmm::address_space_mut_by(lz_as).resolve_lazy_fault(va2, false, &mut oom),
+                "OOM must not resolve"
+            );
+            vmm::address_space_mut_by(lz_as)
+                .verify_hardware_consistency()
+                .expect("OOM must leave mapping Lazy/untouched");
+
+            // 9. negative classification (ADR-032 §2.2): unmapped VA and
+            //    write-to-RO are never resolvable.
+            assert!(!vmm::address_space_mut_by(lz_as).resolve_lazy_fault(
+                va2 + 0x100_0000,
+                false,
+                &mut as_alloc,
+            ));
+            let va_ro = vmm::address_space_mut_by(lz_as)
+                .reserve_lazy(4096, ApiMFlags::from_bits(0), 902, 4096)
+                .expect("reserve RO piece");
+            assert!(
+                !vmm::address_space_mut_by(lz_as).resolve_lazy_fault(va_ro, true, &mut as_alloc),
+                "write to a lazy RO piece must never resolve"
+            );
+            vmm::address_space_mut_by(lz_as)
+                .verify_hardware_consistency()
+                .expect("rejected fill must leave state untouched");
+
+            // 9b. page-granular proof: fault at a NON-base page of a fresh
+            //     piece — base must stay Lazy, faulted page becomes Present.
+            let va4 = vmm::address_space_mut_by(lz_as)
+                .reserve_lazy(16 * 4096, ApiMFlags::read_write(), 903, 4096)
+                .expect("reserve pg-granular");
+            let _ = core::ptr::read_volatile((va4 + 4096) as *const u64);
+            {
+                let aspace = vmm::address_space_mut_by(lz_as);
+                assert!(
+                    aspace
+                        .query(va4 + 4096)
+                        .is_some_and(|m| m.backing == vmm::mapping::Backing::Present),
+                    "faulted page must be the materialized one"
+                );
+                assert!(
+                    aspace
+                        .query(va4)
+                        .is_some_and(|m| m.backing == vmm::mapping::Backing::LazyAnonymous),
+                    "piece base must stay Lazy"
+                );
+                aspace
+                    .verify_hardware_consistency()
+                    .expect("pg-granular verify");
+            }
+            vmm::address_space_mut_by(lz_as)
+                .unmap_range(va4, 16 * 4096, &mut as_alloc)
+                .expect("unmap pg-granular");
+
+            // 9c. deterministic VM stress: reserve/fault/protect/unmap
+            //     cycles with full verification after every iteration.
+            let free_stress_pre = pmm.free_count();
+            for i in 0..200u32 {
+                let perms_i = if i % 2 == 0 {
+                    ApiMFlags::read_write()
+                } else {
+                    ApiMFlags::from_bits(0)
+                };
+                let tables_iter = vmm::tables::count_for_as(lz_as);
+                let vs = vmm::address_space_mut_by(lz_as)
+                    .reserve_lazy(8 * 4096, perms_i, 1000 + i as u64, 4096)
+                    .expect("stress reserve");
+                // Fault two non-base pages. Access type matches the
+                // iteration's permissions: RW iterations write, RO
+                // iterations read (a write would be a correct rejection).
+                let _ = core::ptr::read_volatile((vs + 4096) as *const u64);
+                if perms_i.is_read_write() {
+                    core::ptr::write_volatile((vs + 3 * 4096) as *mut u64, i as u64);
+                    assert_eq!(
+                        core::ptr::read_volatile((vs + 3 * 4096) as *const u64),
+                        i as u64
+                    );
+                } else {
+                    let _ = core::ptr::read_volatile((vs + 3 * 4096) as *const u64);
+                }
+                {
+                    let aspace = vmm::address_space_mut_by(lz_as);
+                    aspace.verify_hardware_consistency().expect("stress verify");
+                    assert!(
+                        aspace
+                            .query(vs + 4096)
+                            .is_some_and(|m| m.backing == vmm::mapping::Backing::Present),
+                        "stress {i}: page not materialized"
+                    );
+                }
+                vmm::address_space_mut_by(lz_as)
+                    .unmap_range(vs, 8 * 4096, &mut as_alloc)
+                    .expect("stress unmap");
+                let free_now = pmm.free_count();
+                assert_eq!(free_now, free_stress_pre, "stress {i}: frame leak");
+                assert_eq!(
+                    vmm::tables::count_for_as(lz_as),
+                    tables_iter,
+                    "stress {i}: table registry leak"
+                );
+            }
+            println!("  [STRESS] 200 reserve/fill/unmap cycles PASS");
+
+            // 10. cleanup: Lazy reservations unmap without any allocation.
+            vmm::address_space_mut_by(lz_as)
+                .unmap_range(va2, 4096, &mut as_alloc)
+                .expect("unmap lazy reservation");
+            vmm::address_space_mut_by(lz_as)
+                .unmap_range(va_ro, 4096, &mut as_alloc)
+                .expect("unmap RO reservation");
+            vmm::address_space_mut_by(lz_as)
+                .verify_hardware_consistency()
+                .expect("clean teardown");
+            vivanta_arch_api::mmu::activate_address_space(kas_root);
+        }
+        vmm::unregister(lz_as).expect("unregister lazy AS");
+        println!("  [LAZY] demand-fill/mprotect/munmap/OOM PASS");
+
+        // ------------------------------------------------------------------
         // M6 process-lifecycle demo: the demo user task (tid) already ran and
         // exited with code 0 through the new thread_exit path. Observe its Task
         // state transitions and verify reaping returns frames to the PMM
@@ -996,6 +1240,14 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         loop {
             scheduler::yield_now();
         }
+    }
+}
+
+/// Diagnostic: walk the faulting address's descriptors at fatal time.
+pub fn dump_walk_at(root_pa: u64, va: u64) {
+    vivanta_boot_common::println!("  [FLT-WALK] root={:#x} va={:#x}", root_pa, va);
+    unsafe {
+        vivanta_arch_api::boot::mmu::dump_walk(root_pa, va, "fault");
     }
 }
 
