@@ -1,9 +1,16 @@
-use super::mapping::{Mapping, MappingSet, VirtRange};
+use super::mapping::{Backing, Mapping, MappingSet, PhysOwnership, VirtRange};
 use super::tables;
 use vivanta_arch_api::mmu::{MappingFlags, PageTableAllocator, RootPageTable};
 use vivanta_vm::va::{VaAllocator, VaRegion};
 
 pub type AddressSpaceId = u64;
+
+// Storage-budget guard (mission-2 lesson: AddressSpace temporaries live on
+// the boot stack in register()/init_kernel_address_space; the stack is
+// 64 KiB and kernel_main locals share it). Growth past this bound must be
+// a conscious decision, never an accident of struct evolution.
+const _: () = assert!(core::mem::size_of::<AddressSpace>() <= 12 * 1024);
+const _: () = assert!(core::mem::size_of::<MappingSet>() <= 5 * 1024);
 
 pub const KERNEL_ADDRESS_SPACE_ID: AddressSpaceId = 0;
 const MAX_ADDRESS_SPACES: usize = 8;
@@ -173,32 +180,242 @@ impl AddressSpace {
             return Err(VmmError::MappingTableFull);
         }
 
-        // SAFETY: coverage proven above — every page in range is mapped.
-        unsafe {
-            vivanta_arch_api::mmu::mmu_unmap(self.root, vaddr, size, alloc);
-        }
+        // SAFETY: each Present run is fully covered by live mappings;
+        // Lazy/Reserved pieces have no hardware image to clear.
+        self.for_present_runs(vaddr, size, |run_start, run_len| unsafe {
+            vivanta_arch_api::mmu::mmu_unmap(self.root, run_start, run_len, alloc);
+        });
 
         for (slot, m) in affected.iter().take(n) {
             let old_flags = m.permissions;
             let base = m.virt_range.base;
             let end = m.virt_range.end();
+            // Present+Anonymous pieces fully covered by the unmap release
+            // their frames (ADR-032 §4): the frame is reachable only through
+            // this mapping, so ownership ends here.
+            if m.backing == Backing::Present
+                && m.phys == PhysOwnership::Anonymous
+                && base >= vaddr
+                && end <= range_end
+            {
+                if let Some(backend) = crate::vmm::faults::anonymous_backend() {
+                    // SAFETY: backend outlives boot; single-core unmap.
+                    unsafe { (*backend).deallocate(m.pa, m.virt_range.size) };
+                }
+            }
             self.mappings.remove(*slot);
             if base < vaddr {
-                let _ = self.mappings.insert(Mapping::new(
-                    VirtRange::new(base, vaddr - base),
-                    m.object_id,
-                    old_flags,
-                ));
+                let mut piece = *m;
+                piece.virt_range = VirtRange::new(base, vaddr - base);
+                piece.permissions = old_flags;
+                let _ = self.mappings.insert(piece);
             }
             if end > range_end {
-                let _ = self.mappings.insert(Mapping::new(
-                    VirtRange::new(range_end, end - range_end),
-                    m.object_id,
-                    old_flags,
-                ));
+                let mut piece = *m;
+                piece.virt_range = VirtRange::new(range_end, end - range_end);
+                piece.permissions = old_flags;
+                let _ = self.mappings.insert(piece);
             }
         }
         self.reclaim_empty_tables(alloc);
+        Ok(())
+    }
+
+    /// Invoke `f(run_start, run_len)` for every maximal run of *Present*
+    /// shadow pieces inside `[vaddr, vaddr+size)`. Lazy/Reserved pieces
+    /// have no hardware image and are skipped; adjacent Present pieces are
+    /// coalesced so the hardware is touched once per contiguous run.
+    fn for_present_runs(&self, vaddr: u64, size: u64, mut f: impl FnMut(u64, u64)) {
+        let range_end = vaddr + size;
+        let mut pieces: alloc::vec::Vec<(u64, u64)> = self
+            .mappings
+            .iter()
+            .filter(|m| {
+                m.backing == Backing::Present
+                    && m.virt_range.base < range_end
+                    && vaddr < m.virt_range.end()
+            })
+            .map(|m| {
+                (
+                    m.virt_range.base.max(vaddr),
+                    m.virt_range.end().min(range_end),
+                )
+            })
+            .collect();
+        pieces.sort_unstable();
+        let mut i = 0;
+        while i < pieces.len() {
+            let (start, mut end) = pieces[i];
+            while i + 1 < pieces.len() && pieces[i + 1].0 == end {
+                end = pieces[i + 1].1;
+                i += 1;
+            }
+            f(start, end - start);
+            i += 1;
+        }
+    }
+
+    /// Reserve a lazy anonymous mapping: VA range becomes occupied, no
+    /// hardware mapping is created, first access demand-fills one page.
+    pub fn reserve_lazy(
+        &mut self,
+        size: u64,
+        permissions: MappingFlags,
+        object_id: u64,
+        align: u64,
+    ) -> Result<u64, VmmError> {
+        let vaddr = self.va.alloc(size, align).map_err(|_| VmmError::OutOfVa)?;
+        let mapping = Mapping::lazy_anonymous(VirtRange::new(vaddr, size), object_id, permissions);
+        if self.mappings.insert(mapping).is_none() {
+            let _ = self.va.free(vaddr, size);
+            return Err(VmmError::MappingTableFull);
+        }
+        Ok(vaddr)
+    }
+
+    /// Resolve a data abort at `va` by materializing exactly one page of a
+    /// LazyAnonymous piece (ADR-032 §2.1). Returns false when the fault is
+    /// not resolvable — the caller must treat it as fatal.
+    ///
+    /// Transaction order (hard rule #6): validate → allocate+zero →
+    /// hardware map → shadow transition last.
+    pub fn resolve_lazy_fault(
+        &mut self,
+        va: u64,
+        write: bool,
+        alloc: &mut dyn PageTableAllocator,
+    ) -> bool {
+        let Some(m) = self.query(va & !0xFFF) else {
+            vivanta_boot_common::println!("  [VMR] reject: no mapping {:#x}", va);
+            return false;
+        };
+        if m.backing != Backing::LazyAnonymous {
+            vivanta_boot_common::println!(
+                "  [VMR] reject: state={:?} {:#x} piece={:#x}..{:#x} perms={:?}",
+                m.backing,
+                va,
+                m.virt_range.base,
+                m.virt_range.end(),
+                m.permissions
+            );
+            return false;
+        }
+        // Permission gate: write requires RW; reads are granted by every
+        // encodable permission combination (all Vivanta flags are readable).
+        if write && !m.permissions.is_read_write() {
+            vivanta_boot_common::println!(
+                "  [VMR] reject: write to RO {:#x} piece={:#x}..{:#x} perms={:?}",
+                va,
+                m.virt_range.base,
+                m.virt_range.end(),
+                m.permissions
+            );
+            return false;
+        }
+        let piece_base = m.virt_range.base;
+        let piece_end = m.virt_range.end();
+        // Fill uses CURRENT permissions — post-mprotect state (hard rule #10).
+        let perms = m.permissions;
+        let object_id = m.object_id;
+
+        let page = va & !0xFFF;
+
+        // Allocate + zero the backing frame.
+        let Some(frame) = alloc.try_alloc_page_table_frame() else {
+            vivanta_boot_common::println!("  [VM] OOM during demand fill at {:#x}", va);
+            return false;
+        };
+        // SAFETY: frame is a live 4 KiB allocation.
+        unsafe { core::ptr::write_bytes(frame as *mut u8, 0, 4096) };
+
+        // SAFETY: page is inside a Lazy piece — no descriptor exists for it.
+        unsafe {
+            vivanta_arch_api::mmu::mmu_map_object(self.root, page, frame, 4096, perms, alloc);
+        }
+        vivanta_boot_common::println!(
+            "  [VMR] mapped page={:#x} frame={:#x} root={:#x}",
+            page,
+            frame,
+            self.root.0
+        );
+
+        // Shadow transition (transactional, value-keyed): split
+        // [piece_base..piece_end) into [head Lazy][Present page][tail Lazy].
+        let mut pieces: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
+        if piece_base < page {
+            pieces.push(Mapping::lazy_anonymous(
+                VirtRange::new(piece_base, page - piece_base),
+                object_id,
+                perms,
+            ));
+        }
+        pieces.push(Mapping::present(
+            VirtRange::new(page, 4096),
+            object_id,
+            perms,
+            frame,
+            PhysOwnership::Anonymous,
+        ));
+        if piece_end > page + 4096 {
+            pieces.push(Mapping::lazy_anonymous(
+                VirtRange::new(page + 4096, piece_end - page - 4096),
+                object_id,
+                perms,
+            ));
+        }
+        let affected_value = Mapping::lazy_anonymous(m.virt_range, object_id, perms);
+        self.mappings
+            .replace_slots(core::slice::from_ref(&affected_value), &pieces)
+            .map_err(|_| VmmError::MappingTableFull)
+            .expect("lazy split: capacity pre-checked by query");
+        true
+    }
+
+    /// INV-VM-001 mechanical verifier: for every shadow piece in this
+    /// address space, the hardware image must match the logical state
+    /// exactly. Present ⇔ valid leaf with matching permission bits;
+    /// Lazy/Reserved ⇔ no leaf. Only meaningful for allocator-managed ASes.
+    pub fn verify_hardware_consistency(&self) -> Result<(), VmmError> {
+        for (_, m) in self.mappings.iter_with_slots() {
+            match m.backing {
+                Backing::Present => {
+                    let mut off = 0u64;
+                    while off < m.virt_range.size {
+                        // SAFETY: read-only descriptor probe.
+                        let desc = unsafe {
+                            vivanta_arch_api::mmu::mmu_leaf_descriptor(
+                                self.root.0 as u64,
+                                m.virt_range.base + off,
+                            )
+                        };
+                        if desc & 1 == 0 {
+                            return Err(VmmError::NotMapped); // Present w/o hw
+                        }
+                        let expected = vivanta_arch_api::mmu::mmu_permission_bits(m.permissions);
+                        if desc & expected != expected {
+                            return Err(VmmError::InvalidRange); // perm drift
+                        }
+                        off += 4096;
+                    }
+                }
+                Backing::LazyAnonymous | Backing::Reserved => {
+                    let mut off = 0u64;
+                    while off < m.virt_range.size {
+                        // SAFETY: read-only descriptor probe.
+                        let desc = unsafe {
+                            vivanta_arch_api::mmu::mmu_leaf_descriptor(
+                                self.root.0 as u64,
+                                m.virt_range.base + off,
+                            )
+                        };
+                        if desc & 1 != 0 {
+                            return Err(VmmError::InvalidRange); // ghost PTE
+                        }
+                        off += 4096;
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -312,43 +529,41 @@ impl AddressSpace {
             return Err(VmmError::MappingTableFull);
         }
 
-        // 3. Program hardware for the whole requested range at once.
+        // 3. Program hardware — but only over Present runs. Lazy/Reserved
+        // pieces have no descriptors to rewrite (ADR-032 §1); their
+        // permission change is metadata-only and takes effect when the
+        // page materializes.
         //
-        // SAFETY: coverage was proven above — every page in [vaddr, end)
-        // is mapped in this address space.
-        unsafe {
-            vivanta_arch_api::mmu::mmu_protect(self.root, vaddr, size, new_flags, alloc);
-        }
+        // SAFETY: each run is fully covered by Present mappings.
+        self.for_present_runs(vaddr, size, |run_start, run_len| unsafe {
+            vivanta_arch_api::mmu::mmu_protect(self.root, run_start, run_len, new_flags, alloc);
+        });
 
-        // 4. Commit shadow pieces.
+        // 4. Commit shadow pieces. Every piece keeps its ORIGINAL
+        // backing/pa/phys — only permissions change (ADR-032: a Lazy piece
+        // must never be committed as Present).
         for (slot, m) in affected.iter().take(n) {
             let old_flags = m.permissions;
             let base = m.virt_range.base;
             let end = m.virt_range.end();
             self.mappings.remove(*slot);
-            // Head piece keeps old permissions.
             if base < vaddr {
-                let _ = self.mappings.insert(Mapping::new(
-                    VirtRange::new(base, vaddr - base),
-                    m.object_id,
-                    old_flags,
-                ));
+                let mut piece = *m;
+                piece.virt_range = VirtRange::new(base, vaddr - base);
+                piece.permissions = old_flags;
+                let _ = self.mappings.insert(piece);
             }
-            // Covered piece gets the new permissions.
             let cov_start = vaddr.max(base);
             let cov_end = range_end.min(end);
-            let _ = self.mappings.insert(Mapping::new(
-                VirtRange::new(cov_start, cov_end - cov_start),
-                m.object_id,
-                new_flags,
-            ));
-            // Tail piece keeps old permissions.
+            let mut piece = *m;
+            piece.virt_range = VirtRange::new(cov_start, cov_end - cov_start);
+            piece.permissions = new_flags;
+            let _ = self.mappings.insert(piece);
             if end > range_end {
-                let _ = self.mappings.insert(Mapping::new(
-                    VirtRange::new(range_end, end - range_end),
-                    m.object_id,
-                    old_flags,
-                ));
+                let mut piece = *m;
+                piece.virt_range = VirtRange::new(range_end, end - range_end);
+                piece.permissions = old_flags;
+                let _ = self.mappings.insert(piece);
             }
         }
         Ok(())
@@ -450,6 +665,21 @@ pub fn kernel_address_space() -> &'static AddressSpace {
             .as_ref()
             .expect("KernelAddressSpace not initialised")
     }
+}
+
+/// Find a registered address space by its root table physical address —
+/// the fault path identifies the active AS by matching TTBR0_EL1, so no
+/// "current AS" global state exists and no stale references are possible.
+pub fn find_by_root(root_pa: u64) -> Option<&'static mut AddressSpace> {
+    unsafe {
+        for i in 0..MAX_ADDRESS_SPACES {
+            let ptr = &raw mut ADDRESS_SPACES[i];
+            if (*ptr).as_ref().is_some_and(|a| a.root.0 as u64 == root_pa) {
+                return (*ptr).as_mut();
+            }
+        }
+    }
+    None
 }
 
 /// Mutable lookup by address-space id.

@@ -74,6 +74,42 @@ fn esr_class(esr: u64) -> &'static str {
     }
 }
 
+/// EL1 synchronous exception entry (ADR-032 §2): resolves exactly one
+/// fault class — data-abort translation faults eligible for demand fill —
+/// and returns so the vector epilogue retries the same instruction.
+/// Everything else is fatal via `exception_handler` (never returns).
+///
+/// Retry safety: ELR is restored unmodified by the epilogue; resolution
+/// makes the faulting access legal instead of skipping it. No `elr += 4`
+/// anywhere on this path.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn el1_sync_handler(frame: &ExceptionFrame, kind: u64, esr: u64, far: u64) {
+    let ec = (esr >> 26) & 0x3f;
+    let dfsc = esr & 0x3f;
+    let data_abort_same_el = ec == 0b100101;
+    let translation_fault = matches!(dfsc, 0b000101 | 0b000110 | 0b000111);
+
+    if data_abort_same_el && translation_fault {
+        let write = esr & (1 << 6) != 0; // ESR.ISS[6] = WnR
+        // SAFETY: system-register read; handler runs with IRQs masked.
+        unsafe {
+            let root: u64;
+            core::arch::asm!("mrs {}, ttbr0_el1", out(reg) root, options(nostack));
+            if vivanta_arch_api::vm::vm_try_resolve_data_abort(
+                root & 0x0000_FFFF_FFFF_F000,
+                far,
+                write,
+            ) {
+                return; // resolved — epilogue retries the instruction
+            }
+            crate::mmu::dump_walk(root & 0x0000_FFFF_FFFF_F000, far, "fault-walk");
+        }
+    }
+
+    // Fatal: dump + halt; never returns.
+    unsafe { exception_handler(frame, kind, esr, far) };
+}
+
 /// Called from the assembly vector table.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn exception_handler(

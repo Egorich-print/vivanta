@@ -31,3 +31,4 @@ pub mod interrupts;
 
 /// Syscall dispatch: vivanta_kernel-provided function called from arch
 pub mod syscall;
+pub mod vm;

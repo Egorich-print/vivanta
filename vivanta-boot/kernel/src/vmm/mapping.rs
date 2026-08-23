@@ -18,14 +18,41 @@ impl VirtRange {
     }
 }
 
+/// Backing lifecycle of a mapping piece (ADR-032 §1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backing {
+    /// Hardware mapping exists for the entire piece.
+    Present,
+    /// No hardware mapping; first access demand-fills exactly one page
+    /// from anonymous memory (PMM frame, zeroed).
+    LazyAnonymous,
+    /// Reservation only; no automatic fill; access faults fatally.
+    Reserved,
+}
+
+/// Physical-frame ownership of a Present piece (ADR-032 §4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PhysOwnership {
+    /// PA provided by the caller / MemoryObject — VMM never frees it.
+    External,
+    /// PA allocated by the VM layer for this piece; released to the PMM
+    /// when the piece is unmapped. Cannot be aliased (PA never published).
+    Anonymous,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Mapping {
     pub virt_range: VirtRange,
     pub object_id: MemoryObjectId,
     pub permissions: MappingFlags,
+    pub backing: Backing,
+    /// Physical base for Present pieces; 0 otherwise.
+    pub pa: u64,
+    pub phys: PhysOwnership,
 }
 
 impl Mapping {
+    /// Fully materialized, externally-owned mapping (classic path).
     pub const fn new(
         virt_range: VirtRange,
         object_id: MemoryObjectId,
@@ -35,6 +62,59 @@ impl Mapping {
             virt_range,
             object_id,
             permissions,
+            backing: Backing::Present,
+            pa: 0,
+            phys: PhysOwnership::External,
+        }
+    }
+
+    /// Present piece with explicit physical base and ownership.
+    pub const fn present(
+        virt_range: VirtRange,
+        object_id: MemoryObjectId,
+        permissions: MappingFlags,
+        pa: u64,
+        phys: PhysOwnership,
+    ) -> Self {
+        Self {
+            virt_range,
+            object_id,
+            permissions,
+            backing: Backing::Present,
+            pa,
+            phys,
+        }
+    }
+
+    /// Lazy anonymous reservation (demand-filled on first access).
+    pub const fn lazy_anonymous(
+        virt_range: VirtRange,
+        object_id: MemoryObjectId,
+        permissions: MappingFlags,
+    ) -> Self {
+        Self {
+            virt_range,
+            object_id,
+            permissions,
+            backing: Backing::LazyAnonymous,
+            pa: 0,
+            phys: PhysOwnership::Anonymous,
+        }
+    }
+
+    /// Pure reservation; accesses fault fatally.
+    pub const fn reserved(
+        virt_range: VirtRange,
+        object_id: MemoryObjectId,
+        permissions: MappingFlags,
+    ) -> Self {
+        Self {
+            virt_range,
+            object_id,
+            permissions,
+            backing: Backing::Reserved,
+            pa: 0,
+            phys: PhysOwnership::External,
         }
     }
 }
@@ -117,5 +197,49 @@ impl MappingSet {
 
     pub const fn capacity() -> usize {
         MAX_MAPPINGS
+    }
+
+    /// Transactionally replace every mapping whose slot is in
+    /// `affected_slots` with `pieces` (ADR-032 INV-VM-001).
+    ///
+    /// Index-independent: affected mappings are identified by VALUE, the
+    /// surviving set is rebuilt from scratch, and capacity is verified
+    /// before any mutation. Slot-index arithmetic after concurrent
+    /// insert/remove cycles was observed to corrupt neighbouring pieces
+    /// (wrong permissions at wrong addresses).
+    pub fn replace_slots(
+        &mut self,
+        affected_values: &[Mapping],
+        pieces: &[Mapping],
+    ) -> Result<(), ()> {
+        let survivors = self.count_minus_affected(affected_values);
+        if survivors + pieces.len() > MAX_MAPPINGS {
+            return Err(());
+        }
+        let mut next = Self::new();
+        for (_, m) in self.iter_with_slots() {
+            if !affected_values.iter().any(|a| {
+                a.virt_range.base == m.virt_range.base && a.virt_range.size == m.virt_range.size
+            }) {
+                next.insert(*m);
+            }
+        }
+        for p in pieces {
+            if next.insert(*p).is_none() {
+                return Err(()); // cannot happen after the capacity check
+            }
+        }
+        *self = next;
+        Ok(())
+    }
+
+    fn count_minus_affected(&self, affected: &[Mapping]) -> usize {
+        self.iter()
+            .filter(|m| {
+                !affected.iter().any(|a| {
+                    a.virt_range.base == m.virt_range.base && a.virt_range.size == m.virt_range.size
+                })
+            })
+            .count()
     }
 }

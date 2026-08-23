@@ -145,6 +145,11 @@ pub extern "Rust" fn mmu_table_valid_leaves(_table_pa: u64) -> u32 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "Rust" fn mmu_permission_bits(_flags: MappingFlags) -> u64 {
+    0
+}
+
+#[unsafe(no_mangle)]
 pub extern "Rust" fn mmu_leaf_descriptor(_root_pa: u64, _va: u64) -> u64 {
     0
 }

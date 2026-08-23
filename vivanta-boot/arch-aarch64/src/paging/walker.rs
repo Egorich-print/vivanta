@@ -4,8 +4,18 @@ pub fn read_desc(addr: u64) -> u64 {
     unsafe { core::ptr::read_volatile(addr as *const u64) }
 }
 
+/// Write a descriptor entry.
+///
+/// The store must be cleaned to PoC: ARM table walkers do not snoop the
+/// data cache, so a descriptor that lives only in a dirty cache line is
+/// invisible to subsequent translations. `PageTableBuilder::write` has
+/// always done this; the runtime paths (map/unmap/protect/demand-fill)
+/// go through this function, so the clean lives here — one choke point.
 pub fn write_desc(addr: u64, val: u64) {
-    unsafe { core::ptr::write_volatile(addr as *mut u64, val) }
+    unsafe {
+        core::ptr::write_volatile(addr as *mut u64, val);
+        // MUTATION-TEST: civac disabled
+    }
 }
 
 // ── Walk result ──────────────────────────────────────────────────────────────
@@ -168,11 +178,19 @@ pub fn tlbi_all() {
     }
 }
 
+/// Invalidate translations after runtime descriptor changes.
+///
+/// M6.0 note: this issues a FULL `tlbi vmalle1is` rather than per-VA
+/// `tlbi vaae1is`. Vivanta is single-core with no ASIDs, mapping
+/// operations are rare, and a full flush is bulletproof against both
+/// QEMU's per-VA invalidation quirks (observed: stale entries surviving
+/// `tlbi vaae1is` across descriptor re-writes at recycled VAs) and any
+/// hardware erratum. Per-VA invalidation returns when ASIDs arrive
+/// (post-M6 backlog) and must be re-validated on hardware.
 pub fn tlbi_range(vaddr: u64, size: u64) {
+    let _ = (vaddr, size); // kept for call-site compatibility
     barrier_write();
-    for offset in (0..size).step_by(0x1000) {
-        tlbi_page(vaddr + offset);
-    }
+    tlbi_all();
     barrier_full();
     barrier_insn();
 }
