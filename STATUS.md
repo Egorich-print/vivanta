@@ -23,6 +23,27 @@ kernel build share one compiler.
   (regression-tested)
 - ADR-031 ratified: `vivanta-boot/docs/adr/ADR-031-va-page-table-ownership.md`
 
+## User VM / fault-driven mapping (M6.0, 2026-08-21)
+
+- Fault policy ADR-032 — ✅ one resolvable class (EL1 data-abort
+  translation fault on a LazyAnonymous piece, access ⊆ perms); permission
+  faults, instruction aborts, Reserved pieces and OOM stay fatal;
+  same-instruction retry with unmodified ELR (no `elr += 4` anywhere)
+- Mapping state machine — ✅ `Backing::{Present, LazyAnonymous, Reserved}`
+  inside `Mapping`; backing metadata lives in MappingSet (no second
+  registry)
+- Demand fill — ✅ page-granular materialization; transactional order
+  validate → allocate+zero → map → shadow-commit-last; OOM leaves mapping
+  Lazy (deterministic unit coverage)
+- mprotect/munmap on Lazy — ✅ metadata-only until materialization; fills
+  use post-mprotect permissions; anonymous frames return to PMM on unmap
+- MappingSet ⇔ hardware verifier — ✅ mechanical per-piece check
+  (Present ⇔ valid leaf + exact permission bits; Lazy ⇔ no leaf)
+- Limitations: MappingSet fixed at 64 slots (demo-scale, heap-backed
+  storage is follow-up); MAX_ADDRESS_SPACES=8 retained (fault path
+  identifies AS by TTBR0 match — no ID reuse possible); EL0-originated
+  lazy fills not yet resolved (containment unchanged)
+
 ## Current milestone
 
 **M5.0 GREEN BASELINE — PASS / CLOSED** (2026-08-11)

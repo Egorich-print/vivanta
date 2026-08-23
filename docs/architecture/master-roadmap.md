@@ -383,6 +383,21 @@ The first genuine isolated EL0 process. Not just a jump — a runtime environmen
 
 *Every roadmap modification must update this section.*
 
+### 2026-08-21 (mission 4 — M6.0)
+-   **User VM foundation**: ADR-032 (fault classification/retry), Mapping
+    state machine (`Present/LazyAnonymous/Reserved` + `PhysOwnership`),
+    EL1 resumable fault vector (`el1h_sync` may now return for approved
+    demand-fills; retry = same instruction, ELR untouched).
+-   **INV-VM-001 enforced mechanically**: MappingSet⇔hardware verifier
+    (per-piece descriptor readback incl. permission-bit compare).
+-   **Transactional value-keyed shadow commits** replace slot-index
+    arithmetic in protect/unmap/demand-fill (stale-slot corruption found
+    by stress testing).
+-   **FIXED**: runtime descriptor writes missing cache clean-to-PoC
+    (`walker::write_desc` now does `dc civac`); QEMU per-VA TLBI
+    unreliability worked around via full flush (single-core/no-ASID);
+    lifecycle test mapped PA it did not own (test bug, caught by stress).
+
 ### 2026-08-21 (mission 3 — M5.1/M5.2)
 -   **VA allocator** added (`vivanta-vm`, host-proven): first-fit interval
     allocator, overflow-safe, canonical merged free list, user/kernel

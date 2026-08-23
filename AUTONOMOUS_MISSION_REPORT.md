@@ -1,8 +1,8 @@
-# AUTONOMOUS MISSION REPORT — M5.1/M5.2 Virtual Address Space & Page-Table Lifecycle
+# AUTONOMOUS MISSION REPORT — M6.0 User Virtual Memory & Fault-Driven Mapping Foundation
 
-**Date:** 2026-08-21 (mission 3)
+**Date:** 2026-08-21 (mission 4)
 **Repository:** https://github.com/Egorich-print/vivanta (`main`)
-**Base:** `bab8130` (mission-2 final)
+**Base:** `2ceef95` (mission-3 final)
 
 Tags: `FIXED` / `VERIFIED` / `KNOWN LIMITATION` / `BACKLOG` / `NOT TESTED`.
 
@@ -10,166 +10,224 @@ Tags: `FIXED` / `VERIFIED` / `KNOWN LIMITATION` / `BACKLOG` / `NOT TESTED`.
 
 ## BASELINE
 
-`bab8130`: check/test/fmt clean, clippy = pre-existing style debt only, all
-6 targets build, QEMU full gate suite PASS (W^X ×2, protect/TLBI, 3 fault
-scenarios, M6, G4), 95 s stress clean (40K lines, 0 panics). Pre-existing
-foreign files (`plan-next-phase` edit, untracked research docs) untouched.
+`2ceef95`: check/test/fmt clean (host + freestanding), all 6 targets build,
+QEMU full suite PASS, 95 s stress clean. Foreign files untouched
+(`plan-next-phase`, untracked research docs).
 
-## ARCHITECTURE
+## FAULT ADR
 
-New layering, respecting ADR-030's mechanism/policy split:
+ADR-032 (`vivanta-boot/docs/adr/ADR-032-user-vm-fault-policy.md`) written
+**before implementation**: fault classification table (§2), retry
+semantics proof (§3), mapping state machine (§1), ownership (§4), OOM
+transaction ordering (§5), capacity notes (§6). `VERIFIED`.
 
-```text
-vivanta-vm (pure, host-proven)     VA intervals, range math, invariants
-        ↓ used by
-kernel::vmm                        AddressSpace + shadow + VA allocator,
-                                   table ownership registry (policy)
-        ↓ arch-api
-arch-aarch64                       descriptor mechanism: walk (now reports
-                                   Missing*), install_child_table, split,
-                                   valid-leaves count, leaf readback
-```
+## MAPPING STATE MACHINE
 
-## VA ALLOCATOR — VERIFIED
+`Mapping` extended in place (INV-VM-002): `Backing::{Present,
+LazyAnonymous, Reserved}` + `pa: u64` + `PhysOwnership::{External,
+Anonymous}`. No parallel registry exists — demand-fill splits the shadow
+piece so piece granularity always equals hardware granularity.
+Transitions verified per ADR table. `VERIFIED`.
 
-First-fit interval allocator over `[USER_VA_BASE=0x0100_0000, USER_VA_END=
-0x4000_0000)`; page 0 guard; kernel AS uses a disabled allocator. Free list
-is canonical (sorted+merged) and the single truth for "allocated" — overlap
-is impossible by construction; double-free/foreign-range are deterministic
-errors; all arithmetic overflow-checked. Proven by 7 host tests including a
-20 000-operation model-checked lifecycle stress. Three real allocator bugs
-found and fixed during self-testing: uninitialized const-constructor slot,
-spurious overflow for already-aligned near-TOP addresses, and a merge pass
-whose swap-remove broke sort order (fragmented drains).
+## MAPPINGSET STORAGE
 
-## PAGE-TABLE OWNERSHIP — VERIFIED
+**Option A chosen**: fixed 64 slots retained for M6.0, documented as
+demo-scale limitation. Rationale: heap-backed storage breaks
+`AddressSpace: Copy` (boot-path ripple) and no current consumer needs
+>64 mappings. Compile-time size guards added (`AddressSpace ≤ 12 KiB`,
+`MappingSet ≤ 5 KiB`) so future growth cannot silently repeat the
+mission-2 stack overflow. Heap-backed migration = `BACKLOG`.
+`MAX_ADDRESS_SPACES=8` retained with analysis: fault path identifies the
+active AS by TTBR0 match against registered roots — no current-AS global,
+no ID reuse (monotonic ids), exhaustion panics deterministically at
+registration. `VERIFIED` as explicit limitation.
 
-Registry model (`vmm::tables`, ADR-031): arch notifies
-`table_installed(frame, parent, index, level)` on every child-table
-install; kernel records `{frame, as_id, level, parent_table, parent_index,
-backend}`. Roots and boot-era frames never enter the registry → leak by
-rule; registry overflow degrades to leak. Chosen over refcounting (no
-shared tables, single-core, simplest provable model).
+## BACKING OWNERSHIP
 
-## MAPPING LIFECYCLE — VERIFIED
+`mapping ownership ≠ physical-frame ownership`, now explicit per piece:
+`External` (caller/MemoryObject owns PA; VMM never frees — alias policy of
+ADR-031 intact) vs `Anonymous` (VM layer allocated on demand; frame is
+reachable only through its mapping; unmap returns it to PMM). Anonymous
+frames cannot be aliased (PA never published). `VERIFIED` (QEMU exact PMM
+deltas).
 
-`map_new_range` (alloc VA → map → rollback VA on failure), `unmap_range`
-(unmap → free VA), both built on range-correct `map_pages`/`unmap_pages`.
-`mmu_map_object` now creates missing intermediate tables through the
-allocator (with ownership notification); unmap/protect keep the strict
-"must be mapped" contract.
+## LAZY PAGING
 
-## PROTECT — VERIFIED
+`reserve_lazy()` creates VA reservation without hardware image;
+first access demand-fills **exactly one page** (page-granular proven:
+non-base fill leaves base Lazy — dedicated QEMU sub-test); zero-initialized;
+retry succeeds. `VERIFIED`.
 
-Partial ranges supported: coverage proof + transactional shadow splitting
-(head/covered/tail pieces, capacity pre-checked before any mutation),
-hardware programmed once, shadow committed last. QEMU: middle-page RO
-protect verified readable-with-content, shadow shows exactly 3 pieces with
-correct permissions, RW restore write proves no stale permissions.
+## FAULT HANDLER
 
-## UNMAP — VERIFIED
+`el1h_sync` switched to a resumable vector (`save_and_eret_sync_el1`) +
+`el1_sync_handler`: classifies EC/DFSC/WnR, reads TTBR0, resolves the
+single approved class via arch-api hook → kernel resolver → VMM
+primitives. Everything else falls through to the pre-existing fatal dump.
+EL0 containment path untouched. `VERIFIED`.
 
-Range semantics mirror protect. After clears, `reclaim_empty_tables`
-runs to fixpoint under the IRQ guard. QEMU asserts exact PMM deltas
-(reclaimed count == free_count increase).
+## RETRY SEMANTICS
 
-## TLB — VERIFIED within emulation limits
+Return-from-exception restores ELR **unmodified**; resolution makes the
+faulting instruction legal instead of skipping it; no TLBI needed for the
+filled page (the first walk missed → nothing cached) but descriptor writes
+are cache-cleaned and ordered (see BUGS #1). Mutation M2 proved that
+`elr += 4` would be caught (skipped load → garbage value assert).
+`VERIFIED`.
 
-Per-operation obligations documented in ADR-031 §6. Table unlink needs no
-additional TLBI (subtree already uninstantiated). Stale-permission proof
-after RW→RO→RW re-verified in the new AS. **KNOWN LIMITATION**: missing
-TLBI after permission *widening* remains unobservable under QEMU
-(mission-2 M4 finding unchanged); narrowing bounded by tlbi_all on AS
-switch.
+## MPROTECT
 
-## ALIASES — VERIFIED
+Existing `protect()` reused; hardware programming restricted to Present
+runs (`for_present_runs`), Lazy pieces change metadata only; fills apply
+post-mprotect permissions (hard rule #10 asserted against live leaf bits).
+RW→RO→RW transitions re-verified. `VERIFIED`.
 
-Policy: VAs may alias one PA; physical ownership never follows unmap (the
-VMM has no PA-free path at all). QEMU regression: alias map → write via
-alias → original VA observes value → unmap alias → original still
-translates; PMM deltas exact through steps 4–5 prove no premature free.
-COW/shared ownership: BACKLOG (must extend ADR-031).
+## MUNMAP
 
-## BUGS FOUND
+Range semantics over Lazy (no allocation, metadata removal), Present
+Anonymous (frame released to PMM), External (untouched). Partial munmap
+supported by the same transactional splitting; anonymous whole-piece
+release rule documented. Table reclamation runs after every unmap.
+`VERIFIED`.
 
-1. **`walk_to_l3` could not report missing intermediates** — allocator-
-   chosen VAs outside boot-mapped regions were unmappable (panic). FIXED:
-   `MissingL2`/`MissingL3` variants + creation path with ownership notify;
-   strict panic preserved for unmap/protect.
-2. **`unmap_pages` was whole-mapping-only** — orphaned shadow pieces after
-   partial protect (caught by the new VM test as `AddressSpaceBusy`).
-   FIXED: range semantics.
-3. **Stack exhaustion regression (self-inflicted, caught immediately)**:
-   `AddressSpace` grew to ~8.8 KB with the embedded VaAllocator; stack
-   temporaries corrupted `.bss` (silent hang in boot println via console-
-   lock deadlock — INV-002's symptom pattern). FIXED: boot stack 32→64 KiB
-   (linker script, M6-precedent comment).
-4. Allocator defects (const-slot init, round_up overflow, merge swap-remove)
-   — FIXED during host-test hardening.
+## OOM
+
+Deterministic coverage: a failing allocator stub drives
+`resolve_lazy_fault` → returns false, mapping stays Lazy, verifier passes,
+no frame lost. Real-allocator behavior: `try_alloc_page_table_frame`
+returns None → `[VM] OOM during demand fill` → fatal (per ADR §5).
+Behavioral test under true 512 MB exhaustion: `NOT TESTED` (impractical);
+resolver contract: `VERIFIED` (mutation M9).
+
+## HARDWARE VERIFIER
+
+`verify_hardware_consistency()`: per-piece mechanical check — Present ⇔
+valid leaf whose AP/PXN/XN bits exactly match `mmu_permission_bits(flags)`
+; Lazy/Reserved ⇔ no leaf. Runs after every mutation-sensitive step in the
+QEMU tests. Known blind spot: cannot see leaves *outside* tracked pieces
+in unmapped regions (reverse scan deferred — `BACKLOG`). `VERIFIED` for
+forward direction.
 
 ## MUTATION TESTING
 
 | mutation | expected | observed |
 |---|---|---|
-| M1 free active table frame (drop obj) | accounting failure | `PANIC: reclaimed 1 table frames (PMM +0)` ✅ |
-| M2 reclaim non-empty table | wrongful reclamation visible | `PANIC: intermediate table missing` ✅ |
-| M3 omit parent unlink | stale-table reuse detectable | `PANIC: remap reused a stale table: registry entry missing` ✅ (needed new structural assert — plain QEMU missed it) |
-| M4 corrupt VA overlap check | host test failure | `free_merge_and_double_free FAILED` ✅ |
-| M5 skip TLBI (widening) | — | KNOWN LIMITATION (QEMU re-walk) |
-| M6 split attribute loss | descriptor audit fires | scenario failure ✅ + neighbor AF audit added (QEMU ignores AF, so audit is structural) |
-| M7 free PA while alias exists | structurally excluded | VERIFIED by construction + exact PMM deltas |
-| M8 cross user/kernel domain | host test failure | `free_merge_and_double_free FAILED` ✅ |
-| M9 root reclamation | structurally impossible | VERIFIED (roots never registered; count asserts) |
+| M1 resolve write-to-RO lazy | direct-call assert | `PANIC: write to a lazy RO piece must never resolve` ✅ |
+| M2 advance ELR instead of retry | value assert | `PANIC: demand-filled page must be zero-initialized` ✅ |
+| M3 claim Present before hw map | ghost-PTE / refault | second fault → state≠Lazy → fatal ✅ |
+| M4 rollback frame loss | — | structural: no failure point between alloc and map (map panic = kernel-fatal) — `KNOWN LIMITATION` |
+| M5 stale Lazy permissions after mprotect | leaf-bits assert | `PANIC: demand fill must apply post-mprotect permissions` ✅ |
+| M6 materialize wrong page | non-base discriminator | `PANIC: piece base must stay Lazy` ✅ |
+| M7 resolve outside MappingSet | direct-call assert | `PANIC: assert !resolve(unmapped)` ✅ |
+| M8 EL0-accessible fill | privilege-policy assert | `PANIC: demand fill must not grant EL0 access` ✅ |
+| M9 ignore OOM | unit contract | resolver-contract asserts ✅ (real-allocator exhaustion `NOT TESTED`) |
+| M10 direct PTE write outside VMM | repo audit | clean — writers exist only in arch mechanism, invoked only via VMM ✅ |
 
-All mutations reverted; final tree verified mutation-free.
+All mutations reverted; final tree verified clean.
 
 ## QEMU EVIDENCE
 
-Full boot: W^X ×2 PASS → protect/TLBI PASS → 3 fault scenarios PASS →
-**VM lifecycle test**: map 3 pages via allocator (`va0=0x01000000`,
-in-domain) → partial protect w/ shadow-split check → RW restore → alias
-regression → unmap with reclamation (`reclaimed 1 table frames, PMM +1`)
-→ block-split case (split-inherited table NOT reclaimed; neighbor AF
-audit) → remap (registry reinstall asserted) → unregister teardown.
-M6 demo OK, G4 running=1, 95 s stress: 38K lines, 0 panics, preempt
-counters ~7×10⁹.
+Boot → W^X ×2 → protect/TLBI → 3 fault scenarios → **lifecycle test**
+(map/partial-protect/split-shadow/alias/reclaim/remap/unregister) →
+**lazy test**: reserve(16K) → read-fill (zeroed ✓) → page-granular check →
+write-fill → mprotect-RO → RO-fill (post-mprotect perms asserted on live
+leaf + kernel-only policy assert) → munmap (3 anon frames + reclaimed
+tables back to PMM, exact deltas) → OOM rollback → negative classification
+→ pg-granular non-base fill → **stress: 200 reserve/fill/unmap cycles with
+verifier + leak asserts** → teardown. M5/M6/containment/preemption
+unchanged. 95 s stress: ~41K lines, 0 panics, preempt counters >7×10⁹.
 
 ## REGRESSION
 
-check/test/clippy/fmt clean (host + aarch64-unknown-none); 13/13 host
-tests; all 6 targets build; no new warnings; M5/M6/containment/preemption
-unchanged.
+check/clippy/fmt clean both targets; 13/13 host tests; all 6 targets build;
+no new warnings; existing gates unchanged.
+
+## BUGS FOUND (all FIXED)
+
+1. **Runtime descriptor writes lacked cache clean-to-PoC** —
+   `walker::write_desc` was plain volatile; ARM walkers don't snoop D-cache
+   (builder path always did `dc civac`; runtime paths didn't). Timing-
+   dependent misbehavior under stress. Fixed at the single choke point.
+2. **QEMU per-VA TLBI unreliability across recycled VAs** — stale entries
+   survived `tlbi vaae1is` after descriptor rewrite+TLBI (observed:
+   silent stale reads post-unmap). Workaround: full `tlbi vmalle1is`
+   flush in `tlbi_range` (single-core/no-ASID makes this cheap);
+   per-VA returns with ASIDs + hardware validation = `KNOWN LIMITATION`.
+3. **Stale-slot shadow corruption** — protect/unmap/demand-fill commits
+   used slot indices captured before hole-reusing inserts/removes;
+   neighbouring pieces got wrong permissions/addresses (caught by stress
+   iteration 1). Fixed with transactional value-keyed
+   `MappingSet::replace_slots`.
+4. **Lifecycle test mapped PA it did not own** (1 frame allocated, 3
+   pages mapped) — wrote into a live page-table frame. Test fixed
+   (`alloc_contiguous(3)`); ownership rule documented in-test.
+5. **Lost `try_alloc_page_table_frame` override** (self-inflicted by a
+   git checkout during debugging) — real fill path would panic-on-OOM
+   instead of controlled failure. Restored; covered by OOM contract.
 
 ## KNOWN LIMITATIONS
 
-- TLBI-widening invisibility under QEMU (see above) — hardware validation
-  pending (pre-existing deferral).
-- Registry capacity 256 frames; overflow leaks (deterministic, safe).
-- Reclamation is O(registry-scan) per unmap — fine at kernel scale.
+- Per-VA TLBI semantics unproven under QEMU; full-flush strategy is
+  correct-but-blunt. Hardware validation pending.
+- Reverse-direction verifier (no leaf outside tracked pieces) deferred.
+- EL0-originated demand fills not resolved (containment unchanged);
+  requires syscall ABI work.
+- M4/M9 behavioral depth as noted above.
 
 ## BACKLOG
 
-- mmap/munmap/mprotect syscalls on top of the new primitives (API-ready:
-  reserve/map_new_range/protect/unmap_range; needs syscall-number scope
-  lift + SYS_READ work).
-- COW / shared page tables → extend ADR-031 ownership model.
-- Physical-frame ownership transfer for user MemoryObjects (user flag in
-  MemRights).
+- Heap-backed MappingSet (drop 64-slot limit) behind the new size guards.
+- mmap/munmap/mprotect syscalls on top of ready primitives.
+- COW/shared anonymous frames (extends PhysOwnership).
+- Lazy executable mappings (instruction-abort IFSC handling).
+- ELF loader / user processes (>8 ASes needs registry evolution).
 
 ## COMMITS
 
 ```text
 branch: main
-base:   bab8130
-feat(vm): add vivanta-vm virtual address allocator (host-proven)
-refactor(mmu): page-table ownership protocol + missing-table creation
-feat(vm): range mapping, partial protect, table reclamation
-test(vm): QEMU VM lifecycle test + mutation battery
-docs(vm): ADR-031 + status/roadmap sync + mission report
-(see git log for final hashes)
+base:   2ceef95
+docs(vm): specify fault resolution semantics (ADR-032)
+refactor(vm): model mapping backing as explicit state
+feat(vm): lazy reservation, demand-fill fault resolution, verifier
+fix(vm): transactional value-keyed shadow commits + desc cache clean
+test(mm): stress + mutation battery
+docs(vm): mission report + status sync
+(see git log for hashes)
 ```
 
 ## FINAL GIT STATUS
 
-Committed: all mission work in logical commits. Untouched foreign state:
-`plan-next-phase` modification + untracked research docs (as found).
+Working tree contains only this mission's committed work; foreign files
+(`plan-next-phase` modification, untracked research docs) untouched.
+
+---
+
+## TEN REQUIRED ANSWERS
+
+1. **MappingSet single source of truth?** Yes — INV-VM-001, mechanically
+   verified per piece; backing metadata lives inside `Mapping`. `VERIFIED`
+2. **Who may write page tables?** Only arch mechanism functions, invoked
+   exclusively from VMM primitives; repo audit confirms no other writer.
+   `VERIFIED`
+3. **Fault classification?** ADR-032 §2: one resolvable tuple
+   (EC=data-abort-same-EL ∧ DFSC∈{translation L1/L2/L3} ∧ access ⊆ perms ∧
+   active-AS piece is LazyAnonymous); everything else fatal. `VERIFIED`
+4. **Why is retry safe?** ELR restored unmodified; the instruction is made
+   executable rather than skipped; effect-of-retry asserted in tests;
+   M2 proves elr+=4 would fail loudly. `VERIFIED`
+5. **Frame owner after lazy allocation?** The mapping (PhysOwnership::
+   Anonymous); released on unmap; never aliased. `VERIFIED`
+6. **OOM?** validate→allocate(fail⇒log+fatal/false)→zero→map→commit-last;
+   mapping stays Lazy; no partial state; deterministic unit coverage.
+   `VERIFIED` (contract) / `NOT TESTED` (true exhaustion)
+7. **mprotect on lazy?** Metadata-only until materialization; fills use
+   current permissions (leaf-bits asserted). `VERIFIED`
+8. **Partial munmap?** Supported via transactional splitting; leftovers
+   keep identity; fully-covered Anonymous frames released. `VERIFIED`
+9. **MappingSet↔hardware divergence prevention?** Mechanical verifier +
+   commit-last ordering + value-keyed transactions + stress with per-
+   iteration verification. `VERIFIED` (forward direction)
+10. **Exhaustion?** MappingSet-full → deterministic error before mutation
+    (`MappingTableFull`); AS-registry-full → panic at registration;
+    both documented limitations. `VERIFIED`
