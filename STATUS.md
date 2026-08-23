@@ -25,6 +25,20 @@ kernel build share one compiler.
 
 ## User VM / fault-driven mapping (M6.0, 2026-08-21)
 
+**M6.0 CLOSED** — закрытие базовых fault/recovery и transactional paging
+semantics (не «lazy paging implementation»). Зафиксированные свойства:
+
+- `MappingSet` — authoritative VM state; hardware tables — производная
+  материализация, проверяемая механически (INV-VM-001);
+- ровно один возобновляемый класс EL1 faults (ADR-032); retry без
+  изменения ELR — скрытый skip instruction доказуемо отсутствует;
+- LazyAnonymous как транзакция: commit-last, OOM оставляет Lazy;
+- ownership разделён: mapping ≠ physical frame; VMM не освобождает PA.
+
+Здоровые границы (не архитектурные дыры): OOM при реальном исчерпании
+512 MiB не тестировался; M4 rollback = structural; ASID и per-VA TLBI —
+backlog за консервативным full-flush.
+
 - Fault policy ADR-032 — ✅ one resolvable class (EL1 data-abort
   translation fault on a LazyAnonymous piece, access ⊆ perms); permission
   faults, instruction aborts, Reserved pieces and OOM stay fatal;
