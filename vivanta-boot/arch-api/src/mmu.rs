@@ -67,6 +67,13 @@ impl core::ops::BitOr for MappingFlags {
 pub trait PageTableAllocator {
     fn alloc_page_table_frame(&mut self) -> u64;
 
+    /// Fallible variant for fault-path resolution where OOM must be
+    /// recoverable rather than fatal. Default delegates to the infallible
+    /// allocator.
+    fn try_alloc_page_table_frame(&mut self) -> Option<u64> {
+        Some(self.alloc_page_table_frame())
+    }
+
     /// Notification: the arch layer installed `frame` as a child table at
     /// `index` of `parent_table`. `level` is 2 for L2 tables (holding 2 MiB
     /// blocks / L3 pointers) and 3 for L3 tables (holding 4 KiB pages),
@@ -150,6 +157,11 @@ unsafe extern "Rust" {
     /// and returns how many are valid. Used by the kernel's reclamation
     /// policy to prove a table is empty before unlinking it. Pure read.
     pub fn mmu_table_valid_leaves(table_pa: u64) -> u32;
+
+    /// Permission-bit mask (AP[2:1], PXN, XN) that a leaf descriptor must
+    /// carry for `flags`, per this architecture's encoder. Used by the
+    /// MappingSet⇔hardware verifier.
+    pub safe fn mmu_permission_bits(flags: MappingFlags) -> u64;
 
     /// Read the raw leaf descriptor covering `va` in the table rooted at
     /// `root_pa` (mechanism primitive). Returns 0 when no valid leaf exists.

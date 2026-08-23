@@ -72,6 +72,21 @@ impl PageTableAllocator for AsPageTableAllocator {
         pa
     }
 
+    fn try_alloc_page_table_frame(&mut self) -> Option<u64> {
+        use crate::memory::AllocationRequirements;
+        let req = AllocationRequirements::new(4096);
+        // SAFETY: mrm outlives the boot flow; single-core access.
+        let obj = unsafe { (*self.mrm).allocate(&req, 0) }?;
+        let pa = obj
+            .phys_addr
+            .expect("try_alloc_page_table_frame: no phys addr");
+        // Storage ownership moves to the registry entry created by
+        // `table_installed`; forget so Drop cannot free a live table
+        // (mission-2 defect df5702b).
+        core::mem::forget(obj);
+        Some(pa)
+    }
+
     fn table_installed(&mut self, frame: u64, parent_table: u64, index: usize, level: u8) {
         let recorded = crate::vmm::tables::record(crate::vmm::tables::TableEntry {
             frame,

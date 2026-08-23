@@ -471,6 +471,12 @@ pub extern "Rust" fn mmu_table_valid_leaves(table_pa: u64) -> u32 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "Rust" fn mmu_permission_bits(flags: MappingFlags) -> u64 {
+    let d = flags_to_desc_bits(flags, 0);
+    d & (DESC_AP_MASK | DESC_PXN | DESC_XN)
+}
+
+#[unsafe(no_mangle)]
 pub extern "Rust" fn mmu_leaf_descriptor(root_pa: u64, va: u64) -> u64 {
     let pt = crate::paging::mapper::PageTable::new(root_pa & ADDR_MASK);
     pt.leaf_descriptor(va).unwrap_or(0)
