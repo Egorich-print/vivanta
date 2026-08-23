@@ -419,6 +419,41 @@ impl AddressSpace {
         Ok(())
     }
 
+    /// INV-VM-001 reverse direction: below the allocator's high-water
+    /// mark, a descriptor may exist ONLY under a Present piece. Anything
+    /// else (freed ranges, Lazy/Reserved pieces, never-touched pages up to
+    /// the watermark) must have no leaf — this is the check that catches
+    /// stale translations the forward pass cannot see, because it has no
+    /// shadow piece to compare against.
+    ///
+    /// Cost: O(high_water / 4K) walks — boot-audit only, not per-operation.
+    pub fn verify_domain_reverse(&self) -> Result<(), VmmError> {
+        if self.va.is_disabled() {
+            return Ok(());
+        }
+        let hi = self.va.high_water();
+        let mut page = USER_VA_BASE;
+        while page < hi {
+            let covered_present = self.mappings.iter().any(|m| {
+                m.backing == Backing::Present
+                    && m.virt_range.base <= page
+                    && page < m.virt_range.end()
+            });
+            // SAFETY: read-only descriptor probe.
+            let desc =
+                unsafe { vivanta_arch_api::mmu::mmu_leaf_descriptor(self.root.0 as u64, page) };
+            if covered_present {
+                if desc & 1 == 0 {
+                    return Err(VmmError::NotMapped);
+                }
+            } else if desc & 1 != 0 {
+                return Err(VmmError::InvalidRange); // ghost leaf
+            }
+            page += 4096;
+        }
+        Ok(())
+    }
+
     /// Reclaim page-table frames of this address space that are provably
     /// unreachable (ADR-031): a frame leaves the hierarchy only when
     ///

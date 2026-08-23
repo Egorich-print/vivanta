@@ -82,6 +82,8 @@ pub struct VaAllocator {
     end: u64,
     free: [Option<VaRegion>; MAX_FREE_RANGES],
     used: usize,
+    /// Historical maximum end of any allocated/reserved range.
+    mapped_water: u64,
 }
 
 impl VaAllocator {
@@ -101,6 +103,7 @@ impl VaAllocator {
             end,
             free,
             used: 1,
+            mapped_water: base,
         })
     }
 
@@ -113,6 +116,7 @@ impl VaAllocator {
             end: 0,
             free: [None; MAX_FREE_RANGES],
             used: 0,
+            mapped_water: 0,
         }
     }
 
@@ -188,6 +192,7 @@ impl VaAllocator {
             return Err(VaError::DoubleFree);
         }
         self.normalize();
+        self.raise_water(region.end());
         Ok(())
     }
 
@@ -255,6 +260,7 @@ impl VaAllocator {
                 }
             }
             self.normalize();
+            self.raise_water(candidate_end);
             return Ok(aligned_start);
         }
         Err(VaError::OutOfSpace)
@@ -281,6 +287,7 @@ impl VaAllocator {
         self.insert_at(self.used, region);
         self.used += 1;
         self.normalize();
+        self.raise_water(region.end());
         Ok(())
     }
 
@@ -297,6 +304,20 @@ impl VaAllocator {
 
     pub fn free_range_count(&self) -> usize {
         self.used
+    }
+
+    /// Historical high-water mark of allocation: descriptors can only
+    /// exist below this address, because leaves are installed exclusively
+    /// for ranges handed out by `alloc`/`reserve`. Bounds the reverse
+    /// hardware scan (INV-VM-001 reverse direction).
+    pub fn high_water(&self) -> u64 {
+        self.mapped_water
+    }
+
+    fn raise_water(&mut self, end: u64) {
+        if end > self.mapped_water {
+            self.mapped_water = end;
+        }
     }
 
     // -- internals --------------------------------------------------------

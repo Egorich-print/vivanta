@@ -1122,6 +1122,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             vmm::address_space_mut_by(lz_as)
                 .verify_hardware_consistency()
                 .expect("clean teardown");
+            vmm::address_space_mut_by(lz_as)
+                .verify_domain_reverse()
+                .expect("reverse scan: ghost leaf after teardown");
             vivanta_arch_api::mmu::activate_address_space(kas_root);
         }
         vmm::unregister(lz_as).expect("unregister lazy AS");

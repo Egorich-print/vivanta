@@ -275,3 +275,17 @@ fn lifecycle_stress_model_checked() {
     let only_free = va.is_free(b) && va.is_free(e - PAGE_SIZE);
     assert!(only_free, "domain not fully restored after drain");
 }
+
+#[test]
+fn high_water_bounds_reverse_scan() {
+    let mut va = VaAllocator::try_new(BASE, END).unwrap();
+    assert_eq!(va.high_water(), BASE); // untouched domain
+    let a = va.alloc(PAGE_SIZE * 2, PAGE_SIZE).unwrap();
+    assert_eq!(va.high_water(), a + PAGE_SIZE * 2); // allocation raises it
+    va.free(a, PAGE_SIZE * 2).unwrap();
+    // Freeing does NOT lower it: stale descriptors may linger there.
+    assert_eq!(va.high_water(), a + PAGE_SIZE * 2);
+    // A later allocation further out raises again.
+    let b = va.alloc(PAGE_SIZE * 8, PAGE_SIZE).unwrap();
+    assert_eq!(va.high_water(), b + PAGE_SIZE * 8);
+}
