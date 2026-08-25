@@ -7,6 +7,19 @@ use alloc::vec::Vec;
 
 pub type TaskId = u64;
 
+/// Generation-protected process handle (M7.4): `(id, generation)` pairs.
+/// A generation increments every time a TaskId is reaped, so a stale
+/// handle can never silently resolve to a *newer* process with the same
+/// raw id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessHandle {
+    pub id: TaskId,
+    pub generation: u32,
+}
+
+/// Hard cap on simultaneously tracked tasks (deterministic exhaustion).
+pub const MAX_TASKS: usize = 64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskState {
     Created,
@@ -21,6 +34,8 @@ pub enum TaskState {
 /// The Task is the owner; dropping it releases its resources.
 pub struct Task {
     pub task_id: TaskId,
+    /// Bumped on reap; used by ProcessHandle validation.
+    pub generation: u32,
     pub address_space: AddressSpaceId,
     pub threads: Vec<ThreadId>,
     pub owned_objects: Vec<MemoryObject>,
@@ -35,6 +50,7 @@ impl Task {
     pub fn new(task_id: TaskId, thread_id: ThreadId, address_space: AddressSpaceId) -> Self {
         Task {
             task_id,
+            generation: 0,
             address_space,
             threads: vec![thread_id],
             owned_objects: Vec::new(),

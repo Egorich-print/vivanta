@@ -1,6 +1,6 @@
 use crate::memory::{AllocationRequirements, MemoryResourceManager};
 use crate::scheduler;
-use crate::scheduler::task::{Task, TaskId, TaskState};
+use crate::scheduler::task::{ProcessHandle, Task, TaskId, TaskState};
 use crate::scheduler::thread::Priority;
 use crate::vmm::AddressSpaceId;
 use alloc::vec::Vec;
@@ -36,7 +36,7 @@ impl TaskManager {
         mrm: &mut MemoryResourceManager,
         priority: Priority,
         parent: Option<TaskId>,
-    ) -> Result<TaskId, &'static str> {
+    ) -> Result<ProcessHandle, &'static str> {
         let stack_base = alloc
             .alloc_contiguous(crate::scheduler::KERNEL_STACK_SIZE / 4096)
             .ok_or("kernel stack contiguous alloc failed")?
@@ -62,16 +62,17 @@ impl TaskManager {
         }
         task.add_object(user_stack);
 
-        let task_id = scheduler::pt().create(task);
+        let handle = scheduler::pt().create(task);
 
         // Update parent's children list
-        if let Some(parent_id) = parent {
+        if let (Some(h), Some(parent_id)) = (handle, parent) {
             if let Some(parent_task) = scheduler::pt().lookup_mut(parent_id) {
-                parent_task.add_child(task_id);
+                parent_task.add_child(h.id);
             }
         }
 
-        Ok(task_id)
+        let h = handle.ok_or("process table full")?;
+        Ok(h)
     }
 
     /// Spawn a new kernel task.
@@ -85,7 +86,7 @@ impl TaskManager {
         alloc: &mut impl FrameAllocator,
         priority: Priority,
         parent: Option<TaskId>,
-    ) -> Result<TaskId, &'static str> {
+    ) -> Result<ProcessHandle, &'static str> {
         let thread_id = scheduler::create_kernel_thread(entry, arg, alloc, address_space, priority);
 
         let mut task = Task::new(0, thread_id, address_space); // ID will be set by ProcessTable
@@ -93,16 +94,17 @@ impl TaskManager {
             task.set_parent(parent_id);
         }
 
-        let task_id = scheduler::pt().create(task);
+        let handle = scheduler::pt().create(task);
 
         // Update parent's children list
-        if let Some(parent_id) = parent {
+        if let (Some(h), Some(parent_id)) = (handle, parent) {
             if let Some(parent_task) = scheduler::pt().lookup_mut(parent_id) {
-                parent_task.add_child(task_id);
+                parent_task.add_child(h.id);
             }
         }
 
-        Ok(task_id)
+        let h = handle.ok_or("process table full")?;
+        Ok(h)
     }
 
     /// Mark a Task as zombie.
@@ -132,6 +134,11 @@ impl TaskManager {
     }
 
     /// Get task by ID.
+    /// Generation-validated lookup.
+    pub fn get_handle(&self, h: ProcessHandle) -> Option<&Task> {
+        scheduler::pt().lookup_handle(h)
+    }
+
     pub fn get(&self, task_id: TaskId) -> Option<&Task> {
         scheduler::pt().lookup(task_id)
     }

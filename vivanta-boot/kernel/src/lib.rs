@@ -520,7 +520,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         const CODE_VA: u64 = 0x5E00_0000;
         const STACK_VA: u64 = 0x5E01_0000;
         let mut taskman = scheduler::task_manager::TaskManager::new();
-        let tid = taskman
+        let tid_h = taskman
             .spawn_user(
                 CODE_VA as usize,
                 (STACK_VA + 4096) as usize,
@@ -531,6 +531,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 None, // no parent (root task)
             )
             .expect("spawn_user");
+        let tid = tid_h.id;
         println!("  Task {} created (thread, code @ 0x{:x})", tid, CODE_VA);
         println!(
             "  {} task(s), {} running",
@@ -577,6 +578,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 None,
             )
             .expect("spawn fault task");
+        let ftid = ftid.id;
         println!("  fault task {} spawned, yielding to it", ftid);
         // Let the faulting task run; it faults and is terminated by the kernel.
         scheduler::yield_now();
@@ -632,6 +634,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     None,
                 )
                 .expect("spawn fault-scenario task");
+            let tid = tid.id;
             println!("  [SC] yielding to {}", name);
             scheduler::yield_now();
             println!("  [SC] back once {}", name);
@@ -703,6 +706,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     None,
                 )
                 .expect("spawn vmsys task");
+            let tid = tid.id;
             scheduler::yield_now();
             scheduler::yield_now();
             let task = tm.get(tid).expect("vmsys task missing");
@@ -1251,7 +1255,8 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 scheduler::thread::Priority::Normal,
                 None,
             )
-            .expect("spawn preempt A");
+            .expect("spawn preempt A")
+            .id;
         let tb = taskman2
             .spawn_kernel(
                 preempt_worker_b,
@@ -1261,7 +1266,8 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 scheduler::thread::Priority::Normal,
                 None,
             )
-            .expect("spawn preempt B");
+            .expect("spawn preempt B")
+            .id;
         println!("  preempt tasks A={} B={} spawned", ta, tb);
 
         // Boot thread: monitor the counters, then spin.
