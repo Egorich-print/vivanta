@@ -44,6 +44,8 @@ unsafe extern "C" {
     static fault_code_end: u8;
     static exec_nx_code_start: u8;
     static exec_nx_code_end: u8;
+    static vmsys_code_start: u8;
+    static vmsys_code_end: u8;
     static kread_code_start: u8;
     static kread_code_end: u8;
     static unmapped_code_start: u8;
@@ -211,6 +213,14 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
 
         let mrm = system_state.memory_manager();
         println!("  MRM: {} backend(s) registered", mrm.backend_count());
+
+        // Demand-fill / VM-syscall backing context: established once here
+        // so every later fault or syscall resolves against the same
+        // allocator (single establishment point, boot-phase owned).
+        vmm::faults::set_backing_context(
+            system_state.memory_manager_mut() as *mut _,
+            &raw mut pmm_backend as *mut dyn memory::MemoryBackend,
+        );
 
         if let Some(f) = pmm.alloc_frame() {
             println!("  Allocated frame @ 0x{:x}  (ok)", f.addr);
@@ -610,6 +620,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             );
             let as_id = vmm::register(root, vmm::AddressSpaceFlags::User);
             let mut tm = scheduler::task_manager::TaskManager::new();
+            vivanta_boot_common::println!("  [SC] spawning {}", name);
             let tid = tm
                 .spawn_user(
                     SCEN_CODE_VA as usize,
@@ -621,8 +632,11 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     None,
                 )
                 .expect("spawn fault-scenario task");
+            println!("  [SC] yielding to {}", name);
             scheduler::yield_now();
+            println!("  [SC] back once {}", name);
             scheduler::yield_now();
+            println!("  [SC] back twice {}", name);
             let task = tm.get(tid).expect("scenario task missing");
             assert_eq!(
                 task.exit_code,
@@ -659,6 +673,48 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             let len =
                 (&raw const unmapped_code_end as usize) - (&raw const unmapped_code_start as usize);
             run_fault_scenario("unmapped", src, len, 0b100100, 0x06, 0x7000_0000);
+        }
+
+        // ------------------------------------------------------------------
+        // M7.2 VM-syscall gate (G-SYS): a genuine EL0 program exercises
+        // mmap/store/mprotect/munmap/negative paths through SVC and exits
+        // with the canonical success code 42.
+        // ------------------------------------------------------------------
+        println!("M7.2 VM-syscall gate:");
+        {
+            let src = &raw const vmsys_code_start;
+            let len = (&raw const vmsys_code_end as usize) - (&raw const vmsys_code_start as usize);
+            let root = build_root(
+                "VmSysAS",
+                0,
+                0,
+                Some((src, len, 0x5C00_0000u64, 0x5C01_0000u64)),
+            );
+            let sys_as = vmm::register(root, vmm::AddressSpaceFlags::User);
+            let mut tm = scheduler::task_manager::TaskManager::new();
+            let tid = tm
+                .spawn_user(
+                    0x5C00_0000 as usize,
+                    0x5C01_1000usize,
+                    sys_as,
+                    &mut pmm,
+                    system_state.memory_manager_mut(),
+                    scheduler::thread::Priority::Normal,
+                    None,
+                )
+                .expect("spawn vmsys task");
+            scheduler::yield_now();
+            scheduler::yield_now();
+            let task = tm.get(tid).expect("vmsys task missing");
+            assert_eq!(
+                task.exit_code,
+                Some(42),
+                "VM-syscall program must exit with code 42 (got {:?})",
+                task.exit_code
+            );
+            println!("  [SYS] mmap/store/mprotect/munmap/negatives PASS (exit=42)");
+            tm.reap_zombie(tid);
+            vmm::unregister(sys_as).expect("unregister VmSysAS");
         }
 
         // ------------------------------------------------------------------
@@ -959,12 +1015,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     desc & expected,
                     expected,
                     "demand fill must apply post-mprotect permissions"
-                );
-                // Privilege policy: anonymous fills are kernel-only in M6.0
-                // — no EL0 access may appear regardless of mapping flags.
-                assert!(
-                    desc & (1 << 6) == 0,
-                    "demand fill must not grant EL0 access: desc={desc:#x}"
                 );
             }
             vmm::address_space_mut_by(lz_as)

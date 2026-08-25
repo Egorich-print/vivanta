@@ -21,7 +21,7 @@ pub fn set_backing_context(
     unsafe { VM_ALLOC_CTX = Some((mrm, backend)) };
 }
 
-fn backing_context() -> Option<(
+pub(crate) fn backing_context() -> Option<(
     *mut crate::memory::MemoryResourceManager,
     *mut dyn crate::memory::MemoryBackend,
 )> {

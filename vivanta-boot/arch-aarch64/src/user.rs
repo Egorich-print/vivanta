@@ -222,6 +222,102 @@ unsafe extern "C" {
     static unmapped_code_end: u8;
 }
 
+// M7.2 — genuine VM-syscall exercise from EL0 (ADR-033 ABI):
+// mmap -> store/load -> mprotect(RO) -> munmap -> negative paths -> exit(42).
+// Any unexpected result exits with a distinct diagnostic code.
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
+    ".section .user.text.vmsys, \"ax\"",
+    ".globl vmsys_code_start",
+    "vmsys_code_start:",
+    // x8=MMMAP(4) addr=0 len=8192 prot=RW
+    "mov  x8, #4",
+    "mov  x0, #0",
+    "mov  x1, #8192",
+    "mov  x2, #3", // R|W
+    "svc  #0",
+    "tbz  x0, 63, 1f", // success if sign bit clear
+    "mov  x0, #1",
+    "b    .Lvmsexit",
+    "1:",
+    "mov  x19, x0", // x19 = mapping base
+    // store + load through the new mapping (demand fill happens here)
+    "mov  x1, #0xDEAD",
+    "str  x1, [x19]",
+    "ldr  x2, [x19]",
+    "cmp  x2, x1",
+    "b.eq 2f",
+    "mov  x0, #2",
+    "b    .Lvmsexit",
+    "2:",
+    // mprotect(base, 4096, RO)
+    "mov  x8, #6",
+    "mov  x0, x19",
+    "mov  x1, #4096",
+    "mov  x2, #1", // R
+    "svc  #0",
+    "cbz  x0, 3f",
+    "mov  x0, #3",
+    "b    .Lvmsexit",
+    "3:",
+    // munmap(base, 8192)
+    "mov  x8, #5",
+    "mov  x0, x19",
+    "mov  x1, #8192",
+    "svc  #0",
+    "cbz  x0, 4f",
+    "mov  x0, #4",
+    "b    .Lvmsexit",
+    "4:",
+    // unknown syscall -> -ENOSYS (-38)
+    "mov  x8, #99",
+    "svc  #0",
+    "mov  x1, #-38",
+    "cmp  x0, x1",
+    "b.eq 5f",
+    "mov  x0, #5",
+    "b    .Lvmsexit",
+    "5:",
+    // mmap len=0 -> -EINVAL (-22)
+    "mov  x8, #4",
+    "mov  x0, #0",
+    "mov  x1, #0",
+    "mov  x2, #3",
+    "svc  #0",
+    "mov  x1, #-22",
+    "cmp  x0, x1",
+    "b.eq 6f",
+    "mov  x0, #6",
+    "b    .Lvmsexit",
+    "6:",
+    // mmap prot=W|X -> -EPERM (-1)
+    "mov  x8, #4",
+    "mov  x0, #0",
+    "mov  x1, #4096",
+    "mov  x2, #6", // W|X
+    "svc  #0",
+    "mov  x1, #-1",
+    "cmp  x0, x1",
+    "b.eq 7f",
+    "mov  x0, #7",
+    "b    .Lvmsexit",
+    "7:",
+    // all good
+    "mov  x0, #42",
+    ".Lvmsexit:",
+    "mov  x8, #2", // EXIT(x0)
+    "svc  #0",
+    "b .",
+    ".globl vmsys_code_end",
+    "vmsys_code_end:",
+);
+// Referenced by vivanta-kernel through its own extern declarations.
+#[allow(dead_code)]
+unsafe extern "C" {
+    static vmsys_code_start: u8;
+    static vmsys_code_end: u8;
+}
+
 /// Addresses used for the faulting user task.
 pub const FAULT_CODE_VA: u64 = 0x5F00_0000;
 pub const FAULT_STACK_VA: u64 = 0x5F01_0000;
@@ -297,6 +393,7 @@ impl UserBootstrap {
 
 unsafe extern "Rust" {
     fn syscall_dispatch(
+        as_root: u64,
         num: u64,
         arg0: u64,
         arg1: u64,
@@ -316,19 +413,49 @@ pub unsafe extern "C" fn el0_sync_handler(
 ) {
     unsafe {
         let ec = (esr >> 26) & 0x3f;
+        #[inline]
+        fn dfsc(esr: u64) -> u64 {
+            esr & 0x3f
+        }
         if ec == 0b010101 {
             // SVC (AArch64) from EL0 — dispatch syscall.
             // ARM: for SVC, ELR_EL1 points to the instruction AFTER the SVC
             // (the SVC is architecturally executed), so we return it unchanged.
+            // Caller identity = active address-space root at entry time
+            // (ADR-033 §1): no "current process" global exists.
+            let root: u64;
+            core::arch::asm!("mrs {}, ttbr0_el1", out(reg) root, options(nostack));
             let ret = syscall_dispatch(
-                frame.x[8], frame.x[0], frame.x[1], frame.x[2], frame.x[3], frame.x[4], frame.x[5],
+                root & 0x0000_FFFF_FFFF_F000,
+                frame.x[8],
+                frame.x[0],
+                frame.x[1],
+                frame.x[2],
+                frame.x[3],
+                frame.x[4],
+                frame.x[5],
             );
             frame.x[0] = ret;
         } else {
-            // G3 fault containment: any other synchronous EL0 exception (data
-            // abort, undef, alignment, etc.) terminates the current task. We do
-            // NOT skip the faulting instruction (`elr += 4`) — that would silently
-            // mask faults. The kernel handles the fault as a task-fatal event.
+            // M7 amendment to ADR-032 §2.3: EL0 tasks legitimately hold
+            // LazyAnonymous reservations (syscall mmap). A translation
+            // fault from EL0 on such a piece resolves exactly like the
+            // EL1 case — same validator, same transaction, same retry.
+            // EVERYTHING else keeps G3 containment: terminate the task.
+            let ec_data_lower = ec == 0b100100;
+            let translation = matches!(dfsc(esr), 0b000101 | 0b000110 | 0b000111);
+            if ec_data_lower && translation {
+                let write = esr & (1 << 6) != 0; // ISS.WnR
+                let root: u64;
+                core::arch::asm!("mrs {}, ttbr0_el1", out(reg) root, options(nostack));
+                if vivanta_arch_api::vm::vm_try_resolve_data_abort(
+                    root & 0x0000_FFFF_FFFF_F000,
+                    far,
+                    write,
+                ) {
+                    return; // resolved — epilogue retries the instruction
+                }
+            }
             LAST_FAULT_ESR = esr;
             LAST_FAULT_FAR = far;
             vivanta_boot_common::println!(
