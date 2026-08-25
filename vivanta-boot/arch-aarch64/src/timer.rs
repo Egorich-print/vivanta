@@ -85,7 +85,7 @@ pub extern "Rust" fn ticks() -> u64 {
 pub fn timer_handler(_irq: u32) {
     TICK_COUNT.fetch_add(1, Ordering::Relaxed);
     set_tval(TVAL.load(Ordering::Relaxed));
-    unsafe { vivanta_arch_api::scheduler::scheduler_tick() }
+    vivanta_arch_api::scheduler::scheduler_tick()
 }
 /// Register the timer IRQ handler and start periodic ticks.
 pub unsafe fn init(gic: &crate::interrupts::Gic) {

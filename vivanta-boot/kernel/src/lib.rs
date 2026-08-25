@@ -2,6 +2,8 @@
 #![allow(static_mut_refs)]
 extern crate alloc;
 
+use core::sync::atomic::{AtomicU64, Ordering};
+
 use memory::KernelHeap;
 
 #[global_allocator]
@@ -308,12 +310,8 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         }
 
         // ------- Wrap in AddressSpace ------------------------------------------
-        let uart_dbg = 0x0900_0000 as *mut u32;
-        core::ptr::write_volatile(uart_dbg, b'B' as u32);
         let root = vivanta_arch_api::mmu::RootPageTable(pt);
-        core::ptr::write_volatile(uart_dbg, b'C' as u32);
         vmm::address_space::init_kernel_address_space(root);
-        core::ptr::write_volatile(uart_dbg, b'D' as u32);
 
         // Build independent root tables for UserAS1/UserAS2
         let alloc_ctx_root: *mut () = mrm_ptr as *mut ();
@@ -322,10 +320,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                           extra_pa: u64,
                           user_pages: Option<(*const u8, usize, u64, u64)>|
          -> RootPageTable {
-            let uart = 0x0900_0000 as *mut u32;
-            core::ptr::write_volatile(uart, b'X' as u32);
             let rpt = vivanta_arch_api::boot::mmu::mmu_init(alloc_ctx_root, boot_alloc_frame);
-            core::ptr::write_volatile(uart, b'Y' as u32);
             // Map ALL usable RAM (not just available region) — kernel code/stack must be accessible
             for r in memory_map.regions() {
                 use vivanta_boot_common::MemoryRegionKind;
@@ -333,7 +328,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     vivanta_arch_api::boot::mmu::mmu_map_ram(rpt, r.start, r.start, r.size);
                 }
             }
-            core::ptr::write_volatile(uart, b'R' as u32);
             for mmio in mmio_regions {
                 vivanta_arch_api::boot::mmu::mmu_map_range(
                     rpt,
@@ -348,7 +342,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             }
             // Map user code + stack when provided (demo, fault task and
             // Phase-10 protection-fault scenarios all use this path).
-            core::ptr::write_volatile(uart, b'M' as u32);
             if let Some((code_src, code_len, code_va, stack_va)) = user_pages {
                 vivanta_arch_api::boot::mmu::mmu_map_user_pages(
                     rpt, code_va, code_src, code_len, stack_va,
@@ -579,7 +572,10 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         scheduler::yield_now();
         scheduler::yield_now();
         println!("  boot thread survived the faulting task (containment OK)");
-        let (fa, fb) = (PREEMPT_COUNTER_A, PREEMPT_COUNTER_B);
+        let (fa, fb) = (
+        PREEMPT_COUNTER_A.load(Ordering::Relaxed),
+        PREEMPT_COUNTER_B.load(Ordering::Relaxed),
+    );
         println!("  preempt counters before test: A={} B={}", fa, fb);
 
         // ------------------------------------------------------------------
@@ -1221,7 +1217,10 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         // Boot thread: monitor the counters, then spin.
         for i in 0..5 {
             scheduler::yield_now();
-            let (ca, cb) = (PREEMPT_COUNTER_A, PREEMPT_COUNTER_B);
+            let (ca, cb) = (
+        PREEMPT_COUNTER_A.load(Ordering::Relaxed),
+        PREEMPT_COUNTER_B.load(Ordering::Relaxed),
+    );
             vivanta_boot_common::println!(
                 "  [MONITOR] iter={} A={} B={} running={} current={}",
                 i,
@@ -1246,27 +1245,20 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     }
 }
 
-/// Diagnostic: walk the faulting address's descriptors at fatal time.
-pub fn dump_walk_at(root_pa: u64, va: u64) {
-    vivanta_boot_common::println!("  [FLT-WALK] root={:#x} va={:#x}", root_pa, va);
-    unsafe {
-        vivanta_arch_api::boot::mmu::dump_walk(root_pa, va, "fault");
-    }
-}
-
 // ---------------------------------------------------------------------------
 // G4 preemption workers — CPU-bound, no voluntary yield. The timer IRQ drives
 // the reschedule. Counters are plain unsync statics because preemption is
 // single-core and each thread touches only its own counter.
 // ---------------------------------------------------------------------------
 
-static mut PREEMPT_COUNTER_A: u64 = 0;
-static mut PREEMPT_COUNTER_B: u64 = 0;
+/// Per-worker iteration counters. Atomics (Relaxed): single-core stats,
+/// no ordering requirements — removes the static-mut hazard entirely.
+static PREEMPT_COUNTER_A: AtomicU64 = AtomicU64::new(0);
+static PREEMPT_COUNTER_B: AtomicU64 = AtomicU64::new(0);
 
 extern "C" fn preempt_worker_a(_arg: usize) {
     loop {
-        unsafe { PREEMPT_COUNTER_A += 1 };
-        let c = unsafe { PREEMPT_COUNTER_A };
+        let c = PREEMPT_COUNTER_A.fetch_add(1, Ordering::Relaxed) + 1;
         if c % 1000000 == 0 {
             vivanta_boot_common::println!(
                 "  [PREEMPT] current={} A={}",
@@ -1279,8 +1271,7 @@ extern "C" fn preempt_worker_a(_arg: usize) {
 
 extern "C" fn preempt_worker_b(_arg: usize) {
     loop {
-        unsafe { PREEMPT_COUNTER_B += 1 };
-        let c = unsafe { PREEMPT_COUNTER_B };
+        let c = PREEMPT_COUNTER_B.fetch_add(1, Ordering::Relaxed) + 1;
         if c % 1000000 == 0 {
             vivanta_boot_common::println!(
                 "  [PREEMPT] current={} B={}",
@@ -1291,10 +1282,4 @@ extern "C" fn preempt_worker_b(_arg: usize) {
     }
 }
 
-/// Minimal worker thread that yields forever.
-#[allow(dead_code)]
-extern "C" fn thread_worker(_arg: usize) {
-    loop {
-        scheduler::yield_now();
-    }
-}
+

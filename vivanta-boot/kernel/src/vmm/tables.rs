@@ -36,20 +36,23 @@ pub struct TableEntry {
 pub const MAX_TABLES: usize = 256;
 
 static mut TABLE_REGISTRY: [Option<TableEntry>; MAX_TABLES] = [None; MAX_TABLES];
-static mut TABLE_COUNT: usize = 0;
+/// Live-entry counter. Relaxed atomic: mutated only under the IRQ-guarded
+/// registry operations, read freely for stats — removes static-mut reads.
+static TABLE_COUNT: core::sync::atomic::AtomicUsize =
+    core::sync::atomic::AtomicUsize::new(0);
 
 /// Record a freshly installed table frame. Returns false when the registry
 /// is full — the frame stays installed and reachable but is never reclaimed
 /// (safe leak).
 pub fn record(entry: TableEntry) -> bool {
     unsafe {
-        if TABLE_COUNT >= MAX_TABLES {
+        if TABLE_COUNT.load(core::sync::atomic::Ordering::Relaxed) >= MAX_TABLES {
             return false;
         }
         for slot in TABLE_REGISTRY.iter_mut() {
             if slot.is_none() {
                 *slot = Some(entry);
-                TABLE_COUNT += 1;
+                TABLE_COUNT.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
                 return true;
             }
         }
@@ -75,7 +78,7 @@ pub unsafe fn take(frame: u64, as_id: u64) -> Option<TableEntry> {
     let e = unsafe { TABLE_REGISTRY[idx] };
     unsafe {
         TABLE_REGISTRY[idx] = None;
-        TABLE_COUNT -= 1;
+        TABLE_COUNT.fetch_sub(1, core::sync::atomic::Ordering::Relaxed);
     }
     e
 }
@@ -109,5 +112,5 @@ pub fn count_for_as(as_id: u64) -> usize {
 }
 
 pub fn total() -> usize {
-    unsafe { TABLE_COUNT }
+    TABLE_COUNT.load(core::sync::atomic::Ordering::Relaxed)
 }

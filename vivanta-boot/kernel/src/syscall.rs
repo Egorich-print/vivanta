@@ -9,8 +9,10 @@ pub const SYS_EXIT: u64 = 2;
 pub const SYS_YIELD: u64 = 3;
 pub const SYS_MMAP: u64 = 4;
 
+/// Body is safe: user pointers are validated via copy_from_user before any
+/// access; MMIO writes are scoped volatile operations.
 #[unsafe(no_mangle)]
-pub unsafe extern "Rust" fn syscall_dispatch(
+pub extern "Rust" fn syscall_dispatch(
     num: u64,
     arg0: u64,
     arg1: u64,

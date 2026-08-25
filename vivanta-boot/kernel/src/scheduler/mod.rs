@@ -20,8 +20,10 @@ pub const KERNEL_STACK_SIZE: usize = 16384;
 
 static mut RUNQUEUE: Option<RunQueue> = None;
 static mut PROCESS_TABLE: Option<ProcessTable> = None;
-static mut BOOT_THREAD_ID: ThreadId = 0;
-static mut IDLE_THREAD_ID: ThreadId = 0;
+/// Boot/idle thread identities. Set once during `init_boot`, read-only
+/// afterwards — Relaxed atomics remove the static-mut hazard entirely.
+static BOOT_THREAD_ID: AtomicU64 = AtomicU64::new(0);
+static IDLE_THREAD_ID: AtomicU64 = AtomicU64::new(0);
 /// Frame allocator used to reclaim kernel stacks of terminated threads.
 /// Set once during boot (kernel_main) after the PMM is initialised.
 static mut STACK_ALLOCATOR: Option<*mut dyn FrameAllocator> = None;
@@ -243,7 +245,6 @@ pub fn yield_now() {
         return;
     }
 
-    vivanta_boot_common::println!("  yield_now: {} -> {}", current_id, next_id);
 
     // G4 running invariant: exactly one thread Running at any instant.
     // Transition order:
@@ -260,13 +261,7 @@ pub fn yield_now() {
     // Activate address space if different
     let next_as = rq().get(next_id).unwrap().address_space;
 
-    vivanta_boot_common::println!(
-        "  yield: {} -> {}, as: {} -> {}",
-        current_id,
-        next_id,
-        current_as,
-        next_as
-    );
+
 
     if next_as != current_as {
         if cfg!(feature = "trace-address-space") {
@@ -434,8 +429,8 @@ pub fn thread_exit(exit_code: i32) -> ! {
 
 fn cleanup() {
     // Remove terminated threads (except boot and idle)
-    let boot_id = unsafe { BOOT_THREAD_ID };
-    let idle_id = unsafe { IDLE_THREAD_ID };
+    let boot_id = BOOT_THREAD_ID.load(Ordering::Relaxed);
+    let idle_id = IDLE_THREAD_ID.load(Ordering::Relaxed);
 
     let to_remove: Vec<ThreadId> = rq()
         .iter()
@@ -489,7 +484,7 @@ pub fn init_boot() {
         })
         .expect("Failed to insert boot thread");
 
-        BOOT_THREAD_ID = boot_id;
+        BOOT_THREAD_ID.store(boot_id, Ordering::Relaxed);
         CURRENT_THREAD.store(boot_id, Ordering::Relaxed);
 
         // Create idle thread
@@ -517,7 +512,7 @@ pub fn init_boot() {
         })
         .expect("Failed to insert idle thread");
 
-        IDLE_THREAD_ID = idle_id;
+        IDLE_THREAD_ID.store(idle_id, Ordering::Relaxed);
     }
 }
 
@@ -525,20 +520,22 @@ pub fn init_boot() {
 // External entry points
 // ---------------------------------------------------------------------------
 
-/// Called from the arch timer handler via extern "Rust"
+/// Called from the arch timer handler via the arch-api boundary.
+/// Body is fully safe: it only touches kernel-internal scheduling state.
 #[unsafe(no_mangle)]
-pub unsafe extern "Rust" fn scheduler_tick() {
+pub extern "Rust" fn scheduler_tick() {
     schedule_tick();
 }
 
-/// Called from the arch IRQ dispatcher via extern "Rust"
+/// Called from the arch IRQ dispatcher via the arch-api boundary.
+/// The raw frame handle is inspected, never dereferenced here.
 #[unsafe(no_mangle)]
-pub unsafe extern "Rust" fn scheduler_reschedule(frame: usize) {
+pub extern "Rust" fn scheduler_reschedule(frame: usize) {
     maybe_reschedule(frame);
 }
 
-/// Called from kernel_main via vivanta_arch_api::boot::sched::sched_init_boot()
+/// Called from kernel_main via vivanta_arch_api::boot::sched::sched_init_boot().
 #[unsafe(no_mangle)]
-pub unsafe extern "Rust" fn sched_init_boot() {
+pub extern "Rust" fn sched_init_boot() {
     init_boot();
 }

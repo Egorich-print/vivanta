@@ -10,11 +10,13 @@ pub type InterruptFrameHandle = usize;
 unsafe extern "Rust" {
     /// Called from the timer IRQ handler in arch.
     /// Signals the scheduler that a tick has occurred.
-    pub fn scheduler_tick();
+    ///
+    /// Safe to call: implementations only touch kernel-internal
+    /// scheduling state and never dereference arch memory.
+    pub safe fn scheduler_tick();
 
     /// Called after every IRQ, from the arch interrupt dispatcher.
-    /// frame: handle to the on-stack exception frame.
-    /// The scheduler uses this for inspection; context switching
-    /// is handled by vivanta_arch_api::context::context_switch().
-    pub fn scheduler_reschedule(frame: InterruptFrameHandle);
+    /// frame: handle to the on-stack exception frame (inspected, never
+    /// dereferenced by the implementation).
+    pub safe fn scheduler_reschedule(frame: InterruptFrameHandle);
 }

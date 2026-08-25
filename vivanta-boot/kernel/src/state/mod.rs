@@ -68,7 +68,6 @@ impl SystemState {
         self.memory_manager.as_ref().expect("MRM not initialized")
     }
 
-    #[allow(dead_code)]
     pub fn memory_manager_mut(&mut self) -> &mut MemoryResourceManager {
         self.memory_manager.as_mut().expect("MRM not initialized")
     }
