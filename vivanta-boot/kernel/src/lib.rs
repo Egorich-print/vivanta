@@ -573,9 +573,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         scheduler::yield_now();
         println!("  boot thread survived the faulting task (containment OK)");
         let (fa, fb) = (
-        PREEMPT_COUNTER_A.load(Ordering::Relaxed),
-        PREEMPT_COUNTER_B.load(Ordering::Relaxed),
-    );
+            PREEMPT_COUNTER_A.load(Ordering::Relaxed),
+            PREEMPT_COUNTER_B.load(Ordering::Relaxed),
+        );
         println!("  preempt counters before test: A={} B={}", fa, fb);
 
         // ------------------------------------------------------------------
@@ -1218,9 +1218,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         for i in 0..5 {
             scheduler::yield_now();
             let (ca, cb) = (
-        PREEMPT_COUNTER_A.load(Ordering::Relaxed),
-        PREEMPT_COUNTER_B.load(Ordering::Relaxed),
-    );
+                PREEMPT_COUNTER_A.load(Ordering::Relaxed),
+                PREEMPT_COUNTER_B.load(Ordering::Relaxed),
+            );
             vivanta_boot_common::println!(
                 "  [MONITOR] iter={} A={} B={} running={} current={}",
                 i,
@@ -1281,5 +1281,3 @@ extern "C" fn preempt_worker_b(_arg: usize) {
         }
     }
 }
-
-

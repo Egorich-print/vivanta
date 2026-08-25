@@ -245,7 +245,6 @@ pub fn yield_now() {
         return;
     }
 
-
     // G4 running invariant: exactly one thread Running at any instant.
     // Transition order:
     //   current: Running -> Ready
@@ -260,8 +259,6 @@ pub fn yield_now() {
 
     // Activate address space if different
     let next_as = rq().get(next_id).unwrap().address_space;
-
-
 
     if next_as != current_as {
         if cfg!(feature = "trace-address-space") {

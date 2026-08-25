@@ -38,8 +38,7 @@ pub const MAX_TABLES: usize = 256;
 static mut TABLE_REGISTRY: [Option<TableEntry>; MAX_TABLES] = [None; MAX_TABLES];
 /// Live-entry counter. Relaxed atomic: mutated only under the IRQ-guarded
 /// registry operations, read freely for stats — removes static-mut reads.
-static TABLE_COUNT: core::sync::atomic::AtomicUsize =
-    core::sync::atomic::AtomicUsize::new(0);
+static TABLE_COUNT: core::sync::atomic::AtomicUsize = core::sync::atomic::AtomicUsize::new(0);
 
 /// Record a freshly installed table frame. Returns false when the registry
 /// is full — the frame stays installed and reachable but is never reclaimed
