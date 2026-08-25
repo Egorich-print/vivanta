@@ -65,8 +65,8 @@ Ratified spec: `vivanta-boot/docs/milestones/M5.0-green-baseline.md`
 
 Honest status: **M5.0 QEMU-correct baseline**, NOT "hardware-correct". One
 deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
-`docs/investigations/MMU-descriptor-encoding-hardware-validation.md`).
-60-min soak is tooled (`tools/soak_test.sh`) and pending a full run.
+`vivanta-boot/docs/investigations/MMU-descriptor-encoding-hardware-validation.md`).
+60-min soak is tooled (`vivanta-boot/tools/soak_test.sh`) and pending a full run.
 
 ## M5.0 gates — all PASS (verified on clean clone + QEMU)
 
@@ -97,7 +97,7 @@ deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
 
 ## Post-M5 deferred artifacts
 
-1. **G4+ soak** — `tools/soak_test.sh` (default 60 min). **Note: soak run
+1. **G4+ soak** — `vivanta-boot/tools/soak_test.sh` (default 60 min). **Note: soak run
    surfaced INV-002 (preemption IRQ-loss under sustained load) — see below.
    Soak must pass consistently before it is trusted as a reliability gate.**
 2. **MMU descriptor encoding** — HW-validation plan documented; requires
