@@ -100,13 +100,18 @@ paths unchanged.
 - All unexpected EC/DFSC combinations at EL1 → pre-existing
   `exception_handler` dump + halt.
 
-### 2.3 EL0 boundary (unchanged)
+### 2.3 EL0 boundary (amended M7.2)
 
-EL0 sync exceptions keep the M5.0 containment path verbatim: SVC →
-syscall dispatch; anything else → task termination. In M6.0 no EL0 code
-legitimately holds lazy mappings, so an EL0 fault on a Lazy piece
-terminates the task like any other user fault. Resolving EL0-originated
-demand fills is future work tied to the syscall ABI.
+Original rule (M6.0): all non-SVC EL0 exceptions terminate the task,
+because nothing legitimately held lazy mappings at EL0.
+
+**Amendment (M7.2):** once tasks hold syscall-created LazyAnonymous
+reservations, an EL0 data-abort *translation* fault resolves through the
+same validator and transaction as the EL1 case (same root identification
+via TTBR0, same permission gate, same retry). Permission faults,
+instruction aborts and any non-Lazy state keep full G3 containment:
+terminate the task. Net effect: the resolvable class is defined by
+*(fault shape ∧ mapping state)*, NOT by exception level.
 
 ## 3. Retry semantics — why this is not `elr += 4`
 
