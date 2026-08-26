@@ -440,3 +440,30 @@ PR8 ──────────┼──→ PR9 ──→ PR10
 - Phase 2 (PR5-PR7): 2-3 sessions
 - Phase 3 (PR8-PR10): 2-3 sessions
 - Total: 6-9 sessions
+
+## Future Target: Google Pixel (GrapheneOS)
+
+Зафиксированное решение (2026-08-11): целевой смартфон для Vivanta в будущем —
+Google Pixel 6+ (Tensor GS101+), с GrapheneOS в качестве базовой ОС. Это
+стратегическая цель, НЕ ближайшая работа.
+
+Контекст исследования (hardware survey, 2026-08-11):
+- Boot: бутлоадер Pixel — Little Kernel (не UEFI); свой бинарь грузится только
+  как Android boot image через `fastboot boot/flash` на разблокированном BL
+  (GKI-формат; процедура pmOS: пустой vbmeta + `erase dtbo`).
+- GrapheneOS не меняет boot-цепочку (тот же boot.img/AVB/GKI) — для загрузки
+  Vivanta неважно, какая Android-система установлена.
+- Необходимый минимум для bringup: Samsung UART 0x10A00000 (+USB-C debug-донгл),
+  GICv3, generic timer, PSCI, память по DTB. Дисплей/хранилище/сеть/SMP —
+  треки вне scope первого bringup (в mainline для GS101 нет даже DSI-драйвера).
+- Отдельный dev-девайс (бутлоадер открыт) + основной телефон с GrapheneOS
+  (бутлоадер закрыт) — НЕ совмещать на одном устройстве: GrapheneOS требует
+  закрытый BL, разработка ядра требует открытый.
+
+Дорожная карта до цели:
+- A. MMU-фикс L1/L2 0b11→0b10 (блокер реального кремния) + валидация на железе.
+- B. SDM660/lavender — первый смартфон-класс (задел уже есть: target-lavender).
+- C. Pixel 6 (GS101): boot image протокол → UART-консоль на 1 ядре.
+
+См. также `docs/architecture/current-architecture.md` — актуальный снапшот
+архитектуры Vivanta (обновлять при изменениях).

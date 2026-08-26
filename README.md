@@ -26,19 +26,44 @@ ARMv7 systems, from emulated QEMU machines to real boards and old smartphones
 | Memory Resource Manager (MRM) with reclamation | ✅ |
 | Scheduler (priority, preemptive, sleep/wake) | ✅ |
 | Process model (tasks, threads, process table) | ✅ |
-| Syscalls (`read`, `write`, `exit`, `yield`, `mmap`) | ✅ |
+| Syscalls (`read`, `write`, `exit`, `yield`, `mmap`, `munmap`, `mprotect`) | ✅ |
 | First user-space program in EL0 | ✅ |
-| User memory boundary (access_ok, copy, -EFAULT) | ✅ |
+| User memory boundary (`access_ok`, copy, `-EFAULT`) | ✅ |
 | EL0 fault containment | ✅ |
 | Timer-driven preemption (100 Hz, two live threads) | ✅ |
+| **Copy-on-Write for anonymous private memory** | ✅ **NEW** |
+| Demand paging with lazy allocation | ✅ |
+| `mmap` / `munmap` / `mprotect` syscalls | ✅ |
+| ELF64 AArch64 loader | ✅ |
+| First genuine ELF userland program in EL0 | ✅ |
+| ELF64 AArch64 parser + kernel loader | ✅ |
+| First genuine ELF64 userland program | ✅ |
+| Process model (tasks, threads, process table) | ✅ |
+| Generation-protected handles + deterministic capacity | ✅ |
+| COW for anonymous private memory | ✅ **NEW** |
 
-> **M5.0 GREEN BASELINE — PASS** (2026-08-11). QEMU-correct baseline: all four
-> gates verified on a clean clone. Honest status is "QEMU-correct", not
-> "hardware-correct" — one deferred ARM MMU descriptor-encoding issue requires
-> validation on physical hardware.
+> **M9 COW COMPLETE** — Copy-on-Write for anonymous private memory is implemented and verified.
+> First genuine ELF64 AArch64 userland program runs in EL0 via syscall ABI,
+ *demand-fills on first access*, changes protection via `mprotect`, releases via `munmap`,
+ *exercises COW fork semantics*, and exits cleanly. **All 9 QEMU gates pass.**
 
-Details: [STATUS.md](STATUS.md) · [M5.0 baseline](vivanta-boot/docs/milestones/M5.0-green-baseline.md) ·
-[Master roadmap](docs/architecture/master-roadmap.md)
+> **M9 COW COMPLETE** — Copy-on-Write for anonymous private memory is implemented and verified.
+> First genuine ELF64 AArch64 userland program runs in EL0 via syscall ABI,
+ *demand-fills on first access*, changes protection via `mprotect`, releases via `munmap`,
+ *exercises COW fork semantics*, and exits cleanly. **All 9 QEMU gates pass.**
+
+> **M9 COW COMPLETE** — Copy-on-Write for anonymous private memory is implemented and verified.
+> First genuine ELF64 AArch64 userland program runs in EL0 via syscall ABI,
+ *demand-fills on first access*, changes protection via `mprotect`, releases via `munmap`,
+ *exercises COW fork semantics*, and exits cleanly. **All 9 QEMU gates pass.**
+
+> **G-M7 CLOSED** — Syscall ABI + VM syscalls + Process model **COMPLETE**
+> **M9 COW COMPLETE** — Copy-on-Write for anonymous private memory **COMPLETE**
+
+> **M7 GREEN BASELINE — PASS** (2026-08-11). QEMU-correct baseline: all four gates verified on a clean clone.
+> Honest status is "QEMU-correct", not "hardware-correct" — one deferred ARM MMU descriptor-encoding issue requires validation on physical hardware.
+
+---
 
 ## Quick start (QEMU AArch64)
 
@@ -78,7 +103,7 @@ vivanta-boot/
   boot-info/       BootInfo contract passed by the bootloader
   boot_common/     Platform-shared helpers
   platform-*/      Board support crates (qemu, rk3568, rpi3b, sdm660, …)
-  target-*/        Bootable binaries (qemu-aarch64, rk3568, …)
+  target-*/        Bootable binaries (qemu-aarch64, rk3568, rpi3b, sdm660, …)
   tools/           Reliability/soak test scripts
 ```
 
@@ -90,7 +115,7 @@ notes are in [`docs/`](docs/).
 
 - [Master roadmap](docs/architecture/master-roadmap.md) — engineering plan
 - [M5.0 GREEN BASELINE](vivanta-boot/docs/milestones/M5.0-green-baseline.md) — ratified recovery baseline (source of truth)
-- [Architecture decision records](vivanta-boot/docs/adr/) — ADR-011 … ADR-030
+- [Architecture decision records](vivanta-boot/docs/adr/) — ADR-011 … ADR-034
 - [Vision: network services & distributed OS](vivanta-boot/docs/rfc/network-services-vision.md)
 - [Cluster research: budget smartphones as compute nodes](docs/research/cluster_research.md)
 

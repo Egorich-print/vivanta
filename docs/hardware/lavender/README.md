@@ -12,6 +12,12 @@
 
 TBD — requires EXP-001 Lavender Boot Survey.
 
+## Session notes
+
+- [pmOS bring-up findings (2026-08-21)](pmos-findings.md) — build env, boot
+  chain, phantom Vol Up root cause, subpartition mounting, remote surgery
+  toolbox, artifacts.
+
 ## Resources
 
 - postmarketOS wiki
