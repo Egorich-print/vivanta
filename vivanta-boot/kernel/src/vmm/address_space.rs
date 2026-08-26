@@ -255,6 +255,30 @@ impl AddressSpace {
         }
     }
 
+    /// Reserve a specific VA range as LazyAnonymous (used by the ELF
+    /// loader for ET_EXEC segments with fixed virtual addresses).
+    /// Fails if the range is already occupied or outside the domain.
+    pub fn reserve_at(
+        &mut self,
+        vaddr: u64,
+        size: u64,
+        permissions: MappingFlags,
+        object_id: u64,
+    ) -> Result<(), VmmError> {
+        if size == 0 || vaddr % 4096 != 0 {
+            return Err(VmmError::InvalidRange);
+        }
+        self.va
+            .reserve(vaddr, size)
+            .map_err(|_| VmmError::OutOfVa)?;
+        let mapping = Mapping::lazy_anonymous(VirtRange::new(vaddr, size), object_id, permissions);
+        if self.mappings.insert(mapping).is_none() {
+            let _ = self.va.free(vaddr, size);
+            return Err(VmmError::MappingTableFull);
+        }
+        Ok(())
+    }
+
     /// Reserve a lazy anonymous mapping: VA range becomes occupied, no
     /// hardware mapping is created, first access demand-fills one page.
     pub fn reserve_lazy(
@@ -371,6 +395,63 @@ impl AddressSpace {
         true
     }
 
+    /// Materialize a LazyAnonymous page with a PRE-FILLED frame (ELF
+    /// loader path). Same transaction as `resolve_lazy_fault` except the
+    /// caller supplies the frame contents instead of zero-fill. The
+    /// frame's ownership transfers to the mapping (Anonymous).
+    pub fn materialize_with(
+        &mut self,
+        va: u64,
+        frame: u64,
+        flags: MappingFlags,
+        alloc: &mut dyn PageTableAllocator,
+    ) -> Result<(), VmmError> {
+        let page = va & !0xFFF;
+        let Some(m) = self.query(page) else {
+            return Err(VmmError::NotMapped);
+        };
+        if m.backing != Backing::LazyAnonymous {
+            return Err(VmmError::InvalidRange);
+        }
+        let piece_base = m.virt_range.base;
+        let piece_end = m.virt_range.end();
+        let object_id = m.object_id;
+
+        // SAFETY: page is inside a Lazy piece — no descriptor exists.
+        unsafe {
+            vivanta_arch_api::mmu::mmu_map_object(self.root, page, frame, 4096, flags, alloc);
+        }
+
+        // Shadow split: same as resolve_lazy_fault.
+        let mut pieces: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
+        if piece_base < page {
+            pieces.push(Mapping::lazy_anonymous(
+                VirtRange::new(piece_base, page - piece_base),
+                object_id,
+                m.permissions,
+            ));
+        }
+        pieces.push(Mapping::present(
+            VirtRange::new(page, 4096),
+            object_id,
+            flags,
+            frame,
+            PhysOwnership::Anonymous,
+        ));
+        if piece_end > page + 4096 {
+            pieces.push(Mapping::lazy_anonymous(
+                VirtRange::new(page + 4096, piece_end - page - 4096),
+                object_id,
+                m.permissions,
+            ));
+        }
+        let affected = Mapping::lazy_anonymous(m.virt_range, object_id, m.permissions);
+        self.mappings
+            .replace_slots(core::slice::from_ref(&affected), &pieces)
+            .map_err(|_| VmmError::MappingTableFull)?;
+        Ok(())
+    }
+
     /// INV-VM-001 mechanical verifier: for every shadow piece in this
     /// address space, the hardware image must match the logical state
     /// exactly. Present ⇔ valid leaf with matching permission bits;
@@ -450,6 +531,47 @@ impl AddressSpace {
                 return Err(VmmError::InvalidRange); // ghost leaf
             }
             page += 4096;
+        }
+        Ok(())
+    }
+
+    /// Unmap every mapping in the allocator-managed domain and release
+    /// all anonymous frames. Used at process teardown. Tolerates gaps:
+    /// each live piece is removed individually.
+    pub fn unmap_all(&mut self, alloc: &mut dyn PageTableAllocator) -> Result<(), VmmError> {
+        loop {
+            let Some((base, size)) = self
+                .mappings
+                .iter()
+                .next()
+                .map(|m| (m.virt_range.base, m.virt_range.size))
+            else {
+                break;
+            };
+            // SAFETY: piece exists; per-piece removal is exact.
+            unsafe {
+                vivanta_arch_api::mmu::mmu_unmap(self.root, base, size, alloc);
+            }
+            let affected_values: alloc::vec::Vec<Mapping> = self
+                .mappings
+                .iter()
+                .filter(|m| m.virt_range.base == base && m.virt_range.size == size)
+                .copied()
+                .collect();
+            // Release anonymous frames.
+            for m in &affected_values {
+                if m.backing == Backing::Present && m.phys == PhysOwnership::Anonymous {
+                    if let Some(backend) = crate::vmm::faults::anonymous_backend() {
+                        // SAFETY: backend outlives boot; single-core.
+                        unsafe { (*backend).deallocate(m.pa, m.virt_range.size) };
+                    }
+                }
+            }
+            let empty: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
+            self.mappings
+                .replace_slots(&affected_values, &empty)
+                .map_err(|_| VmmError::MappingTableFull)?;
+            self.reclaim_empty_tables(alloc);
         }
         Ok(())
     }

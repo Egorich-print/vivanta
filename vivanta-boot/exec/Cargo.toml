@@ -1,0 +1,9 @@
+[package]
+name = "vivanta-exec"
+version = "0.1.0"
+edition = "2024"
+description = "Vivanta — user program image loading (ELF64 AArch64 parsing/validation + load planning)"
+
+# Pure parsing/validation logic over in-memory images: no arch, no hardware,
+# no allocation beyond what the caller provides. Host-testable by design —
+# the ELF contract is proven here before the kernel ever touches a byte.

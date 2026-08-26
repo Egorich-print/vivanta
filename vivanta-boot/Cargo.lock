@@ -42,12 +42,17 @@ name = "vivanta-boot-info"
 version = "0.1.0"
 
 [[package]]
+name = "vivanta-exec"
+version = "0.1.0"
+
+[[package]]
 name = "vivanta-kernel"
 version = "0.1.0"
 dependencies = [
  "vivanta-arch-api",
  "vivanta-boot-common",
  "vivanta-boot-info",
+ "vivanta-exec",
  "vivanta-vm",
 ]
 

@@ -16,6 +16,7 @@ pub(crate) fn interrupts_guard() -> impl core::ops::Drop {
 }
 
 pub mod error;
+mod exec;
 pub mod identity;
 pub mod memory;
 pub mod pmm;
@@ -719,6 +720,65 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             println!("  [SYS] mmap/store/mprotect/munmap/negatives PASS (exit=42)");
             tm.reap_zombie(tid);
             vmm::unregister(sys_as).expect("unregister VmSysAS");
+        }
+
+        // ------------------------------------------------------------------
+        // M8.4 ELF userland gate: load a genuine ELF64 AArch64 image into
+        // a fresh address space, start it at EL0, and require exit(42).
+        // ------------------------------------------------------------------
+        println!("M8.4 ELF userland gate:");
+        {
+            static ELF: &[u8] = include_bytes!("../../user-init/user-init.elf");
+            let root = build_root("ElfAS", 0, 0, None);
+            let elf_as = vmm::register(root, vmm::AddressSpaceFlags::User);
+            let mut as_alloc = memory::AsPageTableAllocator::new(
+                system_state.memory_manager_mut() as *mut _,
+                &raw mut pmm_backend as *mut dyn memory::MemoryBackend,
+                elf_as,
+            );
+            let entry = crate::exec::load_elf(
+                ELF,
+                vmm::address_space_mut_by(elf_as),
+                &mut as_alloc,
+                crate::syscall::OBJ_ANONYMOUS,
+            )
+            .expect("load_elf");
+            println!("  [ELF] loaded, entry={:#x}", entry);
+            {
+                let a = vmm::address_space_mut_by(elf_as);
+                println!("    post-load pieces={}", a.mappings.len());
+            }
+            vmm::address_space_mut_by(elf_as)
+                .verify_hardware_consistency()
+                .expect("ELF load: forward verifier");
+            let mut tm = scheduler::task_manager::TaskManager::new();
+            let tid = tm
+                .spawn_user(
+                    entry as usize,
+                    0x5C01_1000usize, // dummy SP_EL0; program is naked
+                    elf_as,
+                    &mut pmm,
+                    system_state.memory_manager_mut(),
+                    scheduler::thread::Priority::Normal,
+                    None,
+                )
+                .expect("spawn ELF task")
+                .id;
+            scheduler::yield_now();
+            scheduler::yield_now();
+            let task = tm.get(tid).expect("ELF task missing");
+            assert_eq!(
+                task.exit_code,
+                Some(42),
+                "ELF program must exit with code 42 (got {:?})",
+                task.exit_code
+            );
+            println!("  [ELF] genuine ELF64 userland PASS (exit=42)");
+            // Process teardown releases ALL remaining mappings (the loaded
+            // image itself is not unmapped by the program's munmap calls).
+            vmm::address_space_mut_by(elf_as)
+                .unmap_all(&mut as_alloc)
+                .expect("unmap_all at process teardown");
         }
 
         // ------------------------------------------------------------------
