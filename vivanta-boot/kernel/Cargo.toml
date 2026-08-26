@@ -18,3 +18,4 @@ vivanta-boot-info = { path = "../boot-info" }
 vivanta-boot-common = { path = "../boot_common" }
 vivanta-arch-api = { path = "../arch-api" }
 vivanta-vm = { path = "../vm" }
+vivanta-exec = { path = "../exec" }

@@ -27,6 +27,7 @@ mod heapless_set {
                 len: 0,
             }
         }
+        #[allow(dead_code)]
         pub fn contains(&self, start: u64, size: u64) -> bool {
             (0..self.len).any(|i| self.starts[i] == start && self.sizes[i] == size)
         }
@@ -180,7 +181,7 @@ fn repro_drain_fragmentation() {
             .wrapping_add(1442695040888963407);
         state
     };
-    for iter in 0..20_000u32 {
+    for _iter in 0..20_000u32 {
         let pages = 1u64 << (next() % 5);
         match next() % 3 {
             0 | 1 if live.len < 192 => {
@@ -229,7 +230,7 @@ fn lifecycle_stress_model_checked() {
         state
     };
 
-    for iter in 0..20_000u32 {
+    for _iter in 0..20_000u32 {
         let pages_pow = (next() % 5) as u32; // 1..=16 pages
         let pages = 1u64 << pages_pow;
         match next() % 3 {

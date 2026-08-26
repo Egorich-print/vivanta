@@ -199,6 +199,11 @@ impl MappingSet {
         MAX_MAPPINGS
     }
 
+    /// Debug accessor for boot-time diagnostics.
+    pub fn mappings_debug(&self) -> impl Iterator<Item = &Mapping> {
+        self.iter()
+    }
+
     /// Transactionally replace every mapping whose slot is in
     /// `affected_slots` with `pieces` (ADR-032 INV-VM-001).
     ///
