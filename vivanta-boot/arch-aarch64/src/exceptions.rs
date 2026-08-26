@@ -102,7 +102,13 @@ pub unsafe extern "C" fn el1_sync_handler(frame: &ExceptionFrame, kind: u64, esr
             ) {
                 return; // resolved — epilogue retries the instruction
             }
-            crate::mmu::dump_walk(root & 0x0000_FFFF_FFFF_F000, far, "fault-walk");
+            // ADR-034 §3: WRITE permission faults may be COW breaks.
+            if write
+                && matches!(esr & 0x3f, 0b001101 | 0b001110 | 0b001111)
+                && vivanta_arch_api::vm::vm_try_resolve_cow_fault(root & 0x0000_FFFF_FFFF_F000, far)
+            {
+                return; // resolved — retry the store
+            }
         }
     }
 

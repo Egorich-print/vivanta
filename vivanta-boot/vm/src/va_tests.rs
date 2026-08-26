@@ -171,7 +171,6 @@ fn overflow_safe() {
 /// allocations with interleaved frees, model-checked after every operation.
 #[test]
 fn repro_drain_fragmentation() {
-    // Minimal deterministic reproduction of the drain-count bug.
     let mut va = VaAllocator::try_new(BASE, END).unwrap();
     let mut live: heapless_set::AllocSet = heapless_set::AllocSet::new();
     let mut state: u64 = 0x1234_5678_9ABC_DEF0;
@@ -230,7 +229,7 @@ fn lifecycle_stress_model_checked() {
         state
     };
 
-    for _iter in 0..20_000u32 {
+    for iter in 0..20_000u32 {
         let pages_pow = (next() % 5) as u32; // 1..=16 pages
         let pages = 1u64 << pages_pow;
         match next() % 3 {
@@ -258,8 +257,9 @@ fn lifecycle_stress_model_checked() {
                 }
             }
         }
-        if iter % 512 == 0 {
+        if iter % 512 == 1 {
             model.check();
+            let _ = iter;
         }
     }
     model.check();

@@ -16,3 +16,11 @@ unsafe extern "Rust" {
     /// Reserved piece, OOM).
     pub safe fn vm_try_resolve_data_abort(root_pa: u64, vaddr: u64, write: bool) -> bool;
 }
+
+unsafe extern "Rust" {
+    /// Attempt to resolve an EL0/EL1 WRITE *permission* fault at `vaddr`
+    /// as a copy-on-write break (ADR-034 §3). Returns true when resolved
+    /// (retry); false when the permission violation is a genuine policy
+    /// violation (containment/fatal).
+    pub safe fn vm_try_resolve_cow_fault(root_pa: u64, vaddr: u64) -> bool;
+}

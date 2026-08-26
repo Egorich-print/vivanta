@@ -1,8 +1,7 @@
 extern crate std;
-use std::vec;
-extern crate std;
 use crate::elf::*;
-use crate::elf::{ElfError, LoadPlan, plan_load};
+use crate::elf::{ElfError, plan_load};
+use std::vec;
 use std::vec::Vec;
 
 const PHENTSIZE: usize = 56;

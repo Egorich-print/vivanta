@@ -13,7 +13,10 @@ const _: () = assert!(core::mem::size_of::<AddressSpace>() <= 12 * 1024);
 const _: () = assert!(core::mem::size_of::<MappingSet>() <= 5 * 1024);
 
 pub const KERNEL_ADDRESS_SPACE_ID: AddressSpaceId = 0;
-const MAX_ADDRESS_SPACES: usize = 8;
+/// Raised from 8 in G-M9: boot gates register many test spaces.
+/// Static cost ~10 KiB/slot (BSS) — acceptable for QEMU and boards with
+/// >=1 MiB RAM. Exhaustion still panics deterministically at registration.
+const MAX_ADDRESS_SPACES: usize = 16;
 
 /// User VA domain for allocator-managed mappings.
 ///
@@ -115,7 +118,9 @@ impl AddressSpace {
         // (mmu_map_object panics on OOM — boot/runtime fatal — so no rollback
         // is reachable on the failure path after the insert succeeds.)
         let range = VirtRange::new(vaddr, size);
-        let mapping = Mapping::new(range, object_id, flags);
+        // PA recorded in the shadow (External ownership: the caller owns
+        // the physical memory). Needed by duplicate/audit paths.
+        let mapping = Mapping::present(range, object_id, flags, paddr, PhysOwnership::External);
         self.mappings
             .insert(mapping)
             .ok_or(VmmError::MappingTableFull)?;
@@ -452,6 +457,150 @@ impl AddressSpace {
         Ok(())
     }
 
+    /// Resolve a WRITE permission fault on a CoW piece (ADR-034 §3):
+    /// allocate a private frame, copy shared contents, remap writable.
+    /// Returns false if the fault is not a resolvable COW break.
+    pub fn resolve_cow_fault(&mut self, va: u64, alloc: &mut dyn PageTableAllocator) -> bool {
+        let page = va & !0xFFF;
+        let Some(m) = self.query(page) else {
+            return false;
+        };
+        if m.backing != Backing::CoW {
+            return false;
+        }
+        let refcount = match m.phys {
+            PhysOwnership::CoWShared { refcount } => refcount,
+            _ => return false,
+        };
+        if refcount == 0 {
+            return false;
+        }
+        let old_pa = m.pa;
+        let piece_base = m.virt_range.base;
+        let piece_end = m.virt_range.end();
+        // Break restores the ORIGINAL write permission.
+        let full_perms = MappingFlags::from_bits(m.permissions.bits() | 0b001);
+        let object_id = m.object_id;
+
+        let Some(new_frame) = alloc.try_alloc_page_table_frame() else {
+            vivanta_boot_common::println!("  [VM] OOM during COW break at {:#x}", va);
+            return false;
+        };
+        // SAFETY: both frames are live 4 KiB RAM allocations; identity RAM
+        // mapping makes both kernel-accessible regardless of active AS.
+        unsafe {
+            core::ptr::copy_nonoverlapping(old_pa as *const u8, new_frame as *mut u8, 4096);
+            vivanta_arch_api::mmu::mmu_map_object(
+                self.root, page, new_frame, 4096, full_perms, alloc,
+            );
+        }
+
+        // Transactional shadow split: this page becomes Present(Anonymous);
+        // neighbouring CoW pages keep sharing the OLD frame.
+        let mut pieces: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
+        if piece_base < page {
+            pieces.push(Mapping::cow_shared(
+                VirtRange::new(piece_base, page - piece_base),
+                object_id,
+                m.permissions,
+                old_pa,
+                refcount,
+            ));
+        }
+        pieces.push(Mapping::present(
+            VirtRange::new(page, 4096),
+            object_id,
+            full_perms,
+            new_frame,
+            PhysOwnership::Anonymous,
+        ));
+        if piece_end > page + 4096 {
+            pieces.push(Mapping::lazy_anonymous(
+                VirtRange::new(page + 4096, piece_end - page - 4096),
+                object_id,
+                m.permissions,
+            ));
+        }
+        let affected =
+            Mapping::cow_shared(m.virt_range, object_id, m.permissions, old_pa, refcount);
+        self.mappings
+            .replace_slots(core::slice::from_ref(&affected), &pieces)
+            .map_err(|_| VmmError::MappingTableFull)
+            .expect("COW split capacity pre-checked");
+        true
+    }
+
+    /// Duplicate this address space into a fresh child (M7.5).
+    ///
+    /// Returns the constructed-but-unregistered child; the caller registers
+    /// it via `register_child` and activates whichever space it needs.
+    ///
+    /// Copy-based semantics (COW sharing deferred to a follow-up):
+    /// - Present(Anonymous): NEW frame allocated, 4 KiB contents copied
+    ///   through the kernel identity mapping; child owns the copy.
+    /// - Present(External): same PA remapped into the child.
+    /// - Lazy/Reserved: identical reservation, no frames.
+    pub fn duplicate_as(
+        &mut self,
+        child_root: RootPageTable,
+        alloc: &mut dyn PageTableAllocator,
+    ) -> Result<AddressSpace, VmmError> {
+        let pieces: alloc::vec::Vec<Mapping> = self.mappings.iter().copied().collect();
+
+        // Child VA allocator mirrors the parent's domain layout.
+        let mut child = Self::new(0, child_root, self.flags);
+        child.va = self.va;
+        // Root is assigned by register_child after the shadow is built.
+        let mut child_pieces: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
+        for m in &pieces {
+            match m.backing {
+                Backing::Present => {
+                    let Some(new_frame) = alloc.try_alloc_page_table_frame() else {
+                        return Err(VmmError::OutOfVa);
+                    };
+                    // SAFETY: both are live 4 KiB RAM allocations; the
+                    // identity mapping keeps both kernel-accessible.
+                    unsafe {
+                        core::ptr::write_bytes(new_frame as *mut u8, 0, 4096);
+                        core::ptr::copy_nonoverlapping(
+                            m.pa as *const u8,
+                            new_frame as *mut u8,
+                            4096,
+                        );
+                    }
+                    // Install the leaf in the CHILD tree so its EL0 task
+                    // can access the private copy immediately.
+                    unsafe {
+                        vivanta_arch_api::mmu::mmu_map_object(
+                            child.root,
+                            m.virt_range.base,
+                            new_frame,
+                            m.virt_range.size,
+                            m.permissions,
+                            alloc,
+                        );
+                    }
+                    child_pieces.push(Mapping::present(
+                        m.virt_range,
+                        m.object_id,
+                        m.permissions,
+                        new_frame,
+                        PhysOwnership::Anonymous,
+                    ));
+                }
+                _ => {
+                    child_pieces.push(*m);
+                }
+            }
+        }
+        for p in &child_pieces {
+            if child.mappings.insert(*p).is_none() {
+                return Err(VmmError::MappingTableFull);
+            }
+        }
+        Ok(child)
+    }
+
     /// INV-VM-001 mechanical verifier: for every shadow piece in this
     /// address space, the hardware image must match the logical state
     /// exactly. Present ⇔ valid leaf with matching permission bits;
@@ -459,7 +608,7 @@ impl AddressSpace {
     pub fn verify_hardware_consistency(&self) -> Result<(), VmmError> {
         for (_, m) in self.mappings.iter_with_slots() {
             match m.backing {
-                Backing::Present => {
+                Backing::Present | Backing::CoW => {
                     let mut off = 0u64;
                     while off < m.virt_range.size {
                         // SAFETY: read-only descriptor probe.
@@ -472,7 +621,12 @@ impl AddressSpace {
                         if desc & 1 == 0 {
                             return Err(VmmError::NotMapped); // Present w/o hw
                         }
-                        let expected = vivanta_arch_api::mmu::mmu_permission_bits(m.permissions);
+                        let mut expected =
+                            vivanta_arch_api::mmu::mmu_permission_bits(m.permissions);
+                        // CoW pieces are hardware read-only.
+                        if m.backing == Backing::CoW {
+                            expected &= !vivanta_arch_api::mmu::MappingFlags::read_write().bits();
+                        }
                         if desc & expected != expected {
                             return Err(VmmError::InvalidRange); // perm drift
                         }
@@ -736,14 +890,37 @@ pub enum VmmError {
     AddressSpaceBusy,
 }
 
-static mut ADDRESS_SPACES: [Option<AddressSpace>; MAX_ADDRESS_SPACES] =
-    [None, None, None, None, None, None, None, None];
+static mut ADDRESS_SPACES: [Option<AddressSpace>; MAX_ADDRESS_SPACES] = [None; MAX_ADDRESS_SPACES];
 static mut NEXT_AS_ID: AddressSpaceId = 1;
 
 pub fn init_kernel_address_space(root: RootPageTable) {
     unsafe {
         ADDRESS_SPACES[0] = Some(AddressSpace::new(0, root, AddressSpaceFlags::Kernel));
     }
+}
+
+/// Peek the id the NEXT registered address space will receive.
+pub fn peek_next_as_id() -> AddressSpaceId {
+    unsafe { NEXT_AS_ID }
+}
+
+/// Register an ALREADY-CONSTRUCTED address space (from duplicate_as):
+/// assigns the final id, sets its root, and returns the id.
+pub fn register_child(mut child: AddressSpace, root: RootPageTable) -> AddressSpaceId {
+    unsafe {
+        let id = NEXT_AS_ID;
+        NEXT_AS_ID += 1;
+        child.id = id;
+        child.root = root;
+        for i in 0..MAX_ADDRESS_SPACES {
+            let ptr = &raw mut ADDRESS_SPACES[i];
+            if (*ptr).is_none() {
+                *ptr = Some(child);
+                return id;
+            }
+        }
+    }
+    panic!("address space registry full");
 }
 
 pub fn register(root: RootPageTable, flags: AddressSpaceFlags) -> AddressSpaceId {

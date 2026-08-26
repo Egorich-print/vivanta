@@ -23,6 +23,9 @@ impl VirtRange {
 pub enum Backing {
     /// Hardware mapping exists for the entire piece.
     Present,
+    /// Hardware mapping exists (readable, write-suppressed); a WRITE
+    /// permission fault triggers copy-on-write resolution (ADR-034).
+    CoW,
     /// No hardware mapping; first access demand-fills exactly one page
     /// from anonymous memory (PMM frame, zeroed).
     LazyAnonymous,
@@ -38,6 +41,10 @@ pub enum PhysOwnership {
     /// PA allocated by the VM layer for this piece; released to the PMM
     /// when the piece is unmapped. Cannot be aliased (PA never published).
     Anonymous,
+    /// PA shared by exactly `refcount` mappings via COW (ADR-034).
+    /// The last owner to unmap receives the physical frame. The shadow
+    /// refcount is the single authority for "how many owners remain".
+    CoWShared { refcount: u32 },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -83,6 +90,24 @@ impl Mapping {
             backing: Backing::Present,
             pa,
             phys,
+        }
+    }
+
+    /// Present piece shared via copy-on-write.
+    pub const fn cow_shared(
+        virt_range: VirtRange,
+        object_id: MemoryObjectId,
+        permissions: MappingFlags,
+        pa: u64,
+        refcount: u32,
+    ) -> Self {
+        Self {
+            virt_range,
+            object_id,
+            permissions,
+            backing: Backing::CoW,
+            pa,
+            phys: PhysOwnership::CoWShared { refcount },
         }
     }
 
@@ -202,6 +227,18 @@ impl MappingSet {
     /// Debug accessor for boot-time diagnostics.
     pub fn mappings_debug(&self) -> impl Iterator<Item = &Mapping> {
         self.iter()
+    }
+
+    /// Remove a mapping by its virtual base address.
+    pub fn remove_by_base(&mut self, base: u64) -> Option<Mapping> {
+        let slot = (0..self.count).find(|&i| {
+            self.mappings[i]
+                .as_ref()
+                .is_some_and(|m| m.virt_range.base == base)
+        })?;
+        let removed = self.mappings[slot];
+        self.remove(slot);
+        removed
     }
 
     /// Transactionally replace every mapping whose slot is in

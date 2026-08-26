@@ -32,9 +32,10 @@ SECTIONS
 
     . = ALIGN(16);
     __stack_bottom = .;
-    /* 64 KiB: kernel_main locals + large AddressSpace temporaries
-     * (VaAllocator grew the struct; M6 precedent: 16->32 KiB). */
-    . += 65536;
+    /* 128 KiB: kernel_main locals + large AddressSpace temporaries
+     * (each struct evolution raises the peak; M6: 16->32, mission-4:
+     * 32->64, G-M9: 64->128 as Mapping gained COW metadata). */
+    . += 131072;
     __stack_top = .;
 
     /DISCARD/ : {

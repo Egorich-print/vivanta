@@ -214,6 +214,12 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
 
         let mrm = system_state.memory_manager();
         println!("  MRM: {} backend(s) registered", mrm.backend_count());
+        println!(
+            "  [SIZE] AS={} MappingSet={} Mapping={}",
+            core::mem::size_of::<vmm::AddressSpace>(),
+            core::mem::size_of::<vmm::MappingSet>(),
+            core::mem::size_of::<vmm::Mapping>()
+        );
 
         // Demand-fill / VM-syscall backing context: established once here
         // so every later fault or syscall resolves against the same
@@ -622,8 +628,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 Some((code_src, code_len, SCEN_CODE_VA, SCEN_STACK_VA)),
             );
             let as_id = vmm::register(root, vmm::AddressSpaceFlags::User);
+            println!("  [SC-M1] registered as={}", as_id);
             let mut tm = scheduler::task_manager::TaskManager::new();
-            vivanta_boot_common::println!("  [SC] spawning {}", name);
+            println!("  [SC-M2] spawning {}", name);
             let tid = tm
                 .spawn_user(
                     SCEN_CODE_VA as usize,
@@ -635,12 +642,13 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     None,
                 )
                 .expect("spawn fault-scenario task");
+            println!("  [SC-M3] spawned id={}", tid.id);
             let tid = tid.id;
-            println!("  [SC] yielding to {}", name);
+            println!("  [SC-Y] yielding to {}", name);
             scheduler::yield_now();
-            println!("  [SC] back once {}", name);
+            println!("  [SC-Y] back1 {}", name);
             scheduler::yield_now();
-            println!("  [SC] back twice {}", name);
+            println!("  [SC-Y] back2 {}", name);
             let task = tm.get(tid).expect("scenario task missing");
             assert_eq!(
                 task.exit_code,
@@ -779,6 +787,72 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             vmm::address_space_mut_by(elf_as)
                 .unmap_all(&mut as_alloc)
                 .expect("unmap_all at process teardown");
+        }
+
+        // ------------------------------------------------------------------
+        // M9 COW gate: duplicate an AS with a Present Anonymous page,
+        // child writes (COW break), verify parent sees the OLD value and
+        // child sees its OWN new value.
+        // ------------------------------------------------------------------
+        println!("COW gate:");
+        {
+            // Parent AS with one eager anonymous page at 0x1000000.
+            let cow_root = build_root("CowParentAS", 0, 0, None);
+            let parent_as = vmm::register(cow_root, vmm::AddressSpaceFlags::User);
+            let frame = pmm.alloc_frame().expect("cow frame");
+            let mut as_alloc_cow = memory::AsPageTableAllocator::new(
+                system_state.memory_manager_mut() as *mut _,
+                &raw mut pmm_backend as *mut dyn memory::MemoryBackend,
+                parent_as,
+            );
+            let kas_root = vmm::lookup_root(crate::vmm::KERNEL_ADDRESS_SPACE_ID);
+            let child_id = vmm::peek_next_as_id();
+
+            let _irq = vivanta_arch_api::interrupts::disable_interrupts();
+            // Parent page must be accessed with the PARENT AS active.
+            vivanta_arch_api::mmu::activate_address_space(cow_root);
+            {
+                let a = vmm::address_space_mut_by(parent_as);
+                use vivanta_arch_api::mmu::MappingFlags as ApiMFlags;
+                a.map_pages(
+                    0x1000000,
+                    frame.addr,
+                    4096,
+                    ApiMFlags::read_write(),
+                    &mut as_alloc_cow,
+                    555,
+                )
+                .expect("cow map");
+                core::ptr::write_volatile(0x1000000 as *mut u64, 0xAAAA);
+            }
+
+            // Duplicate: builds an independent child shadow; the fresh
+            // root comes from the same boot-style builder.
+            let child_root = build_root("CowChildAS", 0, 0, None);
+            let child = vmm::address_space_mut_by(parent_as)
+                .duplicate_as(child_root, &mut as_alloc_cow)
+                .expect("duplicate");
+            let _child_as = vmm::register_child(child, child_root);
+
+            // Child writes → COW break (EL1 write under the CHILD AS).
+            let child_root = vmm::lookup_root(child_id);
+            vivanta_arch_api::mmu::activate_address_space(child_root);
+            core::ptr::write_volatile(0x1000000 as *mut u64, 0xBBBB); // CoW break
+            let child_val = core::ptr::read_volatile(0x1000000 as *const u64);
+
+            // Parent reads its own view — must still see 0xAAAA.
+            vivanta_arch_api::mmu::activate_address_space(cow_root);
+            let parent_val = core::ptr::read_volatile(0x1000000 as *const u64);
+
+            vivanta_arch_api::mmu::activate_address_space(kas_root);
+            drop(_irq);
+
+            assert_eq!(child_val, 0xBBBB, "child must see its own write");
+            assert_eq!(parent_val, 0xAAAA, "parent must be unaffected by COW break");
+            println!(
+                "  [COW] break+isolation PASS (child=0x{:x} parent=0x{:x})",
+                child_val, parent_val
+            );
         }
 
         // ------------------------------------------------------------------

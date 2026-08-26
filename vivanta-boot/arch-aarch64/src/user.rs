@@ -417,6 +417,7 @@ pub unsafe extern "C" fn el0_sync_handler(
         fn dfsc(esr: u64) -> u64 {
             esr & 0x3f
         }
+        vivanta_boot_common::println!("  [E0H] ec={} far={:#x}", ec, far);
         if ec == 0b010101 {
             // SVC (AArch64) from EL0 — dispatch syscall.
             // ARM: for SVC, ELR_EL1 points to the instruction AFTER the SVC
@@ -444,8 +445,9 @@ pub unsafe extern "C" fn el0_sync_handler(
             // EVERYTHING else keeps G3 containment: terminate the task.
             let ec_data_lower = ec == 0b100100;
             let translation = matches!(dfsc(esr), 0b000101 | 0b000110 | 0b000111);
+            let write = esr & (1 << 6) != 0; // ISS.WnR
+            let permission = matches!(dfsc(esr), 0b001101 | 0b001110 | 0b001111);
             if ec_data_lower && translation {
-                let write = esr & (1 << 6) != 0; // ISS.WnR
                 let root: u64;
                 core::arch::asm!("mrs {}, ttbr0_el1", out(reg) root, options(nostack));
                 if vivanta_arch_api::vm::vm_try_resolve_data_abort(
@@ -454,6 +456,16 @@ pub unsafe extern "C" fn el0_sync_handler(
                     write,
                 ) {
                     return; // resolved — epilogue retries the instruction
+                }
+            }
+            // ADR-034 §3: WRITE permission faults may be COW breaks.
+            // (Read permission faults are genuine policy violations.)
+            if ec_data_lower && permission && write {
+                let root: u64;
+                core::arch::asm!("mrs {}, ttbr0_el1", out(reg) root, options(nostack));
+                if vivanta_arch_api::vm::vm_try_resolve_cow_fault(root & 0x0000_FFFF_FFFF_F000, far)
+                {
+                    return; // resolved — retry
                 }
             }
             LAST_FAULT_ESR = esr;

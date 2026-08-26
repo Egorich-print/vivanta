@@ -150,6 +150,14 @@ pub extern "Rust" fn mmu_permission_bits(_flags: MappingFlags) -> u64 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "Rust" fn mmu_read_table_entry(_table_pa: u64, _index: usize) -> u64 {
+    0
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn mmu_write_table_entry(_table_pa: u64, _index: usize, _value: u64) {}
+
+#[unsafe(no_mangle)]
 pub extern "Rust" fn mmu_leaf_descriptor(_root_pa: u64, _va: u64) -> u64 {
     0
 }

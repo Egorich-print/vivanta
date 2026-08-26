@@ -64,3 +64,17 @@ pub extern "Rust" fn vm_try_resolve_data_abort(root_pa: u64, vaddr: u64, write: 
     let mut alloc = unsafe { AsPageTableAllocator::new(mrm, backend, aspace.id) };
     aspace.resolve_lazy_fault(vaddr, write, &mut alloc)
 }
+
+/// ADR-034 §3: resolve a write permission fault as COW break.
+#[unsafe(no_mangle)]
+pub extern "Rust" fn vm_try_resolve_cow_fault(root_pa: u64, vaddr: u64) -> bool {
+    let Some(aspace) = super::address_space::find_by_root(root_pa) else {
+        return false;
+    };
+    let Some((mrm, backend)) = backing_context() else {
+        return false;
+    };
+    // SAFETY: context pointers were established during boot.
+    let mut alloc = unsafe { crate::memory::AsPageTableAllocator::new(mrm, backend, aspace.id) };
+    aspace.resolve_cow_fault(vaddr, &mut alloc)
+}

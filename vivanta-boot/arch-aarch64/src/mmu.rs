@@ -483,6 +483,18 @@ pub extern "Rust" fn mmu_leaf_descriptor(root_pa: u64, va: u64) -> u64 {
 }
 
 #[unsafe(no_mangle)]
+pub extern "Rust" fn mmu_read_table_entry(table_pa: u64, index: usize) -> u64 {
+    read_desc(table_pa + (index as u64) * 8)
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn mmu_write_table_entry(table_pa: u64, index: usize, value: u64) {
+    debug_assert!(index < 512);
+    write_desc(table_pa + (index as u64) * 8, value);
+    barrier_write();
+}
+
+#[unsafe(no_mangle)]
 pub unsafe extern "Rust" fn mmu_clear_table_entry(table_pa: u64, index: usize) {
     debug_assert!(index < 512);
     write_desc(table_pa + (index as u64) * 8, 0);

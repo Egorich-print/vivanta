@@ -33,6 +33,10 @@ impl MappingFlags {
         Self { bits: 0b100 }
     }
 
+    /// Raw bits (verifier use: strip write-bit for CoW comparison).
+    pub const fn bits(&self) -> u64 {
+        self.bits
+    }
     pub fn is_read_write(&self) -> bool {
         self.bits & 0b001 != 0
     }
@@ -168,6 +172,20 @@ unsafe extern "Rust" {
     /// Used by boot-time audits to assert descriptor attributes (AF, AP, XN)
     /// that QEMU does not enforce.
     pub fn mmu_leaf_descriptor(root_pa: u64, va: u64) -> u64;
+
+    /// Read one raw descriptor entry from a table frame (mechanism
+    /// primitive). Used by the address-space duplication path to walk and
+    /// clone the parent hierarchy.
+    pub fn mmu_read_table_entry(table_pa: u64, index: usize) -> u64;
+
+    /// Write a raw descriptor entry into a table frame (mechanism
+    /// primitive), with the required barrier.
+    ///
+    /// # Safety
+    /// - `table_pa` must be a live table frame recorded in the caller's
+    ///   ownership registry.
+    /// - `index` must be < 512.
+    pub unsafe fn mmu_write_table_entry(table_pa: u64, index: usize, value: u64);
 
     /// Clear one descriptor entry in a table frame (mechanism primitive).
     ///
