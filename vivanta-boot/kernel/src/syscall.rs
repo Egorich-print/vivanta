@@ -9,6 +9,9 @@
 // all memory effects go through VMM primitives that validate ranges.
 // ---------------------------------------------------------------------------
 
+mod process;
+pub use process::*;
+
 use crate::scheduler;
 use crate::vmm;
 use vivanta_arch_api::mmu::MappingFlags;
@@ -25,6 +28,12 @@ pub const SYS_YIELD: u64 = 3;
 pub const SYS_MMAP: u64 = 4;
 pub const SYS_MUNMAP: u64 = 5;
 pub const SYS_MPROTECT: u64 = 6;
+pub const SYS_FORK: u64 = 7;
+pub const SYS_EXIT: u64 = 7;
+pub const SYS_WAITPID: u64 = 8;
+pub const SYS_KILL: u64 = 9;
+pub const SYS_GETPID: u64 = 10;
+pub const SYS_GETPPID: u64 = 11;
 
 // --- frozen errno encoding -------------------------------------------------
 pub const EPERM_I: i64 = -1;
@@ -95,17 +104,19 @@ pub extern "Rust" fn syscall_dispatch(
     match num {
         SYS_READ => ENOSYS, // reserved (ADR-033 §3)
         SYS_WRITE => sys_write(arg0, arg1, arg2),
-        SYS_EXIT => {
-            println!("  syscall: exit({})", arg0);
-            scheduler::thread_exit(arg0 as i32);
-        }
+        SYS_EXIT => process::sys_exit(arg0 as i32),
         SYS_YIELD => {
-            scheduler::yield_now();
+            crate::scheduler::yield_now();
             0
         }
         SYS_MMAP => sys_mmap(as_root, arg0, arg1, arg2),
-        SYS_MUNMAP => sys_munmap(as_root, arg0, arg1),
-        SYS_MPROTECT => sys_mprotect(as_root, arg0, arg1, arg2),
+        SYS_MUNMAP => process::sys_munmap(as_root, arg0, arg1),
+        SYS_MPROTECT => process::sys_mprotect(as_root, arg0, arg1, arg2),
+        SYS_FORK => process::sys_fork(as_root),
+        SYS_WAITPID => process::sys_waitpid(arg0, arg1 as *mut i32, arg2),
+        SYS_KILL => process::sys_kill(arg0 as i64, arg1 as i64),
+        SYS_GETPID => process::sys_getpid(),
+        SYS_GETPPID => process::sys_getppid(),
         _ => {
             println!("  syscall: unknown num={}", num);
             ENOSYS
@@ -121,7 +132,7 @@ fn sys_write(fd: u64, buf: u64, count: u64) -> u64 {
         return EINVAL;
     }
     let count = count as usize;
-    let mut kbuf = [0u8; WRITE_BUF_SIZE];
+    let mut kbuf = [0u8; 256];
     // SAFETY: kbuf is a kernel stack buffer; copy_from_user validates the
     // source range against the active address space first.
     if unsafe { vivanta_arch_api::user_memory::copy_from_user(kbuf.as_mut_ptr(), buf, count) }
@@ -166,60 +177,6 @@ fn sys_mmap(as_root: u64, addr: u64, len: u64, prot: u64) -> u64 {
     }
 }
 
-/// MUNMAP(addr, len) → 0 or -errno.
-fn sys_munmap(as_root: u64, addr: u64, len: u64) -> u64 {
-    let Some(aspace) = vmm::find_by_root(as_root) else {
-        return EFAULT;
-    };
-    if addr % 4096 != 0 || addr < vmm::USER_VA_BASE {
-        return EINVAL;
-    }
-    if len == 0 {
-        return EINVAL;
-    }
-    let Some(len_r) = page_round(len) else {
-        return EINVAL;
-    };
-    match aspace.unmap_range(addr, len_r, &mut as_alloc_for(aspace.id)) {
-        Ok(()) => 0,
-        Err(vmm::VmmError::NotMapped) => ENOMEM,
-        Err(_) => EINVAL,
-    }
-}
-
-/// MPROTECT(addr, len, prot) → 0 or -errno.
-fn sys_mprotect(as_root: u64, addr: u64, len: u64, prot: u64) -> u64 {
-    let Some(aspace) = vmm::find_by_root(as_root) else {
-        return EFAULT;
-    };
-    if addr % 4096 != 0 || addr < vmm::USER_VA_BASE {
-        return EINVAL;
-    }
-    if len == 0 {
-        return EINVAL;
-    }
-    let Some(len_r) = page_round(len) else {
-        return EINVAL;
-    };
-    let Some(flags) = decode_prot(prot) else {
-        return if prot & PROT_WRITE != 0 && prot & PROT_EXEC != 0 {
-            EPERM_I as u64
-        } else {
-            EINVAL
-        };
-    };
-    match aspace.protect(addr, len_r, flags, &mut as_alloc_for(aspace.id)) {
-        Ok(()) => 0,
-        Err(vmm::VmmError::NotMapped) => ENOMEM,
-        Err(_) => EINVAL,
-    }
-}
-
-// -- plumbing ---------------------------------------------------------------
-
-fn as_alloc_for(as_id: u64) -> crate::memory::AsPageTableAllocator {
-    let (mrm, backend) = crate::vmm::faults::backing_context()
-        .expect("syscall VM op before backing context established");
-    // SAFETY: context pointers were established during boot and outlive it.
-    unsafe { crate::memory::AsPageTableAllocator::new(mrm, backend, as_id) }
+fn page_round(len: u64) -> Option<u64> {
+    len.checked_add(0xFFF).map(|v| v & !0xFFF)
 }
