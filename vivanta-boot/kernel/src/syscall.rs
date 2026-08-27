@@ -12,7 +12,6 @@
 mod process;
 pub use process::*;
 
-use crate::scheduler;
 use crate::vmm;
 use vivanta_arch_api::mmu::MappingFlags;
 use vivanta_boot_common::println;
@@ -29,7 +28,6 @@ pub const SYS_MMAP: u64 = 4;
 pub const SYS_MUNMAP: u64 = 5;
 pub const SYS_MPROTECT: u64 = 6;
 pub const SYS_FORK: u64 = 7;
-pub const SYS_EXIT: u64 = 7;
 pub const SYS_WAITPID: u64 = 8;
 pub const SYS_KILL: u64 = 9;
 pub const SYS_GETPID: u64 = 10;
@@ -113,8 +111,8 @@ pub extern "Rust" fn syscall_dispatch(
         SYS_MUNMAP => process::sys_munmap(as_root, arg0, arg1),
         SYS_MPROTECT => process::sys_mprotect(as_root, arg0, arg1, arg2),
         SYS_FORK => process::sys_fork(as_root),
-        SYS_WAITPID => process::sys_waitpid(arg0, arg1 as *mut i32, arg2),
-        SYS_KILL => process::sys_kill(arg0 as i64, arg1 as i64),
+        SYS_WAITPID => process::sys_waitpid(arg0, arg1 as *mut i32, arg2) as u64,
+        SYS_KILL => process::sys_kill(arg0, arg1),
         SYS_GETPID => process::sys_getpid(),
         SYS_GETPPID => process::sys_getppid(),
         _ => {
@@ -175,8 +173,4 @@ fn sys_mmap(as_root: u64, addr: u64, len: u64, prot: u64) -> u64 {
         Ok(va) => va,
         Err(_) => ENOMEM,
     }
-}
-
-fn page_round(len: u64) -> Option<u64> {
-    len.checked_add(0xFFF).map(|v| v & !0xFFF)
 }
