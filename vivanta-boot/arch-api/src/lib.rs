@@ -14,6 +14,9 @@ pub mod boot;
 /// Thread context: opaque handles for context switching
 pub mod context;
 
+/// Exception frame: architecture-specific saved CPU state
+pub mod exception;
+
 /// Scheduler callbacks: vivanta_kernel-provided functions called from arch
 pub mod scheduler;
 

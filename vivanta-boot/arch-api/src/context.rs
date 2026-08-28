@@ -6,6 +6,8 @@
 // Kernel never inspects the inner value.
 // ---------------------------------------------------------------------------
 
+use crate::exception::ExceptionFrame;
+
 /// Opaque token representing a thread's saved CPU context.
 ///
 /// Created by `context_init` or `context_capture_current`,
@@ -73,4 +75,23 @@ unsafe extern "Rust" {
     /// Context switch — save callee-saved registers + SP to *old,
     /// restore from *new. Used by yield_now() and (in future) timer reschedule.
     pub fn context_switch(old: *mut ArchContext, new: ArchContext);
+
+    /// Create a forked child context.
+    ///
+    /// Copies the parent's ThreadContext (at `parent_stack_bottom`) and
+    /// ExceptionFrame (at `parent_frame`) to the child's kernel stack.
+    /// Modifies the child's ExceptionFrame.x[0] = 0 (return value for child).
+    ///
+    /// `child_stack_top` — top of child's kernel stack (stack_base + KERNEL_STACK_SIZE)
+    /// `child_stack_bottom` — bottom of child's kernel stack (stack_base)
+    /// `parent_stack_bottom` — bottom of parent's kernel stack (where ThreadContext lives)
+    /// `parent_frame` — pointer to parent's ExceptionFrame (saved by SVC entry)
+    ///
+    /// Returns ArchContext for the child thread.
+    pub fn context_fork(
+        child_stack_top: usize,
+        child_stack_bottom: usize,
+        parent_stack_bottom: usize,
+        parent_frame: *const ExceptionFrame,
+    ) -> ArchContext;
 }

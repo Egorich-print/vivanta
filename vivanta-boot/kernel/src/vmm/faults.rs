@@ -34,6 +34,15 @@ pub(crate) fn anonymous_backend() -> Option<*mut dyn crate::memory::MemoryBacken
     backing_context().map(|(_, b)| b)
 }
 
+/// Create a PageTableAllocator for the given address space.
+/// This can be used by syscalls (fork, munmap, mprotect) that need to
+/// modify page tables.
+pub fn make_allocator(as_id: crate::vmm::AddressSpaceId) -> Option<AsPageTableAllocator> {
+    backing_context().map(|(mrm, backend)| unsafe {
+        AsPageTableAllocator::new(mrm, backend, as_id)
+    })
+}
+
 /// Panic handler for unmapped page faults (pre-M6.0 behavior retained for
 /// paths that never go through resolution).
 pub fn handle_page_fault(virt_addr: u64, write: bool, user: bool, instruction: bool) -> ! {

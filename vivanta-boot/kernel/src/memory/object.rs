@@ -56,6 +56,11 @@ impl AsPageTableAllocator {
             as_id,
         }
     }
+
+    /// Get the MemoryResourceManager pointer for mmu_init callback.
+    pub fn mrm_ptr(&self) -> *mut crate::memory::MemoryResourceManager {
+        self.mrm
+    }
 }
 
 impl PageTableAllocator for AsPageTableAllocator {

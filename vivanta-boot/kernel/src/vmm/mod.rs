@@ -16,4 +16,5 @@ pub use address_space::{
     kernel_address_space, kernel_address_space_mut, lookup_root, peek_next_as_id, register,
     register_child, unregister,
 };
+pub use faults::make_allocator;
 pub use mapping::{Mapping, MappingSet, MemoryObjectId, VirtRange};

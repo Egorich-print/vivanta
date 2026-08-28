@@ -150,3 +150,32 @@ pub unsafe extern "Rust" fn context_switch(old: *mut ArchContext, new: ArchConte
         context_switch_asm(old_tc, new_tc)
     }
 }
+
+// ---------------------------------------------------------------------------
+// context_fork — create forked child context
+// ---------------------------------------------------------------------------
+
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn context_fork(
+    child_stack_top: usize,
+    child_stack_bottom: usize,
+    parent_stack_bottom: usize,
+    parent_frame: *const ExceptionFrame,
+) -> ArchContext {
+    unsafe {
+        // Copy parent's ThreadContext from parent_stack_bottom to child_stack_bottom
+        let parent_tc = parent_stack_bottom as *const ThreadContext;
+        let child_tc = child_stack_bottom as *mut ThreadContext;
+        core::ptr::copy_nonoverlapping(parent_tc, child_tc, 1);
+
+        // Copy parent's ExceptionFrame to child's stack_top - FRAME_SIZE
+        let child_frame_ptr = (child_stack_top - FRAME_SIZE) as *mut ExceptionFrame;
+        core::ptr::copy_nonoverlapping(parent_frame, child_frame_ptr, 1);
+
+        // Modify child's return value (x0) to 0
+        (*child_frame_ptr).x[0] = 0;
+
+        // Return ArchContext pointing to child's ThreadContext
+        ArchContext::from_raw(child_tc as usize)
+    }
+}

@@ -38,6 +38,11 @@ pub fn register_stack_allocator(alloc: &mut (dyn FrameAllocator + 'static)) {
     }
 }
 
+/// Get the stack allocator (PMM) for allocating kernel stacks.
+pub fn stack_allocator() -> Option<&'static mut dyn FrameAllocator> {
+    unsafe { STACK_ALLOCATOR.as_mut().map(|p| &mut **p) }
+}
+
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 static NEED_RESCHEDULE: AtomicBool = AtomicBool::new(false);
 /// The ThreadId of the currently running thread (NOT a runqueue index).
@@ -49,6 +54,11 @@ static CURRENT_THREAD: AtomicU64 = AtomicU64::new(0);
 /// Read the current ThreadId.
 pub fn current_thread_id() -> ThreadId {
     CURRENT_THREAD.load(Ordering::Relaxed)
+}
+
+/// Get the current thread's info.
+pub fn current_thread() -> Option<&'static Thread> {
+    rq().get(current_thread_id())
 }
 
 /// G4 invariant check: how many threads are in the Running state right now.
@@ -147,6 +157,32 @@ pub fn check_sleeping_threads() {
 
 pub fn register(thread: Thread) {
     rq().insert(thread).expect("runqueue full");
+}
+
+/// Create a thread with a pre-initialized ArchContext (for fork).
+/// The caller must have already set up the kernel stack with ThreadContext
+/// at the bottom and ExceptionFrame at the top.
+pub fn create_thread_with_context(
+    context: vivanta_arch_api::context::ArchContext,
+    kernel_stack_pa: u64,
+    address_space: crate::vmm::AddressSpaceId,
+    priority: crate::scheduler::thread::Priority,
+) -> ThreadId {
+    let id = rq().alloc_id();
+    let thread = Thread {
+        id,
+        state: ThreadState::Created,
+        priority,
+        context,
+        entry: None,
+        address_space,
+        level: vivanta_arch_api::context::ExecutionLevel::User,
+        sleep_until: None,
+        kernel_stack_pa: Some(kernel_stack_pa),
+    };
+    register(thread);
+    thread_set_state(id, ThreadState::Ready);
+    id
 }
 
 pub fn create_user_thread(

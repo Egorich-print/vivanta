@@ -401,6 +401,7 @@ unsafe extern "Rust" {
         arg3: u64,
         arg4: u64,
         arg5: u64,
+        frame: *mut ExceptionFrame,
     ) -> u64;
 }
 
@@ -435,6 +436,7 @@ pub unsafe extern "C" fn el0_sync_handler(
                 frame.x[3],
                 frame.x[4],
                 frame.x[5],
+                frame as *mut ExceptionFrame,
             );
             frame.x[0] = ret;
         } else {

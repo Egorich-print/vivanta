@@ -14,6 +14,7 @@ pub use process::*;
 
 use crate::vmm;
 use vivanta_arch_api::mmu::MappingFlags;
+use vivanta_arch_api::exception::ExceptionFrame;
 use vivanta_boot_common::println;
 
 /// Max bytes accepted by the `write` syscall per call (kernel stack buffer).
@@ -98,6 +99,7 @@ pub extern "Rust" fn syscall_dispatch(
     _arg3: u64,
     _arg4: u64,
     _arg5: u64,
+    frame: *mut ExceptionFrame,
 ) -> u64 {
     match num {
         SYS_READ => ENOSYS, // reserved (ADR-033 §3)
@@ -110,7 +112,7 @@ pub extern "Rust" fn syscall_dispatch(
         SYS_MMAP => sys_mmap(as_root, arg0, arg1, arg2),
         SYS_MUNMAP => process::sys_munmap(as_root, arg0, arg1),
         SYS_MPROTECT => process::sys_mprotect(as_root, arg0, arg1, arg2),
-        SYS_FORK => process::sys_fork(as_root),
+        SYS_FORK => process::sys_fork(as_root, frame),
         SYS_WAITPID => process::sys_waitpid(arg0, arg1 as *mut i32, arg2) as u64,
         SYS_KILL => process::sys_kill(arg0, arg1),
         SYS_GETPID => process::sys_getpid(),
