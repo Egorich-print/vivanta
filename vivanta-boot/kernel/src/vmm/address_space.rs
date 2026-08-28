@@ -198,18 +198,11 @@ impl AddressSpace {
             // Present+Anonymous pieces fully covered by the unmap release
             // their frames (ADR-032 §4): the frame is reachable only through
             // this mapping, so ownership ends here.
-            // CoWShared with refcount==1 is the last sharer — free the frame;
-            // refcount>1 means another AS still shares it, so just unmap HW.
-            // (Single-authority refcount; cross-AS decrement is deferred — M10.1)
-            let should_free = (m.backing == Backing::Present
+            if m.backing == Backing::Present
                 && m.phys == PhysOwnership::Anonymous
                 && base >= vaddr
-                && end <= range_end)
-                || (m.backing == Backing::CoW
-                    && matches!(m.phys, PhysOwnership::CoWShared { refcount: 1 })
-                    && base >= vaddr
-                    && end <= range_end);
-            if should_free {
+                && end <= range_end
+            {
                 if let Some(backend) = crate::vmm::faults::anonymous_backend() {
                     // SAFETY: backend outlives boot; single-core unmap.
                     unsafe { (*backend).deallocate(m.pa, m.virt_range.size) };
@@ -233,9 +226,9 @@ impl AddressSpace {
         Ok(())
     }
 
-    /// Invoke `f(run_start, run_len)` for every maximal run of *Present* or *CoW*
+    /// Invoke `f(run_start, run_len)` for every maximal run of *Present*
     /// shadow pieces inside `[vaddr, vaddr+size)`. Lazy/Reserved pieces
-    /// have no hardware image and are skipped; adjacent Present/CoW pieces are
+    /// have no hardware image and are skipped; adjacent Present pieces are
     /// coalesced so the hardware is touched once per contiguous run.
     fn for_present_runs(&self, vaddr: u64, size: u64, mut f: impl FnMut(u64, u64)) {
         let range_end = vaddr + size;
@@ -243,7 +236,7 @@ impl AddressSpace {
             .mappings
             .iter()
             .filter(|m| {
-                (m.backing == Backing::Present || m.backing == Backing::CoW)
+                m.backing == Backing::Present
                     && m.virt_range.base < range_end
                     && vaddr < m.virt_range.end()
             })
@@ -539,17 +532,16 @@ impl AddressSpace {
         true
     }
 
-    /// Duplicate this address space into a fresh child (ADR-034 §2 — true COW).
+    /// Duplicate this address space into a fresh child (M7.5).
     ///
     /// Returns the constructed-but-unregistered child; the caller registers
     /// it via `register_child` and activates whichever space it needs.
     ///
-    /// True COW semantics:
-    /// - Present(Anonymous|External) → CoWShared{2} in BOTH parent and child,
-    ///   same PA, permissions = original & !WRITE (RO). Parent leaf is
-    ///   downgraded via mmu_protect; child leaf is created via mmu_map_object.
-    /// - CoW (nested fork) → refcount+1 in both sides, same PA, already RO.
-    /// - LazyAnonymous / Reserved → cloned as-is (independent reservation).
+    /// Copy-based semantics (COW sharing deferred to a follow-up):
+    /// - Present(Anonymous): NEW frame allocated, 4 KiB contents copied
+    ///   through the kernel identity mapping; child owns the copy.
+    /// - Present(External): same PA remapped into the child.
+    /// - Lazy/Reserved: identical reservation, no frames.
     pub fn duplicate_as(
         &mut self,
         child_root: RootPageTable,
@@ -561,111 +553,47 @@ impl AddressSpace {
         let mut child = Self::new(0, child_root, self.flags);
         child.va = self.va;
         // Root is assigned by register_child after the shadow is built.
-        let mut parent_affected: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
-        let mut parent_new: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
         let mut child_pieces: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
-
         for m in &pieces {
             match m.backing {
                 Backing::Present => {
-                    // PA is authoritative for Present pieces.
-                    let pa = m.pa;
-                    // RO flags: strip write bit per ADR-034 §2.
-                    let ro_flags = MappingFlags::from_bits(
-                        m.permissions.bits() & !MappingFlags::read_write().bits(),
-                    );
-                    let new_refcount = match m.phys {
-                        PhysOwnership::CoWShared { refcount } => refcount + 1,
-                        PhysOwnership::Anonymous | PhysOwnership::External => 2,
+                    let Some(new_frame) = alloc.try_alloc_page_table_frame() else {
+                        return Err(VmmError::OutOfVa);
                     };
-                    let cow = Mapping::cow_shared(
+                    // SAFETY: both are live 4 KiB RAM allocations; the
+                    // identity mapping keeps both kernel-accessible.
+                    unsafe {
+                        core::ptr::write_bytes(new_frame as *mut u8, 0, 4096);
+                        core::ptr::copy_nonoverlapping(
+                            m.pa as *const u8,
+                            new_frame as *mut u8,
+                            4096,
+                        );
+                    }
+                    // Install the leaf in the CHILD tree so its EL0 task
+                    // can access the private copy immediately.
+                    unsafe {
+                        vivanta_arch_api::mmu::mmu_map_object(
+                            child.root,
+                            m.virt_range.base,
+                            new_frame,
+                            m.virt_range.size,
+                            m.permissions,
+                            alloc,
+                        );
+                    }
+                    child_pieces.push(Mapping::present(
                         m.virt_range,
                         m.object_id,
-                        ro_flags,
-                        pa,
-                        new_refcount,
-                    );
-                    parent_affected.push(*m);
-                    parent_new.push(cow);
-                    child_pieces.push(cow);
+                        m.permissions,
+                        new_frame,
+                        PhysOwnership::Anonymous,
+                    ));
                 }
-                Backing::CoW => {
-                    let pa = m.pa;
-                    let refcount = match m.phys {
-                        PhysOwnership::CoWShared { refcount } => refcount,
-                        _ => 1, // defensive: treat malformed as 1
-                    };
-                    let new_refcount = refcount + 1;
-                    // Already RO — keep permissions as-is.
-                    let cow_parent =
-                        Mapping::cow_shared(m.virt_range, m.object_id, m.permissions, pa, new_refcount);
-                    let cow_child =
-                        Mapping::cow_shared(m.virt_range, m.object_id, m.permissions, pa, new_refcount);
-                    parent_affected.push(*m);
-                    parent_new.push(cow_parent);
-                    child_pieces.push(cow_child);
-                }
-                Backing::LazyAnonymous | Backing::Reserved => {
+                _ => {
                     child_pieces.push(*m);
                 }
             }
-        }
-
-        // Capacity pre-check before any mutation (transactional).
-        if self.mappings.len() - parent_affected.len() + parent_new.len() > MappingSet::capacity() {
-            return Err(VmmError::MappingTableFull);
-        }
-        if child_pieces.len() > MappingSet::capacity() {
-            return Err(VmmError::MappingTableFull);
-        }
-
-        // Parent allocator for mmu_protect table splits (as_id = self.id).
-        // Falls back to child alloc if context not yet established (boot).
-        let mut parent_alloc_owned = crate::vmm::faults::make_allocator(self.id);
-        let parent_alloc: &mut dyn PageTableAllocator = match parent_alloc_owned.as_mut() {
-            Some(a) => a as &mut dyn PageTableAllocator,
-            None => alloc as &mut dyn PageTableAllocator,
-        };
-
-        // 1. Hardware: downgrade parent Present leaves to RO (mmu_protect may
-        //    split block descriptors, allocating tables via parent_alloc).
-        // SAFETY: each range is covered by a live Present/CoW mapping in the
-        // parent; mmu_protect rewrites AP bits only and handles TLBI.
-        for p in &parent_new {
-            unsafe {
-                vivanta_arch_api::mmu::mmu_protect(
-                    self.root,
-                    p.virt_range.base,
-                    p.virt_range.size,
-                    p.permissions,
-                    parent_alloc,
-                );
-            }
-        }
-
-        // 2. Hardware: install shared RO leaves into the child tree.
-        // SAFETY: child VA is unmapped; PA is a live shared frame;
-        // identity RAM mapping keeps the frame kernel-accessible.
-        for c in &child_pieces {
-            if c.backing == Backing::CoW {
-                unsafe {
-                    vivanta_arch_api::mmu::mmu_map_object(
-                        child.root,
-                        c.virt_range.base,
-                        c.pa,
-                        c.virt_range.size,
-                        c.permissions,
-                        alloc,
-                    );
-                }
-            }
-        }
-
-        // 3. Shadow commits (hardware first, shadow last — transactional).
-        if !parent_affected.is_empty() {
-            self.mappings
-                .replace_slots(&parent_affected, &parent_new)
-                .map_err(|_| VmmError::MappingTableFull)?;
         }
         for p in &child_pieces {
             if child.mappings.insert(*p).is_none() {
@@ -786,11 +714,9 @@ impl AddressSpace {
                 .filter(|m| m.virt_range.base == base && m.virt_range.size == size)
                 .copied()
                 .collect();
-            // Release anonymous frames; CoWShared with refcount 1 is last sharer.
+            // Release anonymous frames.
             for m in &affected_values {
-                let should_free = (m.backing == Backing::Present && m.phys == PhysOwnership::Anonymous)
-                    || (m.backing == Backing::CoW && matches!(m.phys, PhysOwnership::CoWShared { refcount: 1 }));
-                if should_free {
+                if m.backing == Backing::Present && m.phys == PhysOwnership::Anonymous {
                     if let Some(backend) = crate::vmm::faults::anonymous_backend() {
                         // SAFETY: backend outlives boot; single-core.
                         unsafe { (*backend).deallocate(m.pa, m.virt_range.size) };
