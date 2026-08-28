@@ -284,30 +284,48 @@ pub fn sys_execve(_path: *const u8, _argv: *const *const u8, _envp: *const *cons
 /// Munmap: remove mappings from address space.
 pub fn sys_munmap(as_root: u64, addr: u64, len: u64) -> u64 {
     println!("  syscall: munmap(0x{:x}, 0x{:x})", addr, len);
-    let Some(_aspace) = find_by_root(as_root) else {
+    let Some(aspace) = find_by_root(as_root) else {
         return EFAULT;
     };
     if len == 0 {
         return EINVAL;
     }
-    // TODO(G-M10): Implement munmap using unmap_range() with PageTableAllocator
-    // Requires plumbing allocator from MemoryResourceManager
-    ENOSYS
+
+    // Get allocator for this address space
+    let as_id = aspace.id;
+    let Some(mut alloc) = make_allocator(as_id) else {
+        println!("  munmap: no allocator for AS {}", as_id);
+        return EFAULT;
+    };
+
+    match aspace.unmap_range(addr, len, &mut alloc) {
+        Ok(_) => 0,
+        Err(_) => EFAULT,
+    }
 }
 
 /// Mprotect: change protection of existing mappings.
 pub fn sys_mprotect(as_root: u64, addr: u64, len: u64, prot: u64) -> u64 {
     println!("  syscall: mprotect(0x{:x}, 0x{:x}, 0x{:x})", addr, len, prot);
-    let Some(_aspace) = find_by_root(as_root) else {
+    let Some(aspace) = find_by_root(as_root) else {
         return EFAULT;
     };
     if len == 0 {
         return EINVAL;
     }
-    let Some(_flags) = crate::syscall::decode_prot(prot) else {
+    let Some(flags) = crate::syscall::decode_prot(prot) else {
         return EINVAL;
     };
-    // TODO(G-M10): Implement mprotect using protect() with PageTableAllocator
-    // Requires plumbing allocator from MemoryResourceManager
-    ENOSYS
+
+    // Get allocator for this address space
+    let as_id = aspace.id;
+    let Some(mut alloc) = make_allocator(as_id) else {
+        println!("  mprotect: no allocator for AS {}", as_id);
+        return EFAULT;
+    };
+
+    match aspace.protect(addr, len, flags, &mut alloc) {
+        Ok(_) => 0,
+        Err(_) => EFAULT,
+    }
 }
