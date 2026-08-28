@@ -139,6 +139,21 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
 
     println!("  fork: parent_tid={} parent_task={} child_thread={} child_task={}", current_id, parent_task_id, child_thread_id, child_task_id);
 
+    // Inherit signal dispositions and blocked mask (POSIX: child inherits
+    // handlers/blocked, but pending is cleared). Keeps fork/waitpid/kill flow.
+    if parent_task_id != 0 {
+        let (blocked, handlers) = if let Some(p) = process_table().lookup(parent_task_id) {
+            (p.signals.blocked, p.signals.handlers)
+        } else {
+            (0, [crate::signal::SigAction { handler: 0, mask: 0, flags: 0 }; crate::signal::MAX_SIG])
+        };
+        if let Some(c) = process_table().lookup_mut(child_task_id) {
+            c.signals.blocked = blocked;
+            c.signals.handlers = handlers;
+            c.signals.pending = None;
+        }
+    }
+
     // Parent returns child's TaskId (PID) — TaskId is the process identity
     child_task_id
 }
@@ -300,6 +315,115 @@ pub fn sys_kill(pid: u64, sig: u64) -> u64 {
     // If target is blocked in waitpid, wake it if signal is not ignored? For now wake if blocked.
     // A blocked waiter will re-check and return EINTR? Simplified: wake.
     crate::scheduler::wake_waiters(pid);
+    0
+}
+
+/// Sigaction: install/inspect signal disposition for the current task.
+///
+/// ABI: rt_sigaction(sig, act_ptr, oldact_ptr) -> 0 or -errno
+/// - sig in 1..31 (MAX_SIG=32). SIGKILL (9) cannot be caught/ignored -> EINVAL.
+/// - act_ptr / oldact_ptr are user VAs to `SigAction` (handler:u64,mask:u64,flags:u32).
+///   Null means absent (query-only or no old copy).
+/// Minimal: stores handler VA in Task's SignalState.handlers[sig].
+pub fn sys_sigaction(sig: u64, act: u64, oldact: u64) -> u64 {
+    use crate::signal::{MAX_SIG, SIG_DFL, SIGKILL, SigAction};
+    println!("  syscall: rt_sigaction(sig={}, act={:#x}, oldact={:#x})", sig, act, oldact);
+
+    if sig == 0 || sig >= MAX_SIG as u64 {
+        println!("  rt_sigaction: invalid sig {}", sig);
+        return EINVAL;
+    }
+    // SIGKILL is uncapturable/unignorable per POSIX — any attempt to set
+    // a non-default disposition must fail. Query-only (act==0) is allowed.
+    if sig == SIGKILL as u64 && act != 0 {
+        // SAFETY: copy_from_user validates range before read; we peek handler
+        // to decide if caller tries to change disposition.
+        let mut tmp = SigAction { handler: SIG_DFL, mask: 0, flags: 0 };
+        // Try to read the user act; if fault, return EFAULT.
+        // If handler != DFL, reject.
+        let res = unsafe {
+            vivanta_arch_api::user_memory::copy_from_user(
+                &mut tmp as *mut _ as *mut u8,
+                act,
+                core::mem::size_of::<SigAction>(),
+            )
+        };
+        if res.is_err() {
+            return EFAULT;
+        }
+        if tmp.handler != SIG_DFL {
+            println!("  rt_sigaction: cannot handle SIGKILL");
+            return EINVAL;
+        }
+        // DFL for SIGKILL is the only valid value — allow but it's already DFL.
+        // Fall through to normal install path (no-op).
+    }
+
+    let current_tid = crate::scheduler::current_thread_id();
+    let Some(current_task_id) = crate::scheduler::task_for_thread(current_tid) else {
+        return EINVAL;
+    };
+
+    // Snapshot old action for copy-out (before any mutation).
+    if oldact != 0 {
+        let cur = {
+            let Some(t) = process_table().lookup(current_task_id) else {
+                return EINVAL;
+            };
+            t.signals.handlers[sig as usize]
+        };
+        // SAFETY: copy_to_user validates user range against current AS first.
+        let res = unsafe {
+            vivanta_arch_api::user_memory::copy_to_user(
+                oldact,
+                &cur as *const _ as *const u8,
+                core::mem::size_of::<SigAction>(),
+            )
+        };
+        if res.is_err() {
+            return EFAULT;
+        }
+    }
+
+    if act != 0 {
+        let mut new_act = SigAction { handler: SIG_DFL, mask: 0, flags: 0 };
+        // SAFETY: copy_from_user validates the source range against the active
+        // address space (TTBR0 at entry) before any kernel deref.
+        let res = unsafe {
+            vivanta_arch_api::user_memory::copy_from_user(
+                &mut new_act as *mut _ as *mut u8,
+                act,
+                core::mem::size_of::<SigAction>(),
+            )
+        };
+        if res.is_err() {
+            return EFAULT;
+        }
+        // Re-validate after copy: SIGKILL already handled; general range check
+        // for handler values: allow DFL, IGN, or any user VA (>1). No further
+        // VA validation now (lazy — fault will be delivered).
+        if sig == SIGKILL as u64 && new_act.handler != SIG_DFL {
+            return EINVAL;
+        }
+        // Install
+        if let Some(t) = process_table().lookup_mut(current_task_id) {
+            t.signals.handlers[sig as usize] = new_act;
+            println!("  rt_sigaction: task {} sig {} -> handler={:#x} mask={:#x} flags={:#x}",
+                current_task_id, sig, new_act.handler, new_act.mask, new_act.flags);
+        } else {
+            return EINVAL;
+        }
+    }
+    0
+}
+
+/// Sigreturn stub: placeholder for user handler return trampoline.
+///
+/// Real rt_sigreturn would restore the saved ExceptionFrame / blocked mask
+/// from the signal frame pushed by the delivery path. For now it simply
+/// returns 0 so the build and syscall dispatch are wired.
+pub fn sys_sigreturn() -> u64 {
+    println!("  syscall: rt_sigreturn() -> stub 0");
     0
 }
 

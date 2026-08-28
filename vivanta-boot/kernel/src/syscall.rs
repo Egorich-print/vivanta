@@ -34,6 +34,9 @@ pub const SYS_KILL: u64 = 9;
 pub const SYS_GETPID: u64 = 10;
 pub const SYS_GETPPID: u64 = 11;
 pub const SYS_EXECVE: u64 = 12;
+pub const SYS_RT_SIGACTION: u64 = 13;
+pub const SYS_RT_SIGPROCMASK: u64 = 14; // reserved -> -ENOSYS (stub)
+pub const SYS_RT_SIGRETURN: u64 = 15;
 
 // --- frozen errno encoding -------------------------------------------------
 pub const EPERM_I: i64 = -1;
@@ -119,6 +122,9 @@ pub extern "Rust" fn syscall_dispatch(
         SYS_GETPID => process::sys_getpid(),
         SYS_GETPPID => process::sys_getppid(),
         SYS_EXECVE => process::sys_execve(frame, arg0 as *const u8, arg1 as *const *const u8, arg2 as *const *const u8),
+        SYS_RT_SIGACTION => process::sys_sigaction(arg0, arg1, arg2),
+        SYS_RT_SIGPROCMASK => ENOSYS, // stub: reserved for future sigprocmask
+        SYS_RT_SIGRETURN => process::sys_sigreturn(),
         _ => {
             println!("  syscall: unknown num={}", num);
             ENOSYS
