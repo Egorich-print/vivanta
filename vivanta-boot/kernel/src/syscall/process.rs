@@ -130,17 +130,17 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
         parent_priority,
     );
 
-    // Create a Task for the child
-    let _child_task_id = crate::scheduler::create_task_for_thread(
+    // Create a Task for the child — PID is TaskId, not ThreadId (ADR-035)
+    let child_task_id = crate::scheduler::create_task_for_thread(
         child_thread_id,
         registered_child_as_id,
         if parent_task_id != 0 { Some(parent_task_id) } else { None },
     );
 
-    println!("  fork: parent={} child_thread={} child_task={}", current_id, child_thread_id, _child_task_id);
+    println!("  fork: parent_tid={} parent_task={} child_thread={} child_task={}", current_id, parent_task_id, child_thread_id, child_task_id);
 
-    // Parent returns child's ThreadId (used as PID)
-    child_thread_id
+    // Parent returns child's TaskId (PID) — TaskId is the process identity
+    child_task_id
 }
 
 /// Wait for child process state change.
@@ -152,111 +152,163 @@ pub fn sys_waitpid(pid: u64, status: *mut i32, options: u64) -> u64 {
         return EINVAL;
     };
 
-    // WNOHANG = 1 (don't block if no child exited)
     const WNOHANG: u64 = 1;
 
-    // Find child task
-    let child_task_id = if pid == 0 {
-        // Wait for any child
-        let children = process_table().children_of(current_task_id);
-        children.first().copied()
-    } else {
-        // Wait for specific child
-        let children = process_table().children_of(current_task_id);
-        children.iter().find(|&&id| id == pid).copied()
-    };
+    loop {
+        // 1. Check for already-zombie child to reap immediately.
+        // For pid==0 (or pid==u64::MAX for -1) — any child in same pgrp, we treat as any.
+        let reap_id = if pid == 0 || pid == u64::MAX {
+            let children = process_table().children_of(current_task_id);
+            children.into_iter().find(|&cid| {
+                process_table().lookup(cid).is_some_and(|t| t.state == crate::scheduler::task::TaskState::Zombie)
+            })
+        } else {
+            // Specific pid
+            let children = process_table().children_of(current_task_id);
+            if children.contains(&pid) {
+                if process_table().lookup(pid).is_some_and(|t| t.state == crate::scheduler::task::TaskState::Zombie) {
+                    Some(pid)
+                } else {
+                    // Child exists but not yet zombie
+                    None
+                }
+            } else {
+                // No such child
+                println!("  waitpid: no matching child {}", pid);
+                return EINVAL; // ECHILD
+            }
+        };
 
-    let Some(child_id) = child_task_id else {
-        println!("  waitpid: no matching child");
-        return EINVAL; // ECHILD
-    };
-
-    // Check if child is a zombie (exited but not reaped)
-    if let Some(child_task) = process_table().lookup(child_id) {
-        if child_task.state == crate::scheduler::task::TaskState::Zombie {
-            // Reap the zombie
-            let exit_code = child_task.exit_code.unwrap_or(-1);
+        if let Some(child_id) = reap_id {
+            // Safe to reap: we re-lookup to get exit_code (avoid TOCTOU with lock, single-core so okay)
+            let exit_code = process_table().lookup(child_id).and_then(|t| t.exit_code).unwrap_or(-1);
             println!("  waitpid: reaping child {} exit_code={}", child_id, exit_code);
-
-            // Write status to user memory if provided
             if !status.is_null() {
-                // Encode exit code in waitpid status format (WEXITSTATUS)
-                let wait_status = (exit_code as u32) << 8; // WEXITSTATUS macro expects this
+                let wait_status = (exit_code as u32) << 8;
+                // SAFETY: copy_to_user validates user range against current AS
                 unsafe {
-                    if crate::vmm::find_by_root(crate::scheduler::current_thread_address_space()).is_some() {
-                        if user_memory::copy_to_user(
-                            status as u64,
-                            &wait_status as *const _ as *const u8,
-                            4
-                        ).is_err() {
-                            return EFAULT;
-                        }
+                    if user_memory::copy_to_user(status as u64, &wait_status as *const _ as *const u8, 4).is_err() {
+                        return EFAULT;
                     }
                 }
             }
-
-            // Remove the child task (reap)
+            // Also clean parent's children vec to avoid tombstone leakage
+            if let Some(parent_task) = process_table().lookup_mut(current_task_id) {
+                parent_task.children.retain(|&c| c != child_id);
+            }
             let _ = process_table().remove(child_id);
-            return child_id; // Return PID of reaped child
+            return child_id;
         }
-    }
 
-    // Child not exited yet
-    if options & WNOHANG != 0 {
-        println!("  waitpid: child {} not exited, WNOHANG", child_id);
-        return 0; // WNOHANG - return 0 immediately
-    }
+        // 2. No zombie found — check if any child exists at all (for ECHILD)
+        let children = process_table().children_of(current_task_id);
+        let has_children = if pid == 0 || pid == u64::MAX {
+            !children.is_empty()
+        } else {
+            children.contains(&pid)
+        };
+        if !has_children {
+            println!("  waitpid: no matching child (ECHILD)");
+            return EINVAL;
+        }
 
-    // Block until child exits
-    println!("  waitpid: child {} not exited, blocking", child_id);
-    crate::scheduler::wait_for_child(child_id);
-    
-    // After wakeup, loop and try again (the child should now be a zombie)
-    // Note: This is a simplified implementation - in reality we'd need to
-    // handle spurious wakeups and re-check the child state.
-    sys_waitpid(pid, status, options)
+        // 3. Not yet exited
+        if options & WNOHANG != 0 {
+            println!("  waitpid: no zombie, WNOHANG -> 0");
+            return 0;
+        }
+
+        // 4. Block: put current thread to Blocked and yield.
+        // For any-child wait we block on 0 (wake on any child), else specific.
+        let wait_id = if pid == 0 || pid == u64::MAX { 0 } else { pid };
+        println!("  waitpid: blocking for child {} (any={})", wait_id, wait_id==0);
+        crate::scheduler::wait_for_child(wait_id);
+        // SAFETY: wait_for_child is IRQ-guarded and sets Blocked; yield switches out.
+        crate::scheduler::yield_now();
+        // Woken — loop to re-check zombie (handles spurious wakeup)
+    }
 }
 
 /// Send signal to process.
 pub fn sys_kill(pid: u64, sig: u64) -> u64 {
     println!("  syscall: kill(pid={}, sig={})", pid, sig);
 
-    // Find the target task
-    let _target_task = process_table().lookup(pid);
-    if _target_task.is_none() {
+    // Find the target task — filter tombstones (Exited not killable)
+    let is_live = process_table().lookup(pid).is_some_and(|t| t.state != crate::scheduler::task::TaskState::Exited);
+    if !is_live {
         println!("  kill: no such task {}", pid);
         return EINVAL; // ESRCH
     }
 
-    // Get signal
     let Some(signal) = crate::signal::Signal::from_num(sig as u8) else {
         println!("  kill: invalid signal {}", sig);
         return EINVAL;
     };
 
-    // Send signal to task
+    // SIGKILL is unblockable — clear blocked mask before send is handled in SignalState
+    // For now just send and handle termination.
+    if signal == crate::signal::Signal::Kill {
+        // Need task's parent for wake and threads to terminate
+        let (parent, threads) = {
+            let t = process_table().lookup(pid).unwrap();
+            (t.parent, t.threads.clone())
+        };
+        // Mark task Zombie (canonical, not Exited) so waitpid can reap
+        if let Some(target_task) = process_table().lookup_mut(pid) {
+            target_task.exit(-9); // Zombie with -SIGKILL
+            target_task.signals.send(signal);
+            println!("  kill: task {} -> Zombie (-SIGKILL)", pid);
+        }
+        // Terminate each thread of the target (except we don't self-terminate via this path if pid == current task)
+        let current_tid = crate::scheduler::current_thread_id();
+        let current_task = crate::scheduler::task_for_thread(current_tid);
+        let is_self_kill = current_task == Some(pid);
+        for tid in threads {
+            if tid == current_tid && is_self_kill {
+                // Self-kill will be handled by caller returning; thread_exit will run on next scheduling
+                // Instead of immediate termination, just mark; the syscall return will still happen.
+                // If we are self-killing, we should exit now. But kill is not supposed to be noreturn.
+                // POSIX kill(self) just queues signal; the signal is delivered on return to user.
+                // So we don't call thread_exit here; the pending signal will be checked on next entry.
+                // Wake parent waiters immediately though.
+                continue;
+            }
+            // SAFETY: thread_set_state is used under IRQ guard inside, but we are in syscall context.
+            crate::scheduler::thread_set_state(tid, crate::scheduler::thread::ThreadState::Terminated);
+        }
+        // Wake parent and clean children vec
+        if let Some(parent_id) = parent {
+            if let Some(parent_task) = process_table().lookup_mut(parent_id) {
+                parent_task.signals.send(crate::signal::Signal::Chld);
+            }
+            crate::scheduler::wake_waiters(pid);
+        } else {
+            // No parent — still wake any waiter for this specific pid
+            crate::scheduler::wake_waiters(pid);
+        }
+        // Also wake any waiter for any child (0) — handle by also waking 0 queue? wake_waiters already handles 0==any in its logic when waking child.
+        // But waiters for any child (wait_id 0) are woken when we call wake_waiters(pid) because condition is waited_for==0 || waited_for==pid.
+        // So single call is enough.
+        return 0;
+    }
+
+    // Non-KILL signals — just queue
     if let Some(target_task) = process_table().lookup_mut(pid) {
         target_task.signals.send(signal);
         println!("  kill: sent signal {:?} to task {}", signal, pid);
-
-        // SIGKILL immediately terminates the task
-        if signal == crate::signal::Signal::Kill {
-            // Mark task for termination (will be handled on next scheduler tick)
-            // For now, just note it - full signal handling needs more infrastructure
-            target_task.state = crate::scheduler::task::TaskState::Exited;
-            target_task.exit_code = Some(-9); // -SIGKILL
-            println!("  kill: task {} marked for termination", pid);
-        }
     }
-
+    // If target is blocked in waitpid, wake it if signal is not ignored? For now wake if blocked.
+    // A blocked waiter will re-check and return EINTR? Simplified: wake.
+    crate::scheduler::wake_waiters(pid);
     0
 }
 
-/// Get current process ID.
+/// Get current process ID — returns TaskId (PID), not ThreadId.
 pub fn sys_getpid() -> u64 {
     let tid = crate::scheduler::current_thread_id();
-    println!("  syscall: getpid() -> {}", tid);
-    tid
+    let pid = crate::scheduler::task_for_thread(tid).unwrap_or(tid);
+    println!("  syscall: getpid() tid={} -> pid={}", tid, pid);
+    pid
 }
 
 /// Get parent process ID.
@@ -312,104 +364,81 @@ fn copy_user_string(ptr: *const u8, max_len: usize) -> Result<alloc::string::Str
 }
 
 /// Execve: replace current process image with new program.
-/// Never returns on success.
-pub fn sys_execve(path: *const u8, argv: *const *const u8, _envp: *const *const u8) -> u64 {
-    println!("  syscall: execve(path={:p}, argv={:p})", path, argv);
+/// Overwrites the live SVC ExceptionFrame at *frame and returns 0;
+/// the vectors.rs eret epilogue will restore ELR/SP/SPSR from that frame.
+pub fn sys_execve(frame: *mut ExceptionFrame, path: *const u8, _argv: *const *const u8, _envp: *const *const u8) -> u64 {
+    // SAFETY: frame is the live ExceptionFrame pushed by save_and_eret_sync at SP_EL1,
+    // still on the current kernel stack. Caller (el0_sync_handler) guarantees validity.
+    if frame.is_null() {
+        return EFAULT;
+    }
+    println!("  syscall: execve(path={:p}) frame={:p}", path, frame);
 
-    // Copy path from user space
     let path_str = match copy_user_string(path, 256) {
         Ok(s) => s,
         Err(e) => return e,
     };
     println!("  execve: path='{}'", path_str);
 
-    // Find the program
     let Some(elf) = find_builtin_program(&path_str) else {
         println!("  execve: program not found");
         return EINVAL; // ENOENT
     };
 
-    // Get current thread and address space
-    let current_tid = crate::scheduler::current_thread_id();
     let Some(current_thread) = current_thread() else {
         return EFAULT;
     };
     let current_as_id = current_thread.address_space;
 
-    // Unmap all existing user mappings in the address space
+    // Unmap all existing user mappings
     let Some(mut alloc) = make_allocator(current_as_id) else {
         return EFAULT;
     };
     let aspace = unsafe { crate::vmm::address_space_mut_by(current_as_id) };
-    if let Err(_) = aspace.unmap_all(&mut alloc) {
+    if aspace.unmap_all(&mut alloc).is_err() {
         return EFAULT;
     }
 
-    // Load the new ELF
+    // Load new ELF into same AS
     let Some(mut load_alloc) = make_allocator(current_as_id) else {
         return EFAULT;
     };
     let entry = match crate::exec::load_elf(elf, aspace, &mut load_alloc, crate::syscall::OBJ_ANONYMOUS) {
         Ok(e) => e,
-        Err(_) => return EFAULT,
+        Err(e) => {
+            println!("  execve: load_elf failed {:?}", e);
+            return EFAULT;
+        }
     };
-    println!("  execve: loaded ELF, entry={:#x}", entry);
+    println!("  execve: loaded ELF entry={:#x}", entry);
 
-    // Set up new user stack
-    // Allocate a stack page
-    let stack_va = 0x5C01_0000u64; // Fixed stack VA for now
+    let stack_va = 0x5C01_0000u64;
     let stack_flags = vivanta_arch_api::mmu::MappingFlags::user() | vivanta_arch_api::mmu::MappingFlags::read_write();
-    if let Err(_) = aspace.reserve_at(stack_va, 4096, stack_flags, crate::syscall::OBJ_ANONYMOUS) {
+    if aspace.reserve_at(stack_va, 4096, stack_flags, crate::syscall::OBJ_ANONYMOUS).is_err() {
         return EFAULT;
     }
-
-    // Copy argv to user stack (simplified - just set up initial stack frame)
     let stack_top = stack_va + 4096;
 
-    // Re-initialize the thread context for the new program
-    let Some(stack_alloc) = stack_allocator() else {
-        return ENOMEM;
-    };
-    let stack_frames = crate::scheduler::KERNEL_STACK_SIZE / 4096;
-    let Some(stack_frame) = stack_alloc.alloc_contiguous(stack_frames) else {
-        return ENOMEM;
-    };
-    let kernel_stack_pa = stack_frame.addr;
-    let kernel_stack_top = kernel_stack_pa + crate::scheduler::KERNEL_STACK_SIZE as u64;
-
-    // Create new context for the program entry
-    let new_context = unsafe {
-        vivanta_arch_api::context::context_init(
-            kernel_stack_top as usize,
-            kernel_stack_pa as usize,
-            stack_top as usize,
-            entry as usize,
-            vivanta_arch_api::context::ExecutionLevel::User,
-        )
-    };
-
-    // Update the thread's context and kernel stack
-    if let Some(thread) = crate::scheduler::get_thread_mut(current_tid) {
-        thread.context = new_context;
-        thread.kernel_stack_pa = Some(kernel_stack_pa);
-        thread.address_space = current_as_id;
+    // Overwrite the live frame — this is what eret will use.
+    // Keep kernel stack; only user state changes.
+    // SAFETY: frame is valid for write, single-core, no aliasing.
+    unsafe {
+        (*frame).elr = entry;
+        (*frame).sp = stack_top;
+        (*frame).spsr = 0x000; // EL0t
+        (*frame).x = [0u64; 31];
+        // x0 would be argc if we set up argv; for now 0
     }
 
-    // Free old kernel stack
-    if let Some(old_pa) = current_thread.kernel_stack_pa {
-        if old_pa != kernel_stack_pa {
-            for i in 0..stack_frames {
-                stack_alloc.free_frame(vivanta_arch_api::pmm::PhysFrame {
-                    addr: old_pa + (i as u64) * 4096,
-                });
-            }
+    // Clear pending signals for new image (POSIX exec clears handlers)
+    let current_tid = crate::scheduler::current_thread_id();
+    if let Some(task_id) = crate::scheduler::task_for_thread(current_tid) {
+        if let Some(task) = process_table().lookup_mut(task_id) {
+            task.signals = crate::signal::SignalState::new();
         }
     }
 
-    // Return to user mode at entry point with new context
-    // This is done by modifying the ExceptionFrame on the kernel stack
-    // The syscall return path will use this frame
-    println!("  execve: switching to new program at {:#x}", entry);
+    println!("  execve: switching to entry={:#x} sp={:#x}", entry, stack_top);
     0
 }
 
