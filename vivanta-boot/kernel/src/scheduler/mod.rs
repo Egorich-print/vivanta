@@ -67,7 +67,9 @@ fn wait_queue() -> &'static mut VecDeque<(ThreadId, TaskId)> {
 }
 
 /// Add current thread to wait queue for the given child task (0 = any child).
+/// Must be called with the thread still Running; caller must yield after.
 pub fn wait_for_child(child_task_id: TaskId) {
+    let _g = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
     let current_id = current_thread_id();
     wait_queue().push_back((current_id, child_task_id));
     thread_set_state(current_id, ThreadState::Blocked);
@@ -75,6 +77,7 @@ pub fn wait_for_child(child_task_id: TaskId) {
 
 /// Wake up threads waiting for the given child task (or any child if 0).
 pub fn wake_waiters(child_task_id: TaskId) {
+    let _g = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
     let mut to_wake = Vec::new();
     let mut remaining = VecDeque::new();
     
@@ -95,6 +98,7 @@ pub fn wake_waiters(child_task_id: TaskId) {
 
 /// Remove current thread from wait queue (e.g., on signal/interrupt).
 pub fn remove_from_wait_queue() {
+    let _g = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
     let current_id = current_thread_id();
     let mut remaining = VecDeque::new();
     for entry in wait_queue().drain(..) {
@@ -500,14 +504,15 @@ pub fn thread_exit(exit_code: i32) -> ! {
                         exit_code,
                         parent
                     );
-                    // Send SIGCHLD to parent
+                    // Send SIGCHLD to parent and wake waiters for this child (tid)
                     if let Some(parent_id) = parent {
                         if let Some(parent_task) = pt().lookup_mut(parent_id) {
                             parent_task.signals.send(crate::signal::Signal::Chld);
                         }
-                        // Wake up parent waiters
-                        wake_waiters(parent_id);
                     }
+                    // Wake waiters waiting for tid (specific) or 0 (any)
+                    // SAFETY: wake_waiters is IRQ-guarded; correct id is the exiting child's TaskId
+                    wake_waiters(tid);
                 }
             }
         }

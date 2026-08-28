@@ -389,7 +389,7 @@ impl AddressSpace {
             pieces.push(Mapping::lazy_anonymous(
                 VirtRange::new(page + 4096, piece_end - page - 4096),
                 object_id,
-                perms,
+                m.permissions,
             ));
         }
         let affected_value = Mapping::lazy_anonymous(m.virt_range, object_id, perms);
@@ -515,10 +515,12 @@ impl AddressSpace {
             PhysOwnership::Anonymous,
         ));
         if piece_end > page + 4096 {
-            pieces.push(Mapping::lazy_anonymous(
+            pieces.push(Mapping::cow_shared(
                 VirtRange::new(page + 4096, piece_end - page - 4096),
                 object_id,
                 m.permissions,
+                old_pa,
+                refcount,
             ));
         }
         let affected =

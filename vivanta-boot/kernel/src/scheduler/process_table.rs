@@ -117,11 +117,13 @@ impl ProcessTable {
     }
 
     /// Get all children of a task.
+    /// Excludes tombstones (Exited) — reaped children are not counted as children.
+    /// Zombie children are still returned (not yet reaped).
     pub fn children_of(&self, parent: TaskId) -> Vec<TaskId> {
         self.tasks
             .iter()
             .filter_map(|s| s.as_ref())
-            .filter(|t| t.parent == Some(parent))
+            .filter(|t| t.parent == Some(parent) && t.state != super::task::TaskState::Exited)
             .map(|t| t.task_id)
             .collect()
     }
