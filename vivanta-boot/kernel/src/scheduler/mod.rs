@@ -42,14 +42,68 @@ pub fn register_stack_allocator(alloc: &mut (dyn FrameAllocator + 'static)) {
 pub fn stack_allocator() -> Option<&'static mut dyn FrameAllocator> {
     unsafe { STACK_ALLOCATOR.as_mut().map(|p| &mut **p) }
 }
-
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use alloc::collections::VecDeque;
+
 static NEED_RESCHEDULE: AtomicBool = AtomicBool::new(false);
 /// The ThreadId of the currently running thread (NOT a runqueue index).
 /// Index-based `current` aliased stale threads after slot reuse; ThreadId is
 /// immutable and never reused, so churn (spawn A, B, kill A, spawn C) cannot
 /// corrupt it (G4 §8).
 static CURRENT_THREAD: AtomicU64 = AtomicU64::new(0);
+
+/// Wait queue for waitpid blocking.
+/// Each entry is (waiting_thread_id, waited_child_task_id).
+/// waited_child_task_id = 0 means wait for any child.
+static mut WAIT_QUEUE: Option<VecDeque<(ThreadId, TaskId)>> = None;
+
+fn wait_queue() -> &'static mut VecDeque<(ThreadId, TaskId)> {
+    unsafe {
+        if WAIT_QUEUE.is_none() {
+            WAIT_QUEUE = Some(VecDeque::new());
+        }
+        WAIT_QUEUE.as_mut().unwrap()
+    }
+}
+
+/// Add current thread to wait queue for the given child task (0 = any child).
+pub fn wait_for_child(child_task_id: TaskId) {
+    let current_id = current_thread_id();
+    wait_queue().push_back((current_id, child_task_id));
+    thread_set_state(current_id, ThreadState::Blocked);
+}
+
+/// Wake up threads waiting for the given child task (or any child if 0).
+pub fn wake_waiters(child_task_id: TaskId) {
+    let mut to_wake = Vec::new();
+    let mut remaining = VecDeque::new();
+    
+    for (waiter, waited_for) in wait_queue().drain(..) {
+        if waited_for == 0 || waited_for == child_task_id {
+            to_wake.push(waiter);
+        } else {
+            remaining.push_back((waiter, waited_for));
+        }
+    }
+    
+    *wait_queue() = remaining;
+    
+    for waiter in to_wake {
+        thread_set_state(waiter, ThreadState::Ready);
+    }
+}
+
+/// Remove current thread from wait queue (e.g., on signal/interrupt).
+pub fn remove_from_wait_queue() {
+    let current_id = current_thread_id();
+    let mut remaining = VecDeque::new();
+    for entry in wait_queue().drain(..) {
+        if entry.0 != current_id {
+            remaining.push_back(entry);
+        }
+    }
+    *wait_queue() = remaining;
+}
 
 /// Read the current ThreadId.
 pub fn current_thread_id() -> ThreadId {
@@ -434,11 +488,17 @@ pub fn thread_exit(exit_code: i32) -> ! {
             if let Some(task) = pt().lookup_mut(tid) {
                 if task.state != TaskState::Exited {
                     task.exit(exit_code);
+                    let parent = task.parent;
                     vivanta_boot_common::println!(
-                        "  [task] Task {} -> Exited code={}",
+                        "  [task] Task {} -> Exited code={} parent={:?}",
                         tid,
-                        exit_code
+                        exit_code,
+                        parent
                     );
+                    // Wake up parent waiters
+                    if let Some(parent_id) = parent {
+                        wake_waiters(parent_id);
+                    }
                 }
             }
         }

@@ -207,9 +207,14 @@ pub fn sys_waitpid(pid: u64, status: *mut i32, options: u64) -> u64 {
         return 0; // WNOHANG - return 0 immediately
     }
 
-    // TODO: Block until child exits (would need wait queue)
-    println!("  waitpid: child {} not exited, would block", child_id);
-    EINVAL // Would block (EAGAIN equivalent)
+    // Block until child exits
+    println!("  waitpid: child {} not exited, blocking", child_id);
+    crate::scheduler::wait_for_child(child_id);
+    
+    // After wakeup, loop and try again (the child should now be a zombie)
+    // Note: This is a simplified implementation - in reality we'd need to
+    // handle spurious wakeups and re-check the child state.
+    sys_waitpid(pid, status, options)
 }
 
 /// Send signal to process.
