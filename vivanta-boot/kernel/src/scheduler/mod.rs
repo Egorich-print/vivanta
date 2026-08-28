@@ -87,6 +87,11 @@ fn rq() -> &'static mut RunQueue {
     }
 }
 
+/// Get the process table (for syscalls).
+pub fn process_table() -> &'static mut ProcessTable {
+    pt()
+}
+
 fn pt() -> &'static mut ProcessTable {
     unsafe {
         if PROCESS_TABLE.is_none() {
@@ -183,6 +188,28 @@ pub fn create_thread_with_context(
     register(thread);
     thread_set_state(id, ThreadState::Ready);
     id
+}
+
+/// Create a Task for an existing thread (for fork).
+/// Returns the new TaskId.
+pub fn create_task_for_thread(
+    thread_id: ThreadId,
+    address_space: crate::vmm::AddressSpaceId,
+    parent: Option<crate::scheduler::task::TaskId>,
+) -> crate::scheduler::task::TaskId {
+    use crate::scheduler::task::Task;
+    let mut task = Task::new(0, thread_id, address_space); // ID will be set by ProcessTable
+    if let Some(parent_id) = parent {
+        task.set_parent(parent_id);
+    }
+    let handle = pt().create(task);
+    // Update parent's children list
+    if let (Some(h), Some(parent_id)) = (handle, parent) {
+        if let Some(parent_task) = pt().lookup_mut(parent_id) {
+            parent_task.add_child(h.id);
+        }
+    }
+    handle.expect("process table full").id
 }
 
 pub fn create_user_thread(
