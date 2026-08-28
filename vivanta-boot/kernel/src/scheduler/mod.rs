@@ -166,6 +166,11 @@ pub fn current_thread_address_space() -> AddressSpaceId {
         .unwrap_or(0)
 }
 
+/// Get mutable access to a thread by ID (for execve context update).
+pub fn get_thread_mut(tid: ThreadId) -> Option<&'static mut Thread> {
+    rq().get_mut(tid)
+}
+
 /// Put current thread to sleep for `ticks` timer ticks.
 pub fn sleep(ticks: u64) {
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };

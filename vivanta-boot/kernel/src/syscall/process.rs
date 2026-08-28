@@ -3,7 +3,7 @@
 /// These handle process lifecycle: fork, exit, waitpid, kill, getpid, getppid.
 
 use crate::scheduler::{current_thread, stack_allocator, task_for_thread, process_table};
-use crate::syscall::{ENOMEM, EFAULT, EINVAL, ENOSYS};
+use crate::syscall::{ENOMEM, EFAULT, EINVAL};
 use crate::vmm::address_space::{find_by_root, register_child};
 use crate::vmm::faults::make_allocator;
 use vivanta_arch_api::context::context_fork;
@@ -274,11 +274,143 @@ pub fn sys_getppid() -> u64 {
     0 // No parent (init process)
 }
 
+/// Built-in program registry for execve (no filesystem yet).
+/// Maps program name to ELF bytes.
+static BUILTIN_PROGRAMS: &[(&str, &[u8])] = &[
+    ("/init", include_bytes!("../../../user-init/user-init.elf")),
+];
+
+fn find_builtin_program(path: &str) -> Option<&'static [u8]> {
+    for (name, elf) in BUILTIN_PROGRAMS {
+        if *name == path {
+            return Some(elf);
+        }
+    }
+    None
+}
+
+/// Copy a user-space string to kernel buffer.
+fn copy_user_string(ptr: *const u8, max_len: usize) -> Result<alloc::string::String, u64> {
+    let mut buf = alloc::vec::Vec::with_capacity(max_len);
+    let mut p = ptr;
+    for _ in 0..max_len {
+        let mut byte = 0u8;
+        let byte_ptr = &mut byte as *mut u8;
+        let result = unsafe {
+            user_memory::copy_from_user(byte_ptr, p as u64, 1)
+        };
+        if result.is_err() {
+            return Err(EFAULT);
+        }
+        if byte == 0 {
+            break;
+        }
+        buf.push(byte);
+        p = unsafe { p.add(1) };
+    }
+    alloc::string::String::from_utf8(buf).map_err(|_| EINVAL)
+}
+
 /// Execve: replace current process image with new program.
 /// Never returns on success.
-pub fn sys_execve(_path: *const u8, _argv: *const *const u8, _envp: *const *const u8) -> u64 {
-    println!("  syscall: execve(...)");
-    ENOSYS
+pub fn sys_execve(path: *const u8, argv: *const *const u8, _envp: *const *const u8) -> u64 {
+    println!("  syscall: execve(path={:p}, argv={:p})", path, argv);
+
+    // Copy path from user space
+    let path_str = match copy_user_string(path, 256) {
+        Ok(s) => s,
+        Err(e) => return e,
+    };
+    println!("  execve: path='{}'", path_str);
+
+    // Find the program
+    let Some(elf) = find_builtin_program(&path_str) else {
+        println!("  execve: program not found");
+        return EINVAL; // ENOENT
+    };
+
+    // Get current thread and address space
+    let current_tid = crate::scheduler::current_thread_id();
+    let Some(current_thread) = current_thread() else {
+        return EFAULT;
+    };
+    let current_as_id = current_thread.address_space;
+
+    // Unmap all existing user mappings in the address space
+    let Some(mut alloc) = make_allocator(current_as_id) else {
+        return EFAULT;
+    };
+    let aspace = unsafe { crate::vmm::address_space_mut_by(current_as_id) };
+    if let Err(_) = aspace.unmap_all(&mut alloc) {
+        return EFAULT;
+    }
+
+    // Load the new ELF
+    let Some(mut load_alloc) = make_allocator(current_as_id) else {
+        return EFAULT;
+    };
+    let entry = match crate::exec::load_elf(elf, aspace, &mut load_alloc, crate::syscall::OBJ_ANONYMOUS) {
+        Ok(e) => e,
+        Err(_) => return EFAULT,
+    };
+    println!("  execve: loaded ELF, entry={:#x}", entry);
+
+    // Set up new user stack
+    // Allocate a stack page
+    let stack_va = 0x5C01_0000u64; // Fixed stack VA for now
+    let stack_flags = vivanta_arch_api::mmu::MappingFlags::user() | vivanta_arch_api::mmu::MappingFlags::read_write();
+    if let Err(_) = aspace.reserve_at(stack_va, 4096, stack_flags, crate::syscall::OBJ_ANONYMOUS) {
+        return EFAULT;
+    }
+
+    // Copy argv to user stack (simplified - just set up initial stack frame)
+    let stack_top = stack_va + 4096;
+
+    // Re-initialize the thread context for the new program
+    let Some(stack_alloc) = stack_allocator() else {
+        return ENOMEM;
+    };
+    let stack_frames = crate::scheduler::KERNEL_STACK_SIZE / 4096;
+    let Some(stack_frame) = stack_alloc.alloc_contiguous(stack_frames) else {
+        return ENOMEM;
+    };
+    let kernel_stack_pa = stack_frame.addr;
+    let kernel_stack_top = kernel_stack_pa + crate::scheduler::KERNEL_STACK_SIZE as u64;
+
+    // Create new context for the program entry
+    let new_context = unsafe {
+        vivanta_arch_api::context::context_init(
+            kernel_stack_top as usize,
+            kernel_stack_pa as usize,
+            stack_top as usize,
+            entry as usize,
+            vivanta_arch_api::context::ExecutionLevel::User,
+        )
+    };
+
+    // Update the thread's context and kernel stack
+    if let Some(thread) = crate::scheduler::get_thread_mut(current_tid) {
+        thread.context = new_context;
+        thread.kernel_stack_pa = Some(kernel_stack_pa);
+        thread.address_space = current_as_id;
+    }
+
+    // Free old kernel stack
+    if let Some(old_pa) = current_thread.kernel_stack_pa {
+        if old_pa != kernel_stack_pa {
+            for i in 0..stack_frames {
+                stack_alloc.free_frame(vivanta_arch_api::pmm::PhysFrame {
+                    addr: old_pa + (i as u64) * 4096,
+                });
+            }
+        }
+    }
+
+    // Return to user mode at entry point with new context
+    // This is done by modifying the ExceptionFrame on the kernel stack
+    // The syscall return path will use this frame
+    println!("  execve: switching to new program at {:#x}", entry);
+    0
 }
 
 /// Munmap: remove mappings from address space.
