@@ -219,9 +219,37 @@ pub fn sys_waitpid(pid: u64, status: *mut i32, options: u64) -> u64 {
 
 /// Send signal to process.
 pub fn sys_kill(pid: u64, sig: u64) -> u64 {
-    println!("  syscall: kill({}, sig={})", pid, sig);
-    // TODO(G-M10): Implement signal delivery
-    EINVAL // ESRCH - no such process
+    println!("  syscall: kill(pid={}, sig={})", pid, sig);
+
+    // Find the target task
+    let _target_task = process_table().lookup(pid);
+    if _target_task.is_none() {
+        println!("  kill: no such task {}", pid);
+        return EINVAL; // ESRCH
+    }
+
+    // Get signal
+    let Some(signal) = crate::signal::Signal::from_num(sig as u8) else {
+        println!("  kill: invalid signal {}", sig);
+        return EINVAL;
+    };
+
+    // Send signal to task
+    if let Some(target_task) = process_table().lookup_mut(pid) {
+        target_task.signals.send(signal);
+        println!("  kill: sent signal {:?} to task {}", signal, pid);
+
+        // SIGKILL immediately terminates the task
+        if signal == crate::signal::Signal::Kill {
+            // Mark task for termination (will be handled on next scheduler tick)
+            // For now, just note it - full signal handling needs more infrastructure
+            target_task.state = crate::scheduler::task::TaskState::Exited;
+            target_task.exit_code = Some(-9); // -SIGKILL
+            println!("  kill: task {} marked for termination", pid);
+        }
+    }
+
+    0
 }
 
 /// Get current process ID.

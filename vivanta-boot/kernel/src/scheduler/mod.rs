@@ -495,8 +495,12 @@ pub fn thread_exit(exit_code: i32) -> ! {
                         exit_code,
                         parent
                     );
-                    // Wake up parent waiters
+                    // Send SIGCHLD to parent
                     if let Some(parent_id) = parent {
+                        if let Some(parent_task) = pt().lookup_mut(parent_id) {
+                            parent_task.signals.send(crate::signal::Signal::Chld);
+                        }
+                        // Wake up parent waiters
                         wake_waiters(parent_id);
                     }
                 }

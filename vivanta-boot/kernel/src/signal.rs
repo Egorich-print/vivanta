@@ -7,6 +7,7 @@ pub const SIGINT: u8 = 2;
 pub const SIGKILL: u8 = 9;
 pub const SIGTERM: u8 = 15;
 pub const SIGSEGV: u8 = 11;
+pub const SIGCHLD: u8 = 17;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
@@ -15,6 +16,7 @@ pub enum Signal {
     Kill = 9,
     Term = 15,
     Segv = 11,
+    Chld = 17,
 }
 
 impl Signal {
@@ -25,6 +27,7 @@ impl Signal {
             9 => Some(Signal::Kill),
             11 => Some(Signal::Segv),
             15 => Some(Signal::Term),
+            17 => Some(Signal::Chld),
             _ => None,
         }
     }
