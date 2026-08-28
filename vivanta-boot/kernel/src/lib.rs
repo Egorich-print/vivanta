@@ -856,6 +856,92 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         }
 
         // ------------------------------------------------------------------
+        // Fork/waitpid/getpid/getppid gate: kernel-level PID domain smoke
+        // without EL0 execution. Verifies Task/ProcessTable linking,
+        // sys_getpid/getppid via task_for_thread, and Zombie->waitpid reaping.
+        // ------------------------------------------------------------------
+        println!("fork/waitpid gate:");
+        {
+            let fw_parent_root = build_root("ForkParentAS", 0, 0, None);
+            let parent_as = vmm::register(fw_parent_root, vmm::AddressSpaceFlags::User);
+            let mut tm = scheduler::task_manager::TaskManager::new();
+            let parent_h = tm
+                .spawn_user(
+                    0x5E00_0000,
+                    0x5E01_1000,
+                    parent_as,
+                    &mut pmm,
+                    system_state.memory_manager_mut(),
+                    scheduler::thread::Priority::Normal,
+                    None,
+                )
+                .expect("spawn fork parent");
+            let parent_pid = parent_h.id;
+            let parent_tid = scheduler::process_table().lookup(parent_pid).unwrap().threads[0];
+            let fw_child_root = build_root("ForkChildAS", 0, 0, None);
+            let child_as = vmm::register(fw_child_root, vmm::AddressSpaceFlags::User);
+            let child_h = tm
+                .spawn_user(
+                    0x5E00_0000,
+                    0x5E01_1000,
+                    child_as,
+                    &mut pmm,
+                    system_state.memory_manager_mut(),
+                    scheduler::thread::Priority::Normal,
+                    Some(parent_pid),
+                )
+                .expect("spawn fork child");
+            let child_pid = child_h.id;
+            let child_tid = scheduler::process_table().lookup(child_pid).unwrap().threads[0];
+            assert_ne!(child_pid, 0, "child pid must be non-zero");
+            assert_ne!(parent_pid, child_pid, "fork: pid collision");
+            let children = scheduler::process_table().children_of(parent_pid);
+            assert!(children.contains(&child_pid), "fork: parent children must contain child");
+            assert_eq!(scheduler::task_for_thread(parent_tid), Some(parent_pid), "getpid parent");
+            assert_eq!(scheduler::task_for_thread(child_tid), Some(child_pid), "getpid child");
+            let ppid = scheduler::process_table()
+                .lookup(child_pid)
+                .and_then(|t| t.parent)
+                .unwrap_or(0);
+            assert_eq!(ppid, parent_pid, "getppid child -> parent");
+            let prev = scheduler::current_thread_id();
+            scheduler::set_current_thread_id(parent_tid);
+            assert_eq!(crate::syscall::sys_getpid(), parent_pid, "sys_getpid parent");
+            assert_eq!(crate::syscall::sys_getppid(), 0, "sys_getppid parent is init");
+            scheduler::set_current_thread_id(child_tid);
+            assert_eq!(crate::syscall::sys_getpid(), child_pid, "sys_getpid child");
+            assert_eq!(crate::syscall::sys_getppid(), parent_pid, "sys_getppid child");
+            scheduler::process_table().lookup_mut(child_pid).unwrap().exit(7);
+            assert_eq!(
+                scheduler::process_table().lookup(child_pid).unwrap().state,
+                scheduler::task::TaskState::Zombie,
+                "child must be Zombie"
+            );
+            scheduler::set_current_thread_id(parent_tid);
+            let wait_ret = crate::syscall::sys_waitpid(child_pid, core::ptr::null_mut(), 0);
+            assert_eq!(wait_ret, child_pid, "waitpid must return child pid");
+            let gone = scheduler::process_table().lookup(child_pid).is_none()
+                || scheduler::process_table()
+                    .lookup(child_pid)
+                    .is_some_and(|t| t.state == scheduler::task::TaskState::Exited);
+            assert!(gone, "child must be reaped (gone or tombstone)");
+            let children_after = scheduler::process_table().children_of(parent_pid);
+            assert!(!children_after.contains(&child_pid), "children must not contain reaped child");
+            scheduler::set_current_thread_id(prev);
+            println!(
+                "  [FORK] pid parent={} child={} ppid={} reaped={} PASS",
+                parent_pid, child_pid, ppid, wait_ret
+            );
+            if let Some(t) = scheduler::process_table().lookup_mut(parent_pid) {
+                t.exit(0);
+            }
+            tm.reap_zombie(parent_pid);
+            let _ = tm.reap_zombie(child_pid);
+            vmm::unregister(parent_as).expect("unregister ForkParentAS");
+            vmm::unregister(child_as).expect("unregister ForkChildAS");
+        }
+
+        // ------------------------------------------------------------------
         // M5.1/M5.2 VM lifecycle test: VA allocator + range mapping +
         // partial protect + table reclamation + alias safety, exercised
         // against the live MMU in a dedicated address space.

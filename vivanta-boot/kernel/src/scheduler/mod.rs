@@ -114,6 +114,12 @@ pub fn current_thread_id() -> ThreadId {
     CURRENT_THREAD.load(Ordering::Relaxed)
 }
 
+/// Test helper: override current ThreadId for syscall gates (e.g. getpid/waitpid).
+/// Caller must restore the previous value; single-core IRQ-guarded context.
+pub fn set_current_thread_id(id: ThreadId) {
+    CURRENT_THREAD.store(id, Ordering::Relaxed);
+}
+
 /// Get the current thread's info.
 pub fn current_thread() -> Option<&'static Thread> {
     rq().get(current_thread_id())
