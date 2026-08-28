@@ -167,6 +167,10 @@ pub unsafe extern "Rust" fn context_fork(
         let parent_tc = parent_stack_bottom as *const ThreadContext;
         let child_tc = child_stack_bottom as *mut ThreadContext;
         core::ptr::copy_nonoverlapping(parent_tc, child_tc, 1);
+        // SAFETY: ThreadContext at bottom holds SP_EL1 (kernel stack top).
+        // For the child it must point to child's stack top, not parent's.
+        // Parent's sp is parent_stack_top; child's must be child_stack_top.
+        (*child_tc).sp = child_stack_top as u64;
 
         // Copy parent's ExceptionFrame to child's stack_top - FRAME_SIZE
         let child_frame_ptr = (child_stack_top - FRAME_SIZE) as *mut ExceptionFrame;

@@ -4,15 +4,9 @@
 
 use vivanta_boot_common::println;
 
-/// Saved CPU state at exception entry.
-#[repr(C)]
-#[derive(Clone, Copy)]
-pub struct ExceptionFrame {
-    pub x: [u64; 31],
-    pub sp: u64,
-    pub elr: u64,
-    pub spsr: u64,
-}
+// Single source of truth for ExceptionFrame — re-export from arch-api.
+// Previously duplicated here; unified to avoid ODR violation (audit 2026-08-28).
+pub use vivanta_arch_api::exception::ExceptionFrame;
 
 const EXCEPTION_NAMES: [&str; 16] = [
     "EL1t Sync",
