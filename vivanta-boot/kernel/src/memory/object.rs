@@ -61,6 +61,13 @@ impl AsPageTableAllocator {
     pub fn mrm_ptr(&self) -> *mut crate::memory::MemoryResourceManager {
         self.mrm
     }
+
+    /// Get the physical backend pointer for frame deallocation (CoWShared
+    /// refcount registry). The pointer is valid for the lifetime of the
+    /// boot-established memory context.
+    pub fn backend_ptr(&self) -> *mut dyn crate::memory::resource::MemoryBackend {
+        self.backend
+    }
 }
 
 impl PageTableAllocator for AsPageTableAllocator {

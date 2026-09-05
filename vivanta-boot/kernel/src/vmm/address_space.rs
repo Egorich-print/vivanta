@@ -478,8 +478,12 @@ impl AddressSpace {
         let old_pa = m.pa;
         let piece_base = m.virt_range.base;
         let piece_end = m.virt_range.end();
-        // Break restores the ORIGINAL write permission.
-        let full_perms = MappingFlags::from_bits(m.permissions.bits() | 0b001);
+        // Break restores the ORIGINAL permissions (the shadow now stores
+        // them verbatim — duplicate_as no longer strips the write bit from
+        // the shadow). Hardware was RO because the shadow said so via
+        // mmu_protect; the faulting page is remapped writable per the
+        // original logical permissions.
+        let full_perms = m.permissions;
         let object_id = m.object_id;
 
         let Some(new_frame) = alloc.try_alloc_page_table_frame() else {
@@ -532,16 +536,24 @@ impl AddressSpace {
         true
     }
 
-    /// Duplicate this address space into a fresh child (M7.5).
+    /// Duplicate this address space into a fresh child (ADR-034 true COW).
     ///
     /// Returns the constructed-but-unregistered child; the caller registers
     /// it via `register_child` and activates whichever space it needs.
     ///
-    /// Copy-based semantics (COW sharing deferred to a follow-up):
-    /// - Present(Anonymous): NEW frame allocated, 4 KiB contents copied
-    ///   through the kernel identity mapping; child owns the copy.
-    /// - Present(External): same PA remapped into the child.
-    /// - Lazy/Reserved: identical reservation, no frames.
+    /// True COW semantics (M10.2, ADR-034 §2): NO allocation, NO eager copy.
+    /// - Present: parent and child share the SAME physical frame. Both pieces
+    ///   become `CoWShared{refcount=2}` with the write bit stripped. The
+    ///   parent's hardware image is rewritten read-only (`mmu_protect`); the
+    ///   child's tree maps the same PA read-only (`mmu_map_object`). The first
+    ///   write faults and `resolve_cow_fault` performs the copy at fault time.
+    /// - CoW (nested fork): refcount incremented, frame stays shared.
+    /// - Lazy/Reserved: identical reservation in the child, no frames.
+    ///
+    /// Fault-path integration: on the child's first write, the EL1/EL0
+    /// permission-fault handler routes to `resolve_cow_fault`, which splits
+    /// the page out of the shared piece; the parent keeps its RO alias of the
+    /// original frame.
     pub fn duplicate_as(
         &mut self,
         child_root: RootPageTable,
@@ -553,52 +565,157 @@ impl AddressSpace {
         let mut child = Self::new(0, child_root, self.flags);
         child.va = self.va;
         // Root is assigned by register_child after the shadow is built.
+
+        // RO flag form used for every shared piece: strip the write bit.
+        let ro_strip = 0b001u64;
+
+        let mut parent_affected: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
+        let mut parent_new: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
         let mut child_pieces: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
+        // Original Present+CoW pieces, in lockstep with parent_new, so the
+        // hardware loops below stay aligned regardless of interleaved
+        // Lazy/Reserved pieces.
+        let mut shared_orig: alloc::vec::Vec<Mapping> = alloc::vec::Vec::new();
+
         for m in &pieces {
             match m.backing {
                 Backing::Present => {
-                    let Some(new_frame) = alloc.try_alloc_page_table_frame() else {
-                        return Err(VmmError::OutOfVa);
-                    };
-                    // SAFETY: both are live 4 KiB RAM allocations; the
-                    // identity mapping keeps both kernel-accessible.
-                    unsafe {
-                        core::ptr::write_bytes(new_frame as *mut u8, 0, 4096);
-                        core::ptr::copy_nonoverlapping(
-                            m.pa as *const u8,
-                            new_frame as *mut u8,
-                            4096,
-                        );
-                    }
-                    // Install the leaf in the CHILD tree so its EL0 task
-                    // can access the private copy immediately.
-                    unsafe {
-                        vivanta_arch_api::mmu::mmu_map_object(
-                            child.root,
-                            m.virt_range.base,
-                            new_frame,
-                            m.virt_range.size,
-                            m.permissions,
-                            alloc,
-                        );
-                    }
-                    child_pieces.push(Mapping::present(
+                    let ro = vivanta_arch_api::mmu::MappingFlags::from_bits(
+                        m.permissions.bits() & !ro_strip,
+                    );
+                    // Parent / child pieces: shadow keeps the ORIGINAL
+                    // (pre-COW) permissions — resolve_cow_fault restores
+                    // them verbatim from the shadow when a page is split.
+                    // Hardware image is forced RO via mmu_protect/mmu_map_object.
+                    // Storing the stripped permissions in the shadow broke
+                    // W^X for read-only code pages: resolve_cow_fault
+                    // unconditionally re-added the write bit, making R|X
+                    // pages RWX.
+                    let mut parent_piece = *m;
+                    parent_piece.backing = Backing::CoW;
+                    parent_piece.phys = PhysOwnership::CoWShared { refcount: 2 };
+                    parent_affected.push(parent_piece);
+                    parent_new.push(parent_piece);
+
+                    // Child piece: same PA, CoWShared{2}, RO in HW, but
+                    // shadow keeps the ORIGINAL permissions so the COW
+                    // break can restore them exactly (not unconditionally
+                    // re-add write bit).
+                    child_pieces.push(Mapping::cow_shared(
                         m.virt_range,
                         m.object_id,
                         m.permissions,
-                        new_frame,
-                        PhysOwnership::Anonymous,
+                        m.pa,
+                        2,
                     ));
+                    shared_orig.push(*m);
+
+                    // Register the new shared frame with the global
+                    // refcount registry — the frame's single owner (the
+                    // parent) just became a two-owner shared frame, and
+                    // we MUST record it before any unmap path runs, or
+                    // the frame leaks forever.
+                    crate::vmm::cow_refcount::inc(m.pa, 2);
                 }
-                _ => {
+                Backing::CoW => {
+                    // Nested fork: increment the share count on both sides.
+                    let refcount = match m.phys {
+                        PhysOwnership::CoWShared { refcount } => refcount + 1,
+                        _ => 2,
+                    };
+                    let mut parent_piece = *m;
+                    parent_piece.phys = PhysOwnership::CoWShared { refcount };
+                    parent_affected.push(parent_piece);
+                    parent_new.push(parent_piece);
+
+                    // Child joins the same share count.
+                    child_pieces.push(Mapping::cow_shared(
+                        m.virt_range,
+                        m.object_id,
+                        m.permissions,
+                        m.pa,
+                        refcount,
+                    ));
+                    shared_orig.push(*m);
+
+                    // Nested fork joins an existing shared frame —
+                    // existing owner count grows by one.
+                    crate::vmm::cow_refcount::inc(m.pa, 1);
+                }
+                Backing::LazyAnonymous | Backing::Reserved => {
                     child_pieces.push(*m);
                 }
             }
         }
-        for p in &child_pieces {
-            if child.mappings.insert(*p).is_none() {
-                return Err(VmmError::MappingTableFull);
+
+        // Transactional ordering (hard rule #6): validate → allocate/modify →
+        // hardware → shadow commit last. All failures occur before the HW edit.
+        if child_pieces.len() > MappingSet::capacity() {
+            return Err(VmmError::MappingTableFull);
+        }
+        let survivors = self.mappings.len() - parent_affected.len();
+        if survivors + parent_new.len() > MappingSet::capacity() {
+            return Err(VmmError::MappingTableFull);
+        }
+
+        // 1. Parent HW: rewrite the freshly-shared Present pages read-only.
+        //    The parent's shadow retains the ORIGINAL (logical) permissions
+        //    (for resolve_cow_fault to restore on write) while the hardware
+        //    image is forced RO to trigger the first write. Already-CoW
+        //    pieces are already RO in hardware, so skip them.
+        //
+        //    `new.permissions` carries the original (unstripped) permissions
+        //    the shadow tracks — hardware must use the RO variant, not the
+        //    original. The shadow keeps the logical view; the hardware
+        //    enforces the physical sharing.
+        for (orig, _new) in shared_orig.iter().zip(parent_new.iter()) {
+            if orig.backing == Backing::Present {
+                let ro_perms = vivanta_arch_api::mmu::MappingFlags::from_bits(
+                    orig.permissions.bits() & !ro_strip,
+                );
+                // SAFETY: parent tree fully constructed; range is mapped.
+                unsafe {
+                    vivanta_arch_api::mmu::mmu_protect(
+                        self.root,
+                        orig.virt_range.base,
+                        orig.virt_range.size,
+                        ro_perms,
+                        alloc,
+                    );
+                }
             }
+        }
+
+        // 2. Child HW: map every shared frame (Present and CoW) read-only at
+        //    its original PA. Lazy/Reserved pieces carry no hardware image and
+        //    are intentionally absent here (they fault in on demand).
+        //    Hardware permissions are stripped of the write bit so writes
+        //    fault; the logical original permissions remain in the shadow.
+        for (orig, _new) in shared_orig.iter().zip(parent_new.iter()) {
+            let hw_perms =
+                vivanta_arch_api::mmu::MappingFlags::from_bits(orig.permissions.bits() & !ro_strip);
+            // SAFETY: child root fully constructed; VA range unmapped.
+            unsafe {
+                vivanta_arch_api::mmu::mmu_map_object(
+                    child.root,
+                    orig.virt_range.base,
+                    orig.pa,
+                    orig.virt_range.size,
+                    hw_perms,
+                    alloc,
+                );
+            }
+        }
+
+        // 3. Commit shadows (value-keyed; no failure can occur after HW edit).
+        self.mappings
+            .replace_slots(&parent_affected, &parent_new)
+            .map_err(|_| VmmError::MappingTableFull)?;
+        for p in &child_pieces {
+            let _ = child
+                .mappings
+                .insert(*p)
+                .expect("child capacity pre-checked");
         }
         Ok(child)
     }

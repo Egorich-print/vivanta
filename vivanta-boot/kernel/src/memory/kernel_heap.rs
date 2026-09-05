@@ -177,13 +177,65 @@ impl KernelHeap {
             return;
         }
         let header = Self::header_of(ptr);
-        // Insert `header` at the head of the free list (coalescing deferred:
-        // M5.0 scope keeps the free list simple; adjacent-coalescing is a
-        // follow-up). Mark as free.
-        Self::set_free(header, true);
+        // Reject double-free: a live block has FREE_BIT clear.
+        if Self::block_size(header) == 0
+            || (unsafe { core::ptr::read_volatile(header) } & FREE_BIT != 0)
+        {
+            return;
+        }
+        let mut merge_header = header;
+        let mut merge_size = Self::block_size(header);
+        let block_end = (header as usize) + core::mem::size_of::<usize>() * 2 + merge_size;
+
+        // Coalesce with the free block that starts immediately after this
+        // block (right neighbour). Walk the free list, unlink it.
+        let mut prev: *mut usize = core::ptr::null_mut();
+        let mut cur = self.free_head.load(Ordering::Relaxed) as *mut usize;
+        let end = self.end.load(Ordering::Relaxed);
+        while !cur.is_null() && (cur as usize) < end {
+            if (cur as usize) == block_end {
+                merge_size += core::mem::size_of::<usize>() * 2 + Self::block_size(cur);
+                let next = Self::next_free(cur);
+                if prev.is_null() {
+                    self.free_head.store(next as usize, Ordering::Relaxed);
+                } else {
+                    Self::set_next_free(prev, next);
+                }
+                break;
+            }
+            prev = cur;
+            cur = Self::next_free(cur);
+        }
+
+        // Coalesce with the free block that ends immediately before this block
+        // (left neighbour). Absorb it: the merged header becomes the neighbour.
+        let mut prev: *mut usize = core::ptr::null_mut();
+        let mut cur = self.free_head.load(Ordering::Relaxed) as *mut usize;
+        while !cur.is_null() && (cur as usize) < end {
+            let cur_end =
+                (cur as usize) + core::mem::size_of::<usize>() * 2 + Self::block_size(cur);
+            if cur_end == (merge_header as usize) {
+                merge_size += core::mem::size_of::<usize>() * 2 + Self::block_size(cur);
+                merge_header = cur;
+                let next = Self::next_free(cur);
+                if prev.is_null() {
+                    self.free_head.store(next as usize, Ordering::Relaxed);
+                } else {
+                    Self::set_next_free(prev, next);
+                }
+                break;
+            }
+            prev = cur;
+            cur = Self::next_free(cur);
+        }
+
+        // Insert the (possibly merged) block at the free-list head.
+        Self::set_block_size(merge_header, merge_size);
+        Self::set_free(merge_header, true);
         let head = self.free_head.load(Ordering::Relaxed) as *mut usize;
-        Self::set_next_free(header, head);
-        self.free_head.store(header as usize, Ordering::Relaxed);
+        Self::set_next_free(merge_header, head);
+        self.free_head
+            .store(merge_header as usize, Ordering::Relaxed);
     }
 }
 

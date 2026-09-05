@@ -177,6 +177,10 @@ impl MappingSet {
 
     pub fn remove(&mut self, slot: usize) {
         if slot < self.count {
+            // Drop refcount if the removed mapping owned a CoWShared frame.
+            if let Some(m) = self.mappings[slot] {
+                release_cow_frame(m);
+            }
             self.mappings[slot] = None;
             // Shrink count while the tail is empty so `len()` reflects live
             // mappings and a fresh insert can reuse the freed slot.
@@ -258,6 +262,13 @@ impl MappingSet {
         if survivors + pieces.len() > MAX_MAPPINGS {
             return Err(());
         }
+        // Drop CoWShared refcounts for the about-to-be-replaced mappings
+        // before the slots are overwritten — the registry is the single
+        // authority for "how many owners remain" and must see the
+        // decrement regardless of the new pieces' backing.
+        for a in affected_values {
+            release_cow_frame(*a);
+        }
         let mut next = Self::new();
         for (_, m) in self.iter_with_slots() {
             if !affected_values.iter().any(|a| {
@@ -283,5 +294,16 @@ impl MappingSet {
                 })
             })
             .count()
+    }
+}
+
+/// Release one CoWShared frame reference. Called when a shadow piece
+/// that owns a frame is removed (MappingSet::remove, replace_slots).
+/// The registry counts owners across all address spaces — when the
+/// count hits zero the physical frame returns to the boot-registered
+/// deallocator.
+fn release_cow_frame(m: Mapping) {
+    if let PhysOwnership::CoWShared { .. } = m.phys {
+        let _ = crate::vmm::cow_refcount::dec(m.pa);
     }
 }

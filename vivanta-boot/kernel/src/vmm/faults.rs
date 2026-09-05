@@ -13,12 +13,32 @@ static mut VM_ALLOC_CTX: Option<(
     *mut dyn crate::memory::MemoryBackend,
 )> = None;
 
+/// Backend pointer kept in a stable static so the CoWShared frame
+/// deallocator can find it without capturing the value in a closure
+/// (closures with captures can't coerce to fn pointers). `None` means
+/// "not yet registered" (safe leak).
+static mut COW_FREE_BACKEND: Option<*mut dyn crate::memory::MemoryBackend> = None;
+
+extern "Rust" fn cow_free_trampoline(pa: u64) {
+    unsafe {
+        if let Some(backend) = COW_FREE_BACKEND {
+            (*backend).deallocate(pa, 4096);
+        }
+    }
+}
+
 /// Provide the memory context used for demand-fill allocations.
 pub fn set_backing_context(
     mrm: *mut crate::memory::MemoryResourceManager,
     backend: *mut dyn crate::memory::MemoryBackend,
 ) {
-    unsafe { VM_ALLOC_CTX = Some((mrm, backend)) };
+    unsafe {
+        VM_ALLOC_CTX = Some((mrm, backend));
+        COW_FREE_BACKEND = Some(backend);
+    }
+    // Wire the CoWShared refcount registry to the same backend so the
+    // last owner of a shared frame returns its storage at unmount.
+    crate::vmm::cow_refcount::set_free_fn(cow_free_trampoline);
 }
 
 pub(crate) fn backing_context() -> Option<(
@@ -38,9 +58,8 @@ pub(crate) fn anonymous_backend() -> Option<*mut dyn crate::memory::MemoryBacken
 /// This can be used by syscalls (fork, munmap, mprotect) that need to
 /// modify page tables.
 pub fn make_allocator(as_id: crate::vmm::AddressSpaceId) -> Option<AsPageTableAllocator> {
-    backing_context().map(|(mrm, backend)| unsafe {
-        AsPageTableAllocator::new(mrm, backend, as_id)
-    })
+    backing_context()
+        .map(|(mrm, backend)| unsafe { AsPageTableAllocator::new(mrm, backend, as_id) })
 }
 
 /// Panic handler for unmapped page faults (pre-M6.0 behavior retained for

@@ -296,6 +296,10 @@ pub(crate) fn flags_to_desc_bits(flags: MappingFlags, phys: u64) -> u64 {
 
     if !flags.is_executable() {
         d |= DESC_PXN | DESC_XN;
+    } else if flags.is_user() {
+        // User-executable pages must remain non-executable at EL1: PXN blocks
+        // privileged fetch while leaving EL0 execution intact (UXN semantics).
+        d |= DESC_PXN;
     }
 
     d | (phys & ADDR_MASK)
@@ -501,6 +505,59 @@ pub unsafe extern "Rust" fn mmu_clear_table_entry(table_pa: u64, index: usize) {
     // The cleared entry can no longer be reached by a table walk once this
     // becomes visible; DSB orders the write before any subsequent TLBI.
     barrier_write();
+}
+
+#[unsafe(no_mangle)]
+pub extern "Rust" fn mmu_clone_kernel_half(
+    src_root: vivanta_arch_api::mmu::RootPageTable,
+    dst_root: vivanta_arch_api::mmu::RootPageTable,
+    alloc: &mut dyn vivanta_arch_api::mmu::PageTableAllocator,
+) -> bool {
+    let src_root_pa = src_root.0 as u64;
+    let dst_root_pa = dst_root.0 as u64;
+
+    // Allocate a private L2 subtable for the child's L1[0] — the
+    // shared source subtable would alias allocator-managed writes.
+    let Some(l2_pa) = alloc.try_alloc_page_table_frame() else {
+        return false;
+    };
+    // SAFETY: l2_pa is a freshly allocated frame, write of zeros is safe.
+    unsafe { core::ptr::write_bytes(l2_pa as *mut u8, 0, 4096) };
+
+    unsafe {
+        // If the source has a valid L1[0] subtable (MMIO + guard),
+        // copy its entries verbatim into the private L2. The kernel
+        // root holds no user pages here by construction.
+        let src_l1_0 = mmu_read_table_entry(src_root_pa, 0);
+        if desc_is_valid(src_l1_0) && desc_is_table(src_l1_0) {
+            let src_l2_pa = src_l1_0 & ADDR_MASK;
+            for i in 0..512 {
+                let entry = mmu_read_table_entry(src_l2_pa, i);
+                mmu_write_table_entry(l2_pa, i, entry);
+            }
+        }
+        // (If L1[0] was invalid in the source — no MMIO at all — the
+        // fresh L2 stays zero, which is also correct.)
+
+        // Copy L1[1..512] verbatim. These point at immutable RAM block
+        // tables that the allocator never modifies; sharing by
+        // reference is safe.
+        for i in 1..512 {
+            let entry = mmu_read_table_entry(src_root_pa, i);
+            mmu_write_table_entry(dst_root_pa, i, entry);
+        }
+
+        // Write the private L2 into the child's L1[0] as a table
+        // descriptor (non-standard 0b11 encoding — QEMU-compatible).
+        let new_l1_0 = table_desc(l2_pa);
+        mmu_write_table_entry(dst_root_pa, 0, new_l1_0);
+    }
+
+    // Record ownership of the private L2 in the caller's registry so
+    // the child's reclamation policy can take it back once empty.
+    alloc.table_installed(l2_pa, dst_root_pa, 0, 2);
+
+    true
 }
 
 // ---------------------------------------------------------------------------

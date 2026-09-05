@@ -89,6 +89,15 @@ pub trait PageTableAllocator {
     /// the underlying memory source. Only called by the reclamation path.
     /// Default: no-op (frame leaks — safe fallback).
     fn reclaim_page_table_frame(&mut self, _frame: u64) {}
+
+    /// Physical backend that owns CoW-shared frames whose refcount reaches
+    /// zero. Required by VMM primitives that maintain a CoW refcount
+    /// registry (ADR-034); default returns null and disables refcounted
+    /// freeing (safe leak). The pointer is valid for the lifetime of the
+    /// boot-established memory context.
+    fn cow_frame_backend(&self) -> *mut core::ffi::c_void {
+        core::ptr::null_mut()
+    }
 }
 
 unsafe extern "Rust" {
@@ -200,4 +209,33 @@ unsafe extern "Rust" {
     ///   ownership registry.
     /// - `index` must be < 512.
     pub unsafe fn mmu_clear_table_entry(table_pa: u64, index: usize);
+
+    /// Clone the kernel-half page tables (identity RAM + MMIO) from
+    /// `src_root` into `dst_root`. The kernel half is treated as
+    /// immutable across address spaces: L1 entries that lie entirely
+    /// above the user allocator domain are copied by reference (their
+    /// subtables are shared with the source). The L1 entry that
+    /// overlaps the user allocator domain is given a private copy of
+    /// its subtable so the child can grow its own allocator mappings
+    /// under it without aliasing the source's tables.
+    ///
+    /// The expected `src_root` is the kernel address space root
+    /// (id 0), which holds no user pages by construction — its L1[0]
+    /// subtable is therefore only MMIO + guard, which copies cleanly
+    /// into a fresh private frame.
+    ///
+    /// Returns `true` on success, `false` if the private subtable
+    /// allocation could not be satisfied (OOM path).
+    ///
+    /// # Safety
+    ///
+    /// - `src_root` must be a valid page table root whose kernel-half
+    ///   subtables will remain valid for the lifetime of the child.
+    /// - `dst_root` must be a valid, zero-filled root frame and must
+    ///   not be currently active.
+    pub fn mmu_clone_kernel_half(
+        src_root: RootPageTable,
+        dst_root: RootPageTable,
+        alloc: &mut dyn PageTableAllocator,
+    ) -> bool;
 }

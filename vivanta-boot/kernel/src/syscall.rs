@@ -13,8 +13,8 @@ mod process;
 pub use process::*;
 
 use crate::vmm;
-use vivanta_arch_api::mmu::MappingFlags;
 use vivanta_arch_api::exception::ExceptionFrame;
+use vivanta_arch_api::mmu::MappingFlags;
 use vivanta_boot_common::println;
 
 /// Max bytes accepted by the `write` syscall per call (kernel stack buffer).
@@ -121,7 +121,12 @@ pub extern "Rust" fn syscall_dispatch(
         SYS_KILL => process::sys_kill(arg0, arg1),
         SYS_GETPID => process::sys_getpid(),
         SYS_GETPPID => process::sys_getppid(),
-        SYS_EXECVE => process::sys_execve(frame, arg0 as *const u8, arg1 as *const *const u8, arg2 as *const *const u8),
+        SYS_EXECVE => process::sys_execve(
+            frame,
+            arg0 as *const u8,
+            arg1 as *const *const u8,
+            arg2 as *const *const u8,
+        ),
         SYS_RT_SIGACTION => process::sys_sigaction(arg0, arg1, arg2),
         SYS_RT_SIGPROCMASK => ENOSYS, // stub: reserved for future sigprocmask
         SYS_RT_SIGRETURN => process::sys_sigreturn(),

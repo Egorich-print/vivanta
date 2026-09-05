@@ -14,7 +14,11 @@ pub fn read_desc(addr: u64) -> u64 {
 pub fn write_desc(addr: u64, val: u64) {
     unsafe {
         core::ptr::write_volatile(addr as *mut u64, val);
-        // MUTATION-TEST: civac disabled
+        // ARM table walkers do not snoop the data cache — a descriptor that
+        // lives only in a dirty cache line is invisible to translations. Clean
+        // to PoC so runtime map/unmap/protect/demand-fill entries are coherent.
+        core::arch::asm!("dc civac, {}", in(reg) addr, options(nostack, preserves_flags));
+        core::arch::asm!("dsb ish", options(nomem, nostack, preserves_flags));
     }
 }
 

@@ -6,6 +6,7 @@
 // ---------------------------------------------------------------------------
 
 pub mod address_space;
+pub mod cow_refcount;
 pub mod faults;
 pub mod mapping;
 pub mod tables;

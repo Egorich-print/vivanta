@@ -1,14 +1,15 @@
 /// Process management syscalls.
 ///
 /// These handle process lifecycle: fork, exit, waitpid, kill, getpid, getppid.
-
-use crate::scheduler::{current_thread, stack_allocator, task_for_thread, process_table};
-use crate::syscall::{ENOMEM, EFAULT, EINVAL};
-use crate::vmm::address_space::{find_by_root, register_child};
+use crate::scheduler::{current_thread, process_table, stack_allocator, task_for_thread};
+use crate::syscall::{EFAULT, EINVAL, ENOMEM};
+use crate::vmm::address_space::{
+    KERNEL_ADDRESS_SPACE_ID, find_by_root, lookup_root, register_child,
+};
 use crate::vmm::faults::make_allocator;
 use vivanta_arch_api::context::context_fork;
 use vivanta_arch_api::exception::ExceptionFrame;
-use vivanta_arch_api::mmu::RootPageTable;
+use vivanta_arch_api::mmu::{RootPageTable, mmu_clone_kernel_half};
 use vivanta_arch_api::user_memory;
 use vivanta_boot_common::println;
 
@@ -91,22 +92,43 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
         return ENOMEM;
     };
 
-    // Duplicate the parent address space into the child
-    let parent_aspace_ptr = parent_aspace as *const _ as *mut crate::vmm::address_space::AddressSpace;
-    let child_aspace = match unsafe { (*parent_aspace_ptr).duplicate_as(child_root, &mut child_alloc) } {
-        Ok(aspace) => aspace,
-        Err(e) => {
-            println!("  fork: duplicate_as failed: {:?}", e);
-            // Free the child kernel stack and root page table
-            for i in 0..stack_frames {
-                stack_alloc.free_frame(vivanta_arch_api::pmm::PhysFrame {
-                    addr: child_kernel_stack_pa + (i as u64) * 4096,
-                });
-            }
-            stack_alloc.free_frame(root_frame);
-            return ENOMEM;
+    // Seed the child root with the kernel half (identity RAM + MMIO) so the
+    // child has the address space it needs to actually run when scheduled
+    // (kernel stack walk, UART output, IRQ dispatch). Without this the child
+    // dies on its first schedule because its root is an empty L1 — no RAM
+    // mapping means the very first instruction fetch faults, and the COW
+    // fault handler has no addressable memory to allocate from either.
+    let kernel_root = lookup_root(KERNEL_ADDRESS_SPACE_ID);
+    let clone_ok = unsafe { mmu_clone_kernel_half(kernel_root, child_root, &mut child_alloc) };
+    if !clone_ok {
+        println!("  fork: mmu_clone_kernel_half failed (OOM)");
+        for i in 0..stack_frames {
+            stack_alloc.free_frame(vivanta_arch_api::pmm::PhysFrame {
+                addr: child_kernel_stack_pa + (i as u64) * 4096,
+            });
         }
-    };
+        stack_alloc.free_frame(root_frame);
+        return ENOMEM;
+    }
+
+    // Duplicate the parent address space into the child
+    let parent_aspace_ptr =
+        parent_aspace as *const _ as *mut crate::vmm::address_space::AddressSpace;
+    let child_aspace =
+        match unsafe { (*parent_aspace_ptr).duplicate_as(child_root, &mut child_alloc) } {
+            Ok(aspace) => aspace,
+            Err(e) => {
+                println!("  fork: duplicate_as failed: {:?}", e);
+                // Free the child kernel stack and root page table
+                for i in 0..stack_frames {
+                    stack_alloc.free_frame(vivanta_arch_api::pmm::PhysFrame {
+                        addr: child_kernel_stack_pa + (i as u64) * 4096,
+                    });
+                }
+                stack_alloc.free_frame(root_frame);
+                return ENOMEM;
+            }
+        };
 
     // Register the child address space
     let registered_child_as_id = register_child(child_aspace, child_root);
@@ -134,10 +156,17 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
     let child_task_id = crate::scheduler::create_task_for_thread(
         child_thread_id,
         registered_child_as_id,
-        if parent_task_id != 0 { Some(parent_task_id) } else { None },
+        if parent_task_id != 0 {
+            Some(parent_task_id)
+        } else {
+            None
+        },
     );
 
-    println!("  fork: parent_tid={} parent_task={} child_thread={} child_task={}", current_id, parent_task_id, child_thread_id, child_task_id);
+    println!(
+        "  fork: parent_tid={} parent_task={} child_thread={} child_task={}",
+        current_id, parent_task_id, child_thread_id, child_task_id
+    );
 
     // Inherit signal dispositions and blocked mask (POSIX: child inherits
     // handlers/blocked, but pending is cleared). Keeps fork/waitpid/kill flow.
@@ -145,7 +174,14 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
         let (blocked, handlers) = if let Some(p) = process_table().lookup(parent_task_id) {
             (p.signals.blocked, p.signals.handlers)
         } else {
-            (0, [crate::signal::SigAction { handler: 0, mask: 0, flags: 0 }; crate::signal::MAX_SIG])
+            (
+                0,
+                [crate::signal::SigAction {
+                    handler: 0,
+                    mask: 0,
+                    flags: 0,
+                }; crate::signal::MAX_SIG],
+            )
         };
         if let Some(c) = process_table().lookup_mut(child_task_id) {
             c.signals.blocked = blocked;
@@ -160,7 +196,10 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
 
 /// Wait for child process state change.
 pub fn sys_waitpid(pid: u64, status: *mut i32, options: u64) -> u64 {
-    println!("  syscall: waitpid(pid={}, status={:p}, options={})", pid, status, options);
+    println!(
+        "  syscall: waitpid(pid={}, status={:p}, options={})",
+        pid, status, options
+    );
 
     let current_tid = crate::scheduler::current_thread_id();
     let Some(current_task_id) = crate::scheduler::task_for_thread(current_tid) else {
@@ -175,13 +214,18 @@ pub fn sys_waitpid(pid: u64, status: *mut i32, options: u64) -> u64 {
         let reap_id = if pid == 0 || pid == u64::MAX {
             let children = process_table().children_of(current_task_id);
             children.into_iter().find(|&cid| {
-                process_table().lookup(cid).is_some_and(|t| t.state == crate::scheduler::task::TaskState::Zombie)
+                process_table()
+                    .lookup(cid)
+                    .is_some_and(|t| t.state == crate::scheduler::task::TaskState::Zombie)
             })
         } else {
             // Specific pid
             let children = process_table().children_of(current_task_id);
             if children.contains(&pid) {
-                if process_table().lookup(pid).is_some_and(|t| t.state == crate::scheduler::task::TaskState::Zombie) {
+                if process_table()
+                    .lookup(pid)
+                    .is_some_and(|t| t.state == crate::scheduler::task::TaskState::Zombie)
+                {
                     Some(pid)
                 } else {
                     // Child exists but not yet zombie
@@ -196,13 +240,25 @@ pub fn sys_waitpid(pid: u64, status: *mut i32, options: u64) -> u64 {
 
         if let Some(child_id) = reap_id {
             // Safe to reap: we re-lookup to get exit_code (avoid TOCTOU with lock, single-core so okay)
-            let exit_code = process_table().lookup(child_id).and_then(|t| t.exit_code).unwrap_or(-1);
-            println!("  waitpid: reaping child {} exit_code={}", child_id, exit_code);
+            let exit_code = process_table()
+                .lookup(child_id)
+                .and_then(|t| t.exit_code)
+                .unwrap_or(-1);
+            println!(
+                "  waitpid: reaping child {} exit_code={}",
+                child_id, exit_code
+            );
             if !status.is_null() {
                 let wait_status = (exit_code as u32) << 8;
                 // SAFETY: copy_to_user validates user range against current AS
                 unsafe {
-                    if user_memory::copy_to_user(status as u64, &wait_status as *const _ as *const u8, 4).is_err() {
+                    if user_memory::copy_to_user(
+                        status as u64,
+                        &wait_status as *const _ as *const u8,
+                        4,
+                    )
+                    .is_err()
+                    {
                         return EFAULT;
                     }
                 }
@@ -236,7 +292,11 @@ pub fn sys_waitpid(pid: u64, status: *mut i32, options: u64) -> u64 {
         // 4. Block: put current thread to Blocked and yield.
         // For any-child wait we block on 0 (wake on any child), else specific.
         let wait_id = if pid == 0 || pid == u64::MAX { 0 } else { pid };
-        println!("  waitpid: blocking for child {} (any={})", wait_id, wait_id==0);
+        println!(
+            "  waitpid: blocking for child {} (any={})",
+            wait_id,
+            wait_id == 0
+        );
         crate::scheduler::wait_for_child(wait_id);
         // SAFETY: wait_for_child is IRQ-guarded and sets Blocked; yield switches out.
         crate::scheduler::yield_now();
@@ -249,7 +309,9 @@ pub fn sys_kill(pid: u64, sig: u64) -> u64 {
     println!("  syscall: kill(pid={}, sig={})", pid, sig);
 
     // Find the target task — filter tombstones (Exited not killable)
-    let is_live = process_table().lookup(pid).is_some_and(|t| t.state != crate::scheduler::task::TaskState::Exited);
+    let is_live = process_table()
+        .lookup(pid)
+        .is_some_and(|t| t.state != crate::scheduler::task::TaskState::Exited);
     if !is_live {
         println!("  kill: no such task {}", pid);
         return EINVAL; // ESRCH
@@ -289,7 +351,10 @@ pub fn sys_kill(pid: u64, sig: u64) -> u64 {
                 continue;
             }
             // SAFETY: thread_set_state is used under IRQ guard inside, but we are in syscall context.
-            crate::scheduler::thread_set_state(tid, crate::scheduler::thread::ThreadState::Terminated);
+            crate::scheduler::thread_set_state(
+                tid,
+                crate::scheduler::thread::ThreadState::Terminated,
+            );
         }
         // Wake parent and clean children vec
         if let Some(parent_id) = parent {
@@ -327,7 +392,10 @@ pub fn sys_kill(pid: u64, sig: u64) -> u64 {
 /// Minimal: stores handler VA in Task's SignalState.handlers[sig].
 pub fn sys_sigaction(sig: u64, act: u64, oldact: u64) -> u64 {
     use crate::signal::{MAX_SIG, SIG_DFL, SIGKILL, SigAction};
-    println!("  syscall: rt_sigaction(sig={}, act={:#x}, oldact={:#x})", sig, act, oldact);
+    println!(
+        "  syscall: rt_sigaction(sig={}, act={:#x}, oldact={:#x})",
+        sig, act, oldact
+    );
 
     if sig == 0 || sig >= MAX_SIG as u64 {
         println!("  rt_sigaction: invalid sig {}", sig);
@@ -338,7 +406,11 @@ pub fn sys_sigaction(sig: u64, act: u64, oldact: u64) -> u64 {
     if sig == SIGKILL as u64 && act != 0 {
         // SAFETY: copy_from_user validates range before read; we peek handler
         // to decide if caller tries to change disposition.
-        let mut tmp = SigAction { handler: SIG_DFL, mask: 0, flags: 0 };
+        let mut tmp = SigAction {
+            handler: SIG_DFL,
+            mask: 0,
+            flags: 0,
+        };
         // Try to read the user act; if fault, return EFAULT.
         // If handler != DFL, reject.
         let res = unsafe {
@@ -386,7 +458,11 @@ pub fn sys_sigaction(sig: u64, act: u64, oldact: u64) -> u64 {
     }
 
     if act != 0 {
-        let mut new_act = SigAction { handler: SIG_DFL, mask: 0, flags: 0 };
+        let mut new_act = SigAction {
+            handler: SIG_DFL,
+            mask: 0,
+            flags: 0,
+        };
         // SAFETY: copy_from_user validates the source range against the active
         // address space (TTBR0 at entry) before any kernel deref.
         let res = unsafe {
@@ -408,8 +484,10 @@ pub fn sys_sigaction(sig: u64, act: u64, oldact: u64) -> u64 {
         // Install
         if let Some(t) = process_table().lookup_mut(current_task_id) {
             t.signals.handlers[sig as usize] = new_act;
-            println!("  rt_sigaction: task {} sig {} -> handler={:#x} mask={:#x} flags={:#x}",
-                current_task_id, sig, new_act.handler, new_act.mask, new_act.flags);
+            println!(
+                "  rt_sigaction: task {} sig {} -> handler={:#x} mask={:#x} flags={:#x}",
+                current_task_id, sig, new_act.handler, new_act.mask, new_act.flags
+            );
         } else {
             return EINVAL;
         }
@@ -452,9 +530,8 @@ pub fn sys_getppid() -> u64 {
 
 /// Built-in program registry for execve (no filesystem yet).
 /// Maps program name to ELF bytes.
-static BUILTIN_PROGRAMS: &[(&str, &[u8])] = &[
-    ("/init", include_bytes!("../../../user-init/user-init.elf")),
-];
+static BUILTIN_PROGRAMS: &[(&str, &[u8])] =
+    &[("/init", include_bytes!("../../../user-init/user-init.elf"))];
 
 fn find_builtin_program(path: &str) -> Option<&'static [u8]> {
     for (name, elf) in BUILTIN_PROGRAMS {
@@ -472,9 +549,7 @@ fn copy_user_string(ptr: *const u8, max_len: usize) -> Result<alloc::string::Str
     for _ in 0..max_len {
         let mut byte = 0u8;
         let byte_ptr = &mut byte as *mut u8;
-        let result = unsafe {
-            user_memory::copy_from_user(byte_ptr, p as u64, 1)
-        };
+        let result = unsafe { user_memory::copy_from_user(byte_ptr, p as u64, 1) };
         if result.is_err() {
             return Err(EFAULT);
         }
@@ -490,7 +565,12 @@ fn copy_user_string(ptr: *const u8, max_len: usize) -> Result<alloc::string::Str
 /// Execve: replace current process image with new program.
 /// Overwrites the live SVC ExceptionFrame at *frame and returns 0;
 /// the vectors.rs eret epilogue will restore ELR/SP/SPSR from that frame.
-pub fn sys_execve(frame: *mut ExceptionFrame, path: *const u8, _argv: *const *const u8, _envp: *const *const u8) -> u64 {
+pub fn sys_execve(
+    frame: *mut ExceptionFrame,
+    path: *const u8,
+    _argv: *const *const u8,
+    _envp: *const *const u8,
+) -> u64 {
     // SAFETY: frame is the live ExceptionFrame pushed by save_and_eret_sync at SP_EL1,
     // still on the current kernel stack. Caller (el0_sync_handler) guarantees validity.
     if frame.is_null() {
@@ -527,18 +607,23 @@ pub fn sys_execve(frame: *mut ExceptionFrame, path: *const u8, _argv: *const *co
     let Some(mut load_alloc) = make_allocator(current_as_id) else {
         return EFAULT;
     };
-    let entry = match crate::exec::load_elf(elf, aspace, &mut load_alloc, crate::syscall::OBJ_ANONYMOUS) {
-        Ok(e) => e,
-        Err(e) => {
-            println!("  execve: load_elf failed {:?}", e);
-            return EFAULT;
-        }
-    };
+    let entry =
+        match crate::exec::load_elf(elf, aspace, &mut load_alloc, crate::syscall::OBJ_ANONYMOUS) {
+            Ok(e) => e,
+            Err(e) => {
+                println!("  execve: load_elf failed {:?}", e);
+                return EFAULT;
+            }
+        };
     println!("  execve: loaded ELF entry={:#x}", entry);
 
     let stack_va = 0x5C01_0000u64;
-    let stack_flags = vivanta_arch_api::mmu::MappingFlags::user() | vivanta_arch_api::mmu::MappingFlags::read_write();
-    if aspace.reserve_at(stack_va, 4096, stack_flags, crate::syscall::OBJ_ANONYMOUS).is_err() {
+    let stack_flags = vivanta_arch_api::mmu::MappingFlags::user()
+        | vivanta_arch_api::mmu::MappingFlags::read_write();
+    if aspace
+        .reserve_at(stack_va, 4096, stack_flags, crate::syscall::OBJ_ANONYMOUS)
+        .is_err()
+    {
         return EFAULT;
     }
     let stack_top = stack_va + 4096;
@@ -562,7 +647,10 @@ pub fn sys_execve(frame: *mut ExceptionFrame, path: *const u8, _argv: *const *co
         }
     }
 
-    println!("  execve: switching to entry={:#x} sp={:#x}", entry, stack_top);
+    println!(
+        "  execve: switching to entry={:#x} sp={:#x}",
+        entry, stack_top
+    );
     0
 }
 
@@ -591,7 +679,10 @@ pub fn sys_munmap(as_root: u64, addr: u64, len: u64) -> u64 {
 
 /// Mprotect: change protection of existing mappings.
 pub fn sys_mprotect(as_root: u64, addr: u64, len: u64, prot: u64) -> u64 {
-    println!("  syscall: mprotect(0x{:x}, 0x{:x}, 0x{:x})", addr, len, prot);
+    println!(
+        "  syscall: mprotect(0x{:x}, 0x{:x}, 0x{:x})",
+        addr, len, prot
+    );
     let Some(aspace) = find_by_root(as_root) else {
         return EFAULT;
     };

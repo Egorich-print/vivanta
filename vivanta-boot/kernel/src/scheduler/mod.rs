@@ -42,8 +42,8 @@ pub fn register_stack_allocator(alloc: &mut (dyn FrameAllocator + 'static)) {
 pub fn stack_allocator() -> Option<&'static mut dyn FrameAllocator> {
     unsafe { STACK_ALLOCATOR.as_mut().map(|p| &mut **p) }
 }
-use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use alloc::collections::VecDeque;
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 static NEED_RESCHEDULE: AtomicBool = AtomicBool::new(false);
 /// The ThreadId of the currently running thread (NOT a runqueue index).
@@ -80,7 +80,7 @@ pub fn wake_waiters(child_task_id: TaskId) {
     let _g = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
     let mut to_wake = Vec::new();
     let mut remaining = VecDeque::new();
-    
+
     for (waiter, waited_for) in wait_queue().drain(..) {
         if waited_for == 0 || waited_for == child_task_id {
             to_wake.push(waiter);
@@ -88,9 +88,9 @@ pub fn wake_waiters(child_task_id: TaskId) {
             remaining.push_back((waiter, waited_for));
         }
     }
-    
+
     *wait_queue() = remaining;
-    
+
     for waiter in to_wake {
         thread_set_state(waiter, ThreadState::Ready);
     }
@@ -140,6 +140,16 @@ pub fn running_thread_count() -> usize {
 pub fn thread_set_state(id: ThreadId, new_state: ThreadState) {
     rq().set_state(id, new_state)
         .expect("thread_set_state failed");
+}
+
+/// Remove a thread from the runqueue by id (deallocates its slot).
+///
+/// ThreadId is immutable and never reused (monotonic `alloc_id`), so this is
+/// the only registry reference to clear — no other structures still hold the
+/// thread once the runqueue slot is freed. Caller must first drop any
+/// underlying `Task` from the process table (e.g. via `reap_zombie`).
+pub fn remove_thread(id: ThreadId) -> Option<Thread> {
+    rq().remove(id)
 }
 
 fn rq() -> &'static mut RunQueue {
@@ -404,9 +414,13 @@ pub fn yield_now() {
 
     // Perform context switch
     unsafe {
+        // Copy the next context out first (ArchContext is Copy) so the
+        // runqueue is only mutably borrowed once — two rq() calls here would
+        // alias the same static store.
+        let next_ctx = rq().get(next_id).unwrap().context;
         vivanta_arch_api::context::context_switch(
             &mut rq().get_mut(current_id).unwrap().context,
-            rq().get(next_id).unwrap().context,
+            next_ctx,
         );
     }
     // After context switch we are running as `next`, which was already set
@@ -559,9 +573,13 @@ pub fn thread_exit(exit_code: i32) -> ! {
 
     // Perform context switch
     unsafe {
+        // Copy the next context out first (ArchContext is Copy) so the
+        // runqueue is only mutably borrowed once — two rq() calls here would
+        // alias the same static store.
+        let next_ctx = rq().get(next_id).unwrap().context;
         vivanta_arch_api::context::context_switch(
             &mut rq().get_mut(current_id).unwrap().context,
-            rq().get(next_id).unwrap().context,
+            next_ctx,
         );
     }
     unreachable!()

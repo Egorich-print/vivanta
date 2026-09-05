@@ -68,10 +68,17 @@ fn esr_class(esr: u64) -> &'static str {
     }
 }
 
-/// EL1 synchronous exception entry (ADR-032 §2): resolves exactly one
-/// fault class — data-abort translation faults eligible for demand fill —
-/// and returns so the vector epilogue retries the same instruction.
-/// Everything else is fatal via `exception_handler` (never returns).
+/// EL1 synchronous exception entry (ADR-032 §2): resolves the two approved
+/// data-abort fault classes — translation faults eligible for demand fill,
+/// and WRITE permission faults eligible for COW break (ADR-034 §3) — and
+/// returns so the vector epilogue retries the same instruction. Everything
+/// else is fatal via `exception_handler` (never returns).
+///
+/// M10.2: the COW branch is reached INDEPENDENTLY of the translation-fault
+/// branch. It was previously nested inside `translation_fault`, which made
+/// it unreachable — a COW break is a permission fault (DFSC 0b001101 /
+/// 0b001110 / 0b001111), not a translation fault — so any write to a shared
+/// RO page at EL1 fell through to `exception_handler` and halted the CPU.
 ///
 /// Retry safety: ELR is restored unmodified by the epilogue; resolution
 /// makes the faulting access legal instead of skipping it. No `elr += 4`
@@ -82,24 +89,26 @@ pub unsafe extern "C" fn el1_sync_handler(frame: &ExceptionFrame, kind: u64, esr
     let dfsc = esr & 0x3f;
     let data_abort_same_el = ec == 0b100101;
     let translation_fault = matches!(dfsc, 0b000101 | 0b000110 | 0b000111);
+    let permission_fault = matches!(dfsc, 0b001101 | 0b001110 | 0b001111);
+    let write = esr & (1 << 6) != 0; // ESR.ISS[6] = WnR
 
-    if data_abort_same_el && translation_fault {
-        let write = esr & (1 << 6) != 0; // ESR.ISS[6] = WnR
+    if data_abort_same_el {
         // SAFETY: system-register read; handler runs with IRQs masked.
         unsafe {
             let root: u64;
             core::arch::asm!("mrs {}, ttbr0_el1", out(reg) root, options(nostack));
-            if vivanta_arch_api::vm::vm_try_resolve_data_abort(
-                root & 0x0000_FFFF_FFFF_F000,
-                far,
-                write,
-            ) {
-                return; // resolved — epilogue retries the instruction
+            let root = root & 0x0000_FFFF_FFFF_F000;
+
+            if translation_fault
+                && vivanta_arch_api::vm::vm_try_resolve_data_abort(root, far, write)
+            {
+                return; // demand fill resolved — epilogue retries the instruction
             }
             // ADR-034 §3: WRITE permission faults may be COW breaks.
-            if write
-                && matches!(esr & 0x3f, 0b001101 | 0b001110 | 0b001111)
-                && vivanta_arch_api::vm::vm_try_resolve_cow_fault(root & 0x0000_FFFF_FFFF_F000, far)
+            // (Read permission faults are genuine policy violations.)
+            if permission_fault
+                && write
+                && vivanta_arch_api::vm::vm_try_resolve_cow_fault(root, far)
             {
                 return; // resolved — retry the store
             }
