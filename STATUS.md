@@ -134,6 +134,9 @@ deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
 
 ## P0 corrective mission (2026-09-09)
 
+Full log: `AUTONOMOUS_MISSION_P0_REPORT.md`. Forensic deep-dive on the
+stack overflow: `vivanta-boot/docs/investigations/INV-003-boot-stack-overflow.md`.
+
 Fixed all §3.1-class defects found by the 2026-09-08 audit, with regression
 gates in the QEMU boot matrix (now 19 PASS, 0 panics):
 
@@ -154,6 +157,11 @@ gates in the QEMU boot matrix (now 19 PASS, 0 panics):
   now live in `#[inline(never)]` fns.
 - MMU table encoding behind `spec-table-desc` feature (default QEMU `0b11`
   unchanged; feature build hangs at MMU enable exactly as documented).
+- Follow-up (same day, YOLO): thread stacks 16→64 KiB (fork path measured
+  18 KiB past the bottom — second INV-003 instance); `context_fork` sets
+  child x30 to `eret_to_user_stub` (first scheduled fork child jumped to
+  ELR=0 before); gates M7.12-dual-ELF and M10.4-EL0-fork green. Matrix at
+  22/22 PASS (13 pre-existing + 9 new), 0 panics.
 
 Deferred with rationale: `UserPtr` adoption in hot syscalls, `register()`
 panic→Result conversion, kernel W^X, MAIR/TCR unification — all touch proven

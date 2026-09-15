@@ -8,7 +8,10 @@
 
 ## Current Focus
 
-*   **Active Track:** `M6 PROCESS LIFECYCLE CORRECTNESS` (closed 2026-08-11)
+*   **Active Track:** P0 corrective mission — CLOSED 2026-09-09 (see
+    `AUTONOMOUS_MISSION_P0_REPORT.md` at repo root; prior M6 entry below was
+    stale since 2026-08-11)
+*   **Superseded Track:** `M6 PROCESS LIFECYCLE CORRECTNESS` (closed 2026-08-11)
 *   **Completed:** `M5.0 GREEN BASELINE` — PASS/CLOSED (see `vivanta-boot/docs/milestones/M5.0-green-baseline.md`)
 *   **Completed:** `M6 Process Lifecycle` — PASS/CLOSED (see `vivanta-boot/docs/milestones/M6-process-lifecycle.md`)
 *   **Current Engineering Objective:** Post-M6 — finish deferred reliability artifacts (60-min soak, MMU descriptor HW validation), then define the next milestone from actual state.
@@ -454,6 +457,22 @@ The first genuine isolated EL0 process. Not just a jump — a runtime environmen
 ### 2026-07-12
 -   Initial release of the Master Roadmap.
 -   R2.0 and R2.1 marked as active focus.
+
+### 2026-09-09
+-   **P0 corrective mission closed:** all audit §3.1 defects fixed
+    (execve stack/return/icache, VA reclaim, process-table lifetime,
+    signal-delivery honesty, fault capacity), 6 new regression gates,
+    QEMU matrix at 19/19 PASS, 0 panics. Full log:
+    `AUTONOMOUS_MISSION_P0_REPORT.md`.
+-   **INV-003 (new, closed):** `-O0` kernel_main frame overflowed the
+    128 KiB boot stack into `.bss` (silent console deadlock); stack is now
+    256 KiB and all P0 gates are `#[inline(never)]` fns. Forensics in
+    `vivanta-boot/docs/investigations/INV-003-boot-stack-overflow.md`.
+-   **P1:** `spec-table-desc` feature (0b10 for silicon, default unchanged),
+    x96q EL2→EL1h drop (compile-checked, needs silicon), docs synced
+    (STATUS/README/INV-001/ADR-035).
+-   Next: functional work without silicon (signal-mask hardening, MAIR/TCR
+    audit); scope fence unchanged.
 
 ### 2026-07-19
 -   **Roadmap v1.1:** Replaced R-phase structure with V-epics (V0–V8).
