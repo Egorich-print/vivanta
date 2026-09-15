@@ -226,6 +226,16 @@ impl PageTableGuard {
 
             // 1. Set memory attributes
             vivanta_boot_common::println!("    activate: root={:#x}", self.root);
+            // Printed so a wrong-binary flash (QEMU 0b11 image on silicon
+            // or vice versa) is diagnosable from the first lines of output.
+            vivanta_boot_common::println!(
+                "    activate: L1/L2 table encoding {}",
+                if cfg!(feature = "spec-table-desc") {
+                    "0b10 (spec-correct)"
+                } else {
+                    "0b11 (QEMU-compatible)"
+                }
+            );
             asm!("msr mair_el1, {}", in(reg) 0x44_FF_u64);
 
             // 2. Set translation control
@@ -271,7 +281,10 @@ pub unsafe extern "Rust" fn activate_address_space(root: vivanta_arch_api::mmu::
     unsafe {
         let ttbr = root.0 as u64;
         // UART poke to verify we're switching address space
-        core::ptr::write_volatile(0x0900_0000 as *mut u32, b'S' as u32);
+        core::ptr::write_volatile(
+            vivanta_boot_common::debug_uart_base() as *mut u32,
+            b'S' as u32,
+        );
         core::arch::asm!("msr TTBR0_EL1, {}", in(reg) ttbr);
         tlbi_all_sync();
         core::arch::asm!("ic ialluis");
@@ -662,7 +675,7 @@ pub unsafe extern "Rust" fn dump_critical_tables(root: u64) {
         dump_walk(root, 0x5E00_0000, "USER_CODE");
 
         // UART
-        dump_walk(root, 0x0900_0000, "UART");
+        dump_walk(root, vivanta_boot_common::debug_uart_base() as u64, "UART");
 
         // Dump raw L2 block descriptor for kernel text (0x40200000-0x403FFFFF)
         vivanta_boot_common::println!("--- Raw descriptor decode ---");

@@ -280,12 +280,12 @@ pub unsafe extern "Rust" fn mmu_map_user_pages(
         }
         core::arch::asm!("dsb sy");
         {
-            let uart = 0x0900_0000 as *mut u32;
+            let uart = vivanta_boot_common::debug_uart_base() as *mut u32;
             core::ptr::write_volatile(uart, b'c' as u32);
         }
         builder.map(code_va, code_pa, 4096, PageFlags::USER_READ_EXEC);
         {
-            let uart = 0x0900_0000 as *mut u32;
+            let uart = vivanta_boot_common::debug_uart_base() as *mut u32;
             core::ptr::write_volatile(uart, b'1' as u32);
         }
         // Allocate and map user stack page
@@ -294,12 +294,12 @@ pub unsafe extern "Rust" fn mmu_map_user_pages(
             .expect("mmu_map_user_pages: no frame for stack")
             .addr;
         {
-            let uart = 0x0900_0000 as *mut u32;
+            let uart = vivanta_boot_common::debug_uart_base() as *mut u32;
             core::ptr::write_volatile(uart, b'2' as u32);
         }
         builder.map(stack_va, stack_pa, 4096, PageFlags::USER_READ_WRITE);
         {
-            let uart = 0x0900_0000 as *mut u32;
+            let uart = vivanta_boot_common::debug_uart_base() as *mut u32;
             core::ptr::write_volatile(uart, b'3' as u32);
         }
     }

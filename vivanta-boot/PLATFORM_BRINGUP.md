@@ -60,6 +60,65 @@ node is not found.  This ensures output even with a missing or malformed DTB.
 | UART0 | 0x05000000 | 0x1000 | User (UserDevice) |
 | GIC-400 | 0x03000000 | 0x20000 | Kernel (Device) |
 
+### 5. Raspberry Pi 3B+ (`target-rpi3b-plus`) — kernel_main wired, awaits silicon
+
+```
+GPU firmware → kernel8.img @ 0x80000 (EL2) → EL2→EL1h drop → adapter_main → kernel_main
+```
+
+| Parameter | Value |
+|-----------|-------|
+| SoC | BCM2837B0 (4× Cortex-A53) |
+| UART | PL011 at 0x3F201000, 250 MHz, 115200 baud (GPIO 14/15 ALT0) |
+| GIC | none on this SoC — kernel runs cooperatively (no preemption) |
+| DRAM | 1 GiB @ 0x0; top 64 MiB reserved for VideoCore (`RPI_USABLE_END`, assumes default `gpu_mem`) |
+| Load address | 0x80000 (GPU firmware convention) |
+| Descriptors | `spec-table-desc` feature (0b10 — mandatory on silicon) |
+
+**Build (standalone — see warning below):**
+```sh
+cargo build -p vivanta-target-rpi3b-plus --target aarch64-unknown-none
+rust-objcopy -O binary \
+  target/aarch64-unknown-none/debug/vivanta-target-rpi3b-plus kernel8.img
+# (or ./build.sh rpi3bp — same two steps)
+```
+
+**SD card:** FAT32 boot partition with Raspberry Pi firmware files
+(`bootcode.bin`, `start.elf`, `fixup.dat`, `config.txt`) + `kernel8.img`.
+Minimal `config.txt`:
+```text
+arm_64bit=1
+kernel=kernel8.img
+enable_uart=1
+uart_2ndstage=1
+```
+UART output on GPIO 14/15 at 115200 baud. First lines to expect:
+`Vivanta Boot Adapter (RPi3B+/BCM2837)`, `Enabling MMU...` with
+`L1/L2 table encoding 0b10 (spec-correct)`, then the standard gate log.
+
+**⚠️ Feature-unification hazard:** this target enables
+`vivanta-arch-aarch64/spec-table-desc` via its Cargo.toml. A bare
+`cargo build --workspace` unifies that feature into *every* target of the
+build — including QEMU, which hangs on 0b10. Never flash from workspace
+builds; always build single-target (`-p` / `build.sh`) and rebuild QEMU
+separately before validating on the emulator.
+
+**Known gaps on this board (no silicon here to close them):**
+- No timer IRQ without a GIC: `sched_init` runs, preemption doesn't; the G4
+  gate prints SKIP instead of asserting. Everything else is expected to run.
+- Phase-10 `kread` probes a QEMU-virt kernel address (`0x4020…`): on 1 GiB
+  RAM that VA is unmapped, so the fault class may differ from the asserted
+  one — read the actual `EC/DFSC/FAR` from the UART log when triaging.
+- `CNTFRQ_EL0` is never read (no `timer_init`); if a future change touches
+  the generic timer, confirm the firmware programs CNTFRQ (19.2 MHz stock).
+- `gpu_mem` other than default moves the usable-RAM ceiling: adjust
+  `RPI_USABLE_END` in `target-rpi3b-plus/src/main.rs`.
+
+**MMIO regions published to kernel:**
+| Device | Base | Size | Access |
+|--------|------|------|--------|
+| PL011 UART | 0x3F201000 | 0x1000 | User (UserDevice) |
+
 ---
 
 ## How to Add a New Platform

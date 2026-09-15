@@ -8,7 +8,12 @@ description = "Vivanta — Raspberry Pi 3 B+ (BCM2837B0) target binary"
 vivanta-boot-common = { path = "../boot_common" }
 vivanta-boot-info = { path = "../boot-info" }
 vivanta-arch-api = { path = "../arch-api" }
-vivanta-arch-aarch64 = { path = "../arch-aarch64" }
+# Real silicon needs spec-correct L1/L2 table descriptors (0b10); QEMU
+# hangs with them, so this feature must NEVER leak into the QEMU build.
+# Build this target standalone (build.sh / -p); never flash a binary
+# from a bare `cargo build --workspace` (feature unification would flip
+# every target in that build to 0b10, including QEMU).
+vivanta-arch-aarch64 = { path = "../arch-aarch64", features = ["spec-table-desc"] }
 vivanta-kernel = { path = "../kernel" }
 vivanta-platform-rpi3b = { path = "../platform-rpi3b" }
 

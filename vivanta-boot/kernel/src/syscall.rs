@@ -154,7 +154,7 @@ fn sys_write(fd: u64, buf: u64, count: u64) -> u64 {
         return EFAULT;
     }
     for &byte in kbuf[..count].iter() {
-        let uart = 0x0900_0000 as *mut u32;
+        let uart = vivanta_boot_common::debug_uart_base() as *mut u32;
         unsafe {
             while core::ptr::read_volatile(uart.add(0x18 / 4)) & (1 << 5) != 0 {}
             core::ptr::write_volatile(uart, byte as u32);

@@ -103,6 +103,14 @@ pub fn early_platform() -> Option<EarlyPlatformInfo> {
     unsafe { EARLY_PLATFORM }
 }
 
+/// UART base for raw debug writes that bypass the console lock
+/// (`sys_write`, early boot markers, AS-activation pokes). Reads the
+/// adapter-provided platform info; falls back to the QEMU virt PL011 so
+/// every pre-existing call site behaves exactly as before on QEMU.
+pub fn debug_uart_base() -> usize {
+    early_platform().map(|p| p.uart_base).unwrap_or(0x0900_0000)
+}
+
 // ---------------------------------------------------------------------------
 // BootContext — entry information passed from bootloader to vivanta_kernel
 // ---------------------------------------------------------------------------

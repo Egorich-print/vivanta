@@ -887,8 +887,20 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         println!("Enabling MMU...");
         vivanta_arch_api::boot::mmu::mmu_activate(pt);
         println!("MMU enabled successfully.");
-        println!("MMU self-test:");
-        vivanta_arch_api::boot::mmu::mmu_self_test();
+        // The self-test probes QEMU-virt RAM windows (0x40xxxxxx); on a
+        // board with a different DRAM map it would fault instead, so it
+        // only runs with an FDT. W^X coverage is unaffected (verified per
+        // user address space below).
+        if dtb_addr != 0 {
+            println!("MMU self-test:");
+            vivanta_arch_api::boot::mmu::mmu_self_test();
+        } else {
+            println!("MMU self-test SKIPPED (no FDT-described RAM window).");
+        }
+
+        // Scheduler core always (GIC-free runqueue + boot/idle threads).
+        // GIC-less boards (dtb == 0, e.g. RPi3B+) run cooperatively.
+        vivanta_arch_api::boot::sched::sched_init_boot();
 
         // ------- GIC Discovery & Initialisation --------------------------------
         if dtb_addr != 0 {
@@ -899,9 +911,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
 
             // @@M4@@ Timer disabled for cooperative-only demo (re-enabled in M4.2)
             // vivanta_arch_api::boot::timer::timer_init();
-
-            // Scheduler
-            vivanta_arch_api::boot::sched::sched_init_boot();
 
             // M4.2.0: timer smoke test — tick counting only
             println!("  Initialising timer...");
@@ -1992,58 +2001,66 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         // yield. The 100 Hz timer must preempt them and switch A <-> B. The
         // observability log ([PREEMPT] current=.. counter=..) proves real
         // timer-driven context switches (G4 observability sub-gate).
+        // Without a timer IRQ (dtb == 0, e.g. GIC-less RPi3B+) there is
+        // nothing to preempt with: skip the workers, keep the terminal
+        // cooperative loop so the board still idles cleanly.
         // ------------------------------------------------------------------
-        println!();
-        println!("G4 preemption test: spawning 2 CPU-bound threads");
-        let mut taskman2 = scheduler::task_manager::TaskManager::new();
-        let ta = taskman2
-            .spawn_kernel(
-                preempt_worker_a,
-                0,
-                crate::vmm::KERNEL_ADDRESS_SPACE_ID,
-                &mut pmm,
-                scheduler::thread::Priority::Normal,
-                None,
-            )
-            .expect("spawn preempt A")
-            .id;
-        let tb = taskman2
-            .spawn_kernel(
-                preempt_worker_b,
-                0,
-                crate::vmm::KERNEL_ADDRESS_SPACE_ID,
-                &mut pmm,
-                scheduler::thread::Priority::Normal,
-                None,
-            )
-            .expect("spawn preempt B")
-            .id;
-        println!("  preempt tasks A={} B={} spawned", ta, tb);
+        if dtb_addr == 0 {
+            println!();
+            println!("G4 preemption test SKIPPED (no timer IRQ on this platform).");
+        } else {
+            println!();
+            println!("G4 preemption test: spawning 2 CPU-bound threads");
+            let mut taskman2 = scheduler::task_manager::TaskManager::new();
+            let ta = taskman2
+                .spawn_kernel(
+                    preempt_worker_a,
+                    0,
+                    crate::vmm::KERNEL_ADDRESS_SPACE_ID,
+                    &mut pmm,
+                    scheduler::thread::Priority::Normal,
+                    None,
+                )
+                .expect("spawn preempt A")
+                .id;
+            let tb = taskman2
+                .spawn_kernel(
+                    preempt_worker_b,
+                    0,
+                    crate::vmm::KERNEL_ADDRESS_SPACE_ID,
+                    &mut pmm,
+                    scheduler::thread::Priority::Normal,
+                    None,
+                )
+                .expect("spawn preempt B")
+                .id;
+            println!("  preempt tasks A={} B={} spawned", ta, tb);
 
-        // Boot thread: monitor the counters, then spin.
-        for i in 0..5 {
-            scheduler::yield_now();
-            let (ca, cb) = (
-                PREEMPT_COUNTER_A.load(Ordering::Relaxed),
-                PREEMPT_COUNTER_B.load(Ordering::Relaxed),
-            );
-            vivanta_boot_common::println!(
-                "  [MONITOR] iter={} A={} B={} running={} current={}",
-                i,
-                ca,
-                cb,
-                scheduler::running_thread_count(),
-                scheduler::current_thread_id()
-            );
+            // Boot thread: monitor the counters, then spin.
+            for i in 0..5 {
+                scheduler::yield_now();
+                let (ca, cb) = (
+                    PREEMPT_COUNTER_A.load(Ordering::Relaxed),
+                    PREEMPT_COUNTER_B.load(Ordering::Relaxed),
+                );
+                vivanta_boot_common::println!(
+                    "  [MONITOR] iter={} A={} B={} running={} current={}",
+                    i,
+                    ca,
+                    cb,
+                    scheduler::running_thread_count(),
+                    scheduler::current_thread_id()
+                );
+            }
+
+            // G4 running invariant: exactly one Running thread at a time. The enum
+            // state is exclusive, so Running ∩ Ready == ∅ holds structurally; the
+            // dangerous case (a thread stranded Ready while actually running) is
+            // caught by running_count != 1.
+            let rcount = scheduler::running_thread_count();
+            vivanta_boot_common::println!("  [G4] running_count={} (expect 1)", rcount);
+            assert_eq!(rcount, 1, "G4 FAIL: expected exactly one Running thread");
         }
-
-        // G4 running invariant: exactly one Running thread at a time. The enum
-        // state is exclusive, so Running ∩ Ready == ∅ holds structurally; the
-        // dangerous case (a thread stranded Ready while actually running) is
-        // caught by running_count != 1.
-        let rcount = scheduler::running_thread_count();
-        vivanta_boot_common::println!("  [G4] running_count={} (expect 1)", rcount);
-        assert_eq!(rcount, 1, "G4 FAIL: expected exactly one Running thread");
 
         loop {
             scheduler::yield_now();

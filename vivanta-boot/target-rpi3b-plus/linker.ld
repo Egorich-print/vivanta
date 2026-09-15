@@ -31,7 +31,9 @@ SECTIONS
 
     . = ALIGN(16);
     __stack_bottom = .;
-    . += 16384;
+    /* 256 KiB like the QEMU target: kernel_main's -O0 frame plus boot-gate
+     * temporaries peaked past 128 KiB (see INV-003). */
+    . += 262144;
     __stack_top = .;
 
     /DISCARD/ : {
