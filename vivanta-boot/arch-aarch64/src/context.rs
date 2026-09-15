@@ -171,6 +171,14 @@ pub unsafe extern "Rust" fn context_fork(
         // For the child it must point to child's stack top, not parent's.
         // Parent's sp is parent_stack_top; child's must be child_stack_top.
         (*child_tc).sp = child_stack_top as u64;
+        // The copied x30 is the parent's kernel return address — meaningless
+        // on the child's stack. A fork child enters exactly like a fresh
+        // user thread: ret into eret_to_user_stub, which consumes the
+        // ExceptionFrame copied below and erets to EL0 (x0 already forced
+        // to 0 there). Without this the first schedule of the child jumps
+        // to a stale address (observed ELR=0 abort the first time a fork
+        // child was ever actually scheduled).
+        (*child_tc).x19_x30[11] = &raw const eret_to_user_stub as u64;
 
         // Copy parent's ExceptionFrame to child's stack_top - FRAME_SIZE
         let child_frame_ptr = (child_stack_top - FRAME_SIZE) as *mut ExceptionFrame;
