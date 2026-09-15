@@ -120,9 +120,13 @@ impl SignalState {
         self.blocked &= !(1 << (sig as u8));
     }
 
-    pub fn take(&mut self) -> Option<Signal> {
-        self.pending.take()
-    }
+    // NOTE (scope fence): async delivery of `pending` to EL0 is NOT
+    // implemented — no EL0 entry/exit path consults it, and there is no
+    // handler-frame/sigreturn machinery. `pending` is write-only state
+    // (set by kill/fork/exit paths, read by gates for SIGCHLD). SIGKILL
+    // takes effect synchronously inside sys_kill instead. Delivery is an
+    // explicit non-goal until the fence is lifted; do not add a `take()`
+    // consumer without the full delivery design.
 
     /// Fetch SigAction for raw signal number (1..31). Returns None if OOB.
     pub fn get_action(&self, sig: u8) -> Option<SigAction> {

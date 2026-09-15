@@ -86,10 +86,11 @@ impl PageFlags {
 /// as `0b10` (DESC_TABLE with bit0 clear). QEMU's cortex-a53 model does not
 /// boot with that encoding (hang at MMU enable), but accepts `0b11`
 /// (DESC_VALID | DESC_TABLE). QEMU is the primary M5.0 runtime oracle, so the
-/// working encoding is kept; the spec-correct `0b10` must be validated on real
-/// hardware before switching. Tracked in M5.0-green-baseline §5.6.
+/// working encoding is kept; the spec-correct `0b10` lives behind the
+/// `spec-table-desc` feature for real-hardware validation runs.
+/// Tracked in M5.0-green-baseline §5.6.
 fn table_desc(phys: u64) -> u64 {
-    DESC_VALID | DESC_TABLE | (phys & ADDR_MASK)
+    table_desc_bits() | (phys & ADDR_MASK)
 }
 
 pub(crate) fn block_or_page_desc(phys: u64, flags: PageFlags, is_page: bool) -> u64 {
@@ -548,7 +549,7 @@ pub extern "Rust" fn mmu_clone_kernel_half(
         }
 
         // Write the private L2 into the child's L1[0] as a table
-        // descriptor (non-standard 0b11 encoding — QEMU-compatible).
+        // descriptor (encoding follows table_desc_bits()).
         let new_l1_0 = table_desc(l2_pa);
         mmu_write_table_entry(dst_root_pa, 0, new_l1_0);
     }
@@ -690,6 +691,11 @@ pub unsafe extern "Rust" fn dump_critical_tables(root: u64) {
 /// Must be called after writing code that will be fetched as instructions,
 /// e.g. loading user code into a data page.  `va` is the *virtual* address
 /// of the range (or identity-mapped physical address if MMU is off).
+#[unsafe(no_mangle)]
+pub unsafe extern "Rust" fn mmu_flush_icache_range(va: u64, size: u64) {
+    flush_icache_range(va, size)
+}
+
 pub fn flush_icache_range(va: u64, size: u64) {
     let ctr_el0: u64;
     unsafe { core::arch::asm!("mrs {}, ctr_el0", out(reg) ctr_el0) }

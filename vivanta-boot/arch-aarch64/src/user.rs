@@ -318,6 +318,36 @@ unsafe extern "C" {
     static vmsys_code_end: u8;
 }
 
+// M10.3 — genuine EL0 execve exercise: execve("/init") must replace this
+// image with user-init, which then runs to exit(42). If execve returns at
+// all (error path), exit(99) marks the failure distinctly.
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
+    ".section .user.text.execve, \"ax\"",
+    ".globl execve_code_start",
+    "execve_code_start:",
+    "adr  x0, exec_path", // path = embedded "/init"
+    "mov  x1, #0",        // argv = NULL
+    "mov  x2, #0",        // envp = NULL
+    "mov  x8, #12",       // SYS_EXECVE
+    "svc  #0",
+    "mov  x0, #99", // execve returned => failure
+    "mov  x8, #2",  // EXIT(99)
+    "svc  #0",
+    "b .",
+    "exec_path:",
+    ".ascii \"/init\\0\"",
+    ".balign 4",
+    ".globl execve_code_end",
+    "execve_code_end:",
+);
+// Referenced by vivanta-kernel through its own extern declarations.
+#[allow(dead_code)]
+unsafe extern "C" {
+    static execve_code_start: u8;
+    static execve_code_end: u8;
+}
+
 /// Addresses used for the faulting user task.
 pub const FAULT_CODE_VA: u64 = 0x5F00_0000;
 pub const FAULT_STACK_VA: u64 = 0x5F01_0000;

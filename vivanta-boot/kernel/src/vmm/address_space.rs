@@ -349,6 +349,15 @@ impl AddressSpace {
 
         let page = va & !0xFFF;
 
+        // Capacity pre-check BEFORE any mutation: the split replaces 1
+        // piece with up to 3 ([head][page][tail]). Without this, a nearly
+        // full MappingSet turns a user fault into a kernel panic instead
+        // of a fatal-but-contained task fault (false return).
+        if self.mappings.len() + 2 > MappingSet::capacity() {
+            vivanta_boot_common::println!("  [VMR] reject: mapping table full at {:#x}", va);
+            return false;
+        }
+
         // Allocate + zero the backing frame.
         let Some(frame) = alloc.try_alloc_page_table_frame() else {
             vivanta_boot_common::println!("  [VM] OOM during demand fill at {:#x}", va);
@@ -393,10 +402,13 @@ impl AddressSpace {
             ));
         }
         let affected_value = Mapping::lazy_anonymous(m.virt_range, object_id, perms);
+        // Capacity was pre-checked above; a concurrent change cannot happen
+        // (single-core, IRQs masked on the fault path), so failure here is
+        // a kernel invariant violation, not a user fault.
         self.mappings
             .replace_slots(core::slice::from_ref(&affected_value), &pieces)
             .map_err(|_| VmmError::MappingTableFull)
-            .expect("lazy split: capacity pre-checked by query");
+            .expect("lazy split: capacity pre-checked above");
         true
     }
 
@@ -486,6 +498,13 @@ impl AddressSpace {
         let full_perms = m.permissions;
         let object_id = m.object_id;
 
+        // Same capacity pre-check as the lazy path: 1 piece becomes up to
+        // 3, and a user write fault must never panic the kernel.
+        if self.mappings.len() + 2 > MappingSet::capacity() {
+            vivanta_boot_common::println!("  [VMR] reject: mapping table full at {:#x}", va);
+            return false;
+        }
+
         let Some(new_frame) = alloc.try_alloc_page_table_frame() else {
             vivanta_boot_common::println!("  [VM] OOM during COW break at {:#x}", va);
             return false;
@@ -532,7 +551,7 @@ impl AddressSpace {
         self.mappings
             .replace_slots(core::slice::from_ref(&affected), &pieces)
             .map_err(|_| VmmError::MappingTableFull)
-            .expect("COW split capacity pre-checked");
+            .expect("COW split: capacity pre-checked above");
         true
     }
 
@@ -580,9 +599,6 @@ impl AddressSpace {
         for m in &pieces {
             match m.backing {
                 Backing::Present => {
-                    let ro = vivanta_arch_api::mmu::MappingFlags::from_bits(
-                        m.permissions.bits() & !ro_strip,
-                    );
                     // Parent / child pieces: shadow keeps the ORIGINAL
                     // (pre-COW) permissions — resolve_cow_fault restores
                     // them verbatim from the shadow when a page is split.
@@ -821,16 +837,26 @@ impl AddressSpace {
             else {
                 break;
             };
-            // SAFETY: piece exists; per-piece removal is exact.
-            unsafe {
-                vivanta_arch_api::mmu::mmu_unmap(self.root, base, size, alloc);
-            }
             let affected_values: alloc::vec::Vec<Mapping> = self
                 .mappings
                 .iter()
                 .filter(|m| m.virt_range.base == base && m.virt_range.size == size)
                 .copied()
                 .collect();
+            // Only pieces with a hardware image need mmu_unmap:
+            // Lazy/Reserved pieces have no descriptors, and asking the
+            // walker to unmap them panics (MissingL2/MissingL3). This bit
+            // the first teardown containing a never-touched Lazy piece
+            // (execve stack reservation).
+            // SAFETY: piece exists; per-piece removal is exact.
+            let has_hw_image = affected_values
+                .iter()
+                .any(|m| matches!(m.backing, Backing::Present | Backing::CoW));
+            if has_hw_image {
+                unsafe {
+                    vivanta_arch_api::mmu::mmu_unmap(self.root, base, size, alloc);
+                }
+            }
             // Release anonymous frames.
             for m in &affected_values {
                 if m.backing == Backing::Present && m.phys == PhysOwnership::Anonymous {
@@ -844,6 +870,11 @@ impl AddressSpace {
             self.mappings
                 .replace_slots(&affected_values, &empty)
                 .map_err(|_| VmmError::MappingTableFull)?;
+            // Return the VA reservation: without this, execve-into-live-AS
+            // (unmap_all + load_elf/reserve_at) leaks the domain until it
+            // collides or exhausts. Best-effort: pieces installed outside
+            // the allocator (direct map_pages) have no reservation to free.
+            let _ = self.va.free(base, size);
             self.reclaim_empty_tables(alloc);
         }
         Ok(())

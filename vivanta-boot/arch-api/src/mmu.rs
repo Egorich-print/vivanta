@@ -238,4 +238,15 @@ unsafe extern "Rust" {
         dst_root: RootPageTable,
         alloc: &mut dyn PageTableAllocator,
     ) -> bool;
+
+    /// Clean D-cache to PoC and invalidate I-cache to PoU for
+    /// `[va, va + size)`. Required after writing code that will be
+    /// fetched as instructions (ELF file pages, JIT-less loaders).
+    ///
+    /// # Safety
+    ///
+    /// - The range must be mapped in the CURRENTLY ACTIVE address space
+    ///   (maintenance operates by VA); calling it for an inactive AS is
+    ///   meaningless at best and faults at worst.
+    pub fn mmu_flush_icache_range(va: u64, size: u64);
 }

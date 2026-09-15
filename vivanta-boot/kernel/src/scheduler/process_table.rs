@@ -2,7 +2,7 @@
 // Process Table — global registry of all tasks
 // ---------------------------------------------------------------------------
 
-use super::task::{MAX_TASKS, ProcessHandle, Task, TaskId};
+use super::task::{MAX_TASKS, ProcessHandle, Task, TaskId, TaskState};
 use alloc::vec::Vec;
 
 /// Global registry of all tasks (M7.4).
@@ -23,9 +23,15 @@ impl ProcessTable {
         }
     }
 
-    /// Number of live tasks.
+    /// Number of live tasks. Reap tombstones (`Exited`) are not live:
+    /// counting them turned MAX_TASKS into a lifetime cap — 64
+    /// fork/reap cycles would wedge task creation forever.
     pub fn live_count(&self) -> usize {
-        self.tasks.iter().filter(|s| s.is_some()).count()
+        use super::task::TaskState;
+        self.tasks
+            .iter()
+            .filter(|s| s.as_ref().is_some_and(|t| t.state != TaskState::Exited))
+            .count()
     }
 
     /// Create a new task and return its generation-protected handle.
@@ -37,19 +43,27 @@ impl ProcessTable {
         let pid = self.next_pid;
         self.next_pid += 1;
         task.task_id = pid;
-        task.generation = 0;
 
-        // Find empty slot
+        // Find an empty slot — or a reaped tombstone (Exited). Tombstones
+        // are resource-free; reusing them keeps the Vec bounded across
+        // fork/reap churn (otherwise every cycle pushes ~1 KiB until the
+        // kernel heap OOMs). The tombstone's bumped generation is kept so
+        // handles to the reaped task stay stale (lookup_handle).
         for slot in self.tasks.iter_mut() {
-            if slot.is_none() {
-                *slot = Some(task);
-                return Some(ProcessHandle {
-                    id: pid,
-                    generation: 0,
-                });
-            }
+            let slot_gen = match slot {
+                None => 0,
+                Some(t) if t.state == TaskState::Exited => t.generation,
+                Some(_) => continue,
+            };
+            task.generation = slot_gen;
+            *slot = Some(task);
+            return Some(ProcessHandle {
+                id: pid,
+                generation: slot_gen,
+            });
         }
-        // No empty slot, push new
+        // No reusable slot, push new
+        task.generation = 0;
         self.tasks.push(Some(task));
         Some(ProcessHandle {
             id: pid,
@@ -128,9 +142,9 @@ impl ProcessTable {
             .collect()
     }
 
-    /// Count active tasks.
+    /// Count active tasks (same live definition as `live_count`).
     pub fn count(&self) -> usize {
-        self.tasks.iter().filter(|s| s.is_some()).count()
+        self.live_count()
     }
 
     /// Iterate over all tasks.

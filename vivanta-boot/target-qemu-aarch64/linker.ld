@@ -32,10 +32,13 @@ SECTIONS
 
     . = ALIGN(16);
     __stack_bottom = .;
-    /* 128 KiB: kernel_main locals + large AddressSpace temporaries
-     * (each struct evolution raises the peak; M6: 16->32, mission-4:
-     * 32->64, G-M9: 64->128 as Mapping gained COW metadata). */
-    . += 131072;
+    /* 256 KiB: kernel_main runs every boot gate inline and holds
+     * ~10 KiB AddressSpace/VaAllocator temporaries by value; the -O0
+     * frame peaked past 128 KiB once the P0 gates landed, overflowing
+     * into .bss (silent console death pre-dump). Gates are moving to
+     * #[inline(never)] fns, but the stack keeps 2x headroom regardless.
+     * (M6: 16->32, mission-4: 32->64, G-M9: 64->128, P0: 128->256.) */
+    . += 262144;
     __stack_top = .;
 
     /DISCARD/ : {

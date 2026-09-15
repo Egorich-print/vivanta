@@ -10,8 +10,27 @@ use crate::vmm::faults::make_allocator;
 use vivanta_arch_api::context::context_fork;
 use vivanta_arch_api::exception::ExceptionFrame;
 use vivanta_arch_api::mmu::{RootPageTable, mmu_clone_kernel_half};
+use vivanta_arch_api::pmm::{FrameAllocator, PhysFrame};
 use vivanta_arch_api::user_memory;
 use vivanta_boot_common::println;
+
+/// Release partially-allocated child boot frames on a fork OOM path:
+/// the contiguous kernel stack plus the root table frame when present.
+fn free_child_boot_frames(
+    stack_alloc: &mut dyn FrameAllocator,
+    stack_base: u64,
+    stack_frames: usize,
+    root: Option<PhysFrame>,
+) {
+    for i in 0..stack_frames {
+        stack_alloc.free_frame(PhysFrame {
+            addr: stack_base + (i as u64) * 4096,
+        });
+    }
+    if let Some(r) = root {
+        stack_alloc.free_frame(r);
+    }
+}
 
 /// Exit current process with exit code.
 pub fn sys_exit(code: i32) -> ! {
@@ -31,7 +50,6 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
     };
 
     let current_id = current_thread.id;
-    let _parent_as_id = current_thread.address_space;
     let parent_kernel_stack_pa = current_thread.kernel_stack_pa.unwrap_or(0);
     let parent_priority = current_thread.priority;
 
@@ -62,12 +80,7 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
     // Allocate a root page table frame for the child (1 page = 4 KiB)
     let Some(root_frame) = stack_alloc.alloc_frame() else {
         println!("  fork: failed to allocate root page table");
-        // Free the kernel stack
-        for i in 0..stack_frames {
-            stack_alloc.free_frame(vivanta_arch_api::pmm::PhysFrame {
-                addr: child_kernel_stack_pa + (i as u64) * 4096,
-            });
-        }
+        free_child_boot_frames(stack_alloc, child_kernel_stack_pa, stack_frames, None);
         return ENOMEM;
     };
     let child_root_pa = root_frame.addr;
@@ -82,13 +95,12 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
     let child_as_id = crate::vmm::peek_next_as_id();
     let Some(mut child_alloc) = make_allocator(child_as_id) else {
         println!("  fork: no allocator for child AS");
-        // Free the child kernel stack and root page table
-        for i in 0..stack_frames {
-            stack_alloc.free_frame(vivanta_arch_api::pmm::PhysFrame {
-                addr: child_kernel_stack_pa + (i as u64) * 4096,
-            });
-        }
-        stack_alloc.free_frame(root_frame);
+        free_child_boot_frames(
+            stack_alloc,
+            child_kernel_stack_pa,
+            stack_frames,
+            Some(root_frame),
+        );
         return ENOMEM;
     };
 
@@ -102,12 +114,12 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
     let clone_ok = unsafe { mmu_clone_kernel_half(kernel_root, child_root, &mut child_alloc) };
     if !clone_ok {
         println!("  fork: mmu_clone_kernel_half failed (OOM)");
-        for i in 0..stack_frames {
-            stack_alloc.free_frame(vivanta_arch_api::pmm::PhysFrame {
-                addr: child_kernel_stack_pa + (i as u64) * 4096,
-            });
-        }
-        stack_alloc.free_frame(root_frame);
+        free_child_boot_frames(
+            stack_alloc,
+            child_kernel_stack_pa,
+            stack_frames,
+            Some(root_frame),
+        );
         return ENOMEM;
     }
 
@@ -119,13 +131,12 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
             Ok(aspace) => aspace,
             Err(e) => {
                 println!("  fork: duplicate_as failed: {:?}", e);
-                // Free the child kernel stack and root page table
-                for i in 0..stack_frames {
-                    stack_alloc.free_frame(vivanta_arch_api::pmm::PhysFrame {
-                        addr: child_kernel_stack_pa + (i as u64) * 4096,
-                    });
-                }
-                stack_alloc.free_frame(root_frame);
+                free_child_boot_frames(
+                    stack_alloc,
+                    child_kernel_stack_pa,
+                    stack_frames,
+                    Some(root_frame),
+                );
                 return ENOMEM;
             }
         };
@@ -342,13 +353,12 @@ pub fn sys_kill(pid: u64, sig: u64) -> u64 {
         let is_self_kill = current_task == Some(pid);
         for tid in threads {
             if tid == current_tid && is_self_kill {
-                // Self-kill will be handled by caller returning; thread_exit will run on next scheduling
-                // Instead of immediate termination, just mark; the syscall return will still happen.
-                // If we are self-killing, we should exit now. But kill is not supposed to be noreturn.
-                // POSIX kill(self) just queues signal; the signal is delivered on return to user.
-                // So we don't call thread_exit here; the pending signal will be checked on next entry.
-                // Wake parent waiters immediately though.
-                continue;
+                // SIGKILL to self terminates NOW via thread_exit (Zombie +
+                // SIGCHLD + waiter wake inside). "Queue and return" is not
+                // an option: no async delivery path exists (see signal.rs
+                // scope note), so returning would leave a Zombie task with
+                // a still-Running thread.
+                crate::scheduler::thread_exit(-9);
             }
             // SAFETY: thread_set_state is used under IRQ guard inside, but we are in syscall context.
             crate::scheduler::thread_set_state(
@@ -533,7 +543,7 @@ pub fn sys_getppid() -> u64 {
 static BUILTIN_PROGRAMS: &[(&str, &[u8])] =
     &[("/init", include_bytes!("../../../user-init/user-init.elf"))];
 
-fn find_builtin_program(path: &str) -> Option<&'static [u8]> {
+pub(crate) fn find_builtin_program(path: &str) -> Option<&'static [u8]> {
     for (name, elf) in BUILTIN_PROGRAMS {
         if *name == path {
             return Some(elf);
@@ -617,7 +627,20 @@ pub fn sys_execve(
         };
     println!("  execve: loaded ELF entry={:#x}", entry);
 
-    let stack_va = 0x5C01_0000u64;
+    // I-cache coherence: file pages were written through D-cache while
+    // this AS was active, but nothing has flushed them to PoU yet. The
+    // spawn path gets this for free (eret stub does `ic iallu`); the
+    // execve path returns through the SVC epilogue, so flush the entry
+    // page here. (VA maintenance is valid: the target AS is active.)
+    // SAFETY: entry page is mapped Present in the active AS by load_elf.
+    unsafe {
+        vivanta_arch_api::mmu::mmu_flush_icache_range(entry & !0xFFF, 4096);
+    }
+
+    // New-image stack lives at the top of the user VA domain
+    // ([USER_VA_BASE, USER_VA_END)): reserve_at rejects anything outside
+    // it, and the old 0x5C01_0000 value made every execve fail with EFAULT.
+    let stack_va = 0x3FFF_F000u64;
     let stack_flags = vivanta_arch_api::mmu::MappingFlags::user()
         | vivanta_arch_api::mmu::MappingFlags::read_write();
     if aspace
@@ -631,12 +654,18 @@ pub fn sys_execve(
     // Overwrite the live frame — this is what eret will use.
     // Keep kernel stack; only user state changes.
     // SAFETY: frame is valid for write, single-core, no aliasing.
+    //
+    // Frame slot 31 (`sp`) is the SVC epilogue's SP_EL1 restore value —
+    // it must keep the kernel SP. The epilogue never writes SP_EL0, so
+    // the new user stack is installed directly into the banked register
+    // (legal at EL1). Writing stack_top into frame.sp would corrupt the
+    // epilogue's SP_EL1 restore and hang the return path.
     unsafe {
         (*frame).elr = entry;
-        (*frame).sp = stack_top;
         (*frame).spsr = 0x000; // EL0t
         (*frame).x = [0u64; 31];
         // x0 would be argc if we set up argv; for now 0
+        core::arch::asm!("msr sp_el0, {}", in(reg) stack_top, options(nostack));
     }
 
     // Clear pending signals for new image (POSIX exec clears handlers)
