@@ -13,6 +13,20 @@ pub const DESC_TABLE: u64 = 1 << 1;
 /// blocks from the rest; they are encoding-agnostic where possible.
 pub const DESC_TYPE_MASK: u64 = 0b11;
 
+/// Low two bits for an L1/L2 TABLE descriptor. Default `0b11`
+/// (QEMU-compatible); `0b10` (spec-correct) under the `spec-table-desc`
+/// feature. All three emission sites (`table_desc`, `install_child_table`,
+/// `split_l2_block`) go through here so the encodings move together;
+/// the predicates above accept both, so no other change is needed.
+#[inline]
+pub const fn table_desc_bits() -> u64 {
+    if cfg!(feature = "spec-table-desc") {
+        DESC_TABLE
+    } else {
+        DESC_VALID | DESC_TABLE
+    }
+}
+
 #[inline]
 pub const fn desc_is_valid(desc: u64) -> bool {
     desc & DESC_TYPE_MASK != 0

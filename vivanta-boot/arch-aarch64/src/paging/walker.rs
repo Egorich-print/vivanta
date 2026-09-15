@@ -88,7 +88,7 @@ pub fn walk_to_l3(pt_root: u64, vaddr: u64) -> WalkResult {
 pub unsafe fn install_child_table(parent: u64, index: usize, frame_paddr: u64) {
     write_desc(
         parent + (index as u64) * 8,
-        DESC_VALID | DESC_TABLE | (frame_paddr & ADDR_MASK),
+        table_desc_bits() | (frame_paddr & ADDR_MASK),
     );
 }
 
@@ -119,7 +119,7 @@ pub unsafe fn split_l2_block(
     barrier_write();
     write_desc(
         l2_table_addr + (l2_index as u64) * 8,
-        l3_addr | DESC_VALID | DESC_TABLE, // L2 table descriptor (see table_desc note)
+        l3_addr | table_desc_bits(), // L2 table descriptor (see table_desc note)
     );
 }
 

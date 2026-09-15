@@ -51,7 +51,18 @@ core::arch::global_asm!(
     "5:",
     "mov x5, #(0b11 << 20)",
     "msr CPTR_EL2, x5",
-    "b 7f",
+    // Drop EL2 -> EL1h: U-Boot enters at EL2, but the kernel is EL1-only
+    // (TTBR0_EL1, VBAR_EL1, SVC). x0 (DTB pointer) survives eret untouched.
+    // Boards already at EL1 take branch 6f and never execute this.
+    "mrs x5, HCR_EL2",
+    "orr x5, x5, #(1 << 31)", // HCR_EL2.RW = 1: EL1 is AArch64
+    "msr HCR_EL2, x5",
+    "msr CNTVOFF_EL2, xzr", // guest timer starts at zero
+    "mov x5, #0x3c5",       // SPSR: EL1h, DAIF all masked
+    "msr SPSR_EL2, x5",
+    "adr x5, 7f",
+    "msr ELR_EL2, x5",
+    "eret",
     "6:",
     "mov x5, #(0b11 << 20)",
     "msr CPACR_EL1, x5",

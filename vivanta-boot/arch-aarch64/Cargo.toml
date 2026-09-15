@@ -9,6 +9,13 @@ description = "Vivanta — AArch64 architecture implementation"
 [lib]
 test = false
 
+[features]
+# Spec-correct L1/L2 table descriptors (0b10). Default off: QEMU's
+# cortex-a53 hangs at MMU enable with 0b10 and boots with 0b11 (see
+# docs/investigations/MMU-descriptor-encoding-hardware-validation.md).
+# Enable for real-silicon validation runs (RK3568/RPi3B+).
+spec-table-desc = []
+
 [dependencies]
 vivanta-boot-common = { path = "../boot_common" }
 vivanta-arch-api = { path = "../arch-api" }
