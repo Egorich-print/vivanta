@@ -68,16 +68,11 @@ with open('${BIN}','rb') as f:
         ;;
 
     rpi3bp)
-        ELF="target/aarch64-unknown-none/debug/vivanta-target-rpi3b-plus"
-        BIN="kernel8.img"
-        echo "=== Converting to flat binary ==="
-        rust-objcopy -O binary "${ELF}" "${BIN}"
-        ls -lh "${BIN}"
-        file "${BIN}"
-        echo "=== RPi3 GPU firmware boot: ==="
-        echo "  1. Copy kernel8.img to SD card boot/ partition"
-        echo "  2. Insert SD card, power on"
-        echo "  3. Expected UART output: '.' (RP0 marker)"
+        # Full SD-card image (kernel + firmware + config + overlay) rather
+        # than a bare kernel8.img: see tools/make-rpi3b-image.sh and
+        # PLATFORM_BRINGUP.md §5.
+        echo "=== Building Raspberry Pi 3B+ SD image ==="
+        ./tools/make-rpi3b-image.sh
         ;;
 
     vivanta-target-qemu-aarch64|vivanta-target-qemu-armv7a)

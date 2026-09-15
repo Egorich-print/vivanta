@@ -75,25 +75,46 @@ GPU firmware → kernel8.img @ 0x80000 (EL2) → EL2→EL1h drop → adapter_mai
 | Load address | 0x80000 (GPU firmware convention) |
 | Descriptors | `spec-table-desc` feature (0b10 — mandatory on silicon) |
 
-**Build (standalone — see warning below):**
+**Build the SD image (one command):**
 ```sh
-cargo build -p vivanta-target-rpi3b-plus --target aarch64-unknown-none
-rust-objcopy -O binary \
-  target/aarch64-unknown-none/debug/vivanta-target-rpi3b-plus kernel8.img
-# (or ./build.sh rpi3bp — same two steps)
+./build.sh rpi3bp          # == tools/make-rpi3b-image.sh
 ```
+Produces `images/rpi3b-plus/vivanta-rpi3b-plus.img` — MBR + one 64 MiB
+FAT32 partition (type 0x0c, LBA 8192) holding the firmware, `config.txt`,
+`overlays/miniuart-bt.dtbo` and `kernel8.img`. Flash it whole:
+```sh
+diskutil unmountDisk /dev/diskN
+sudo dd if=images/rpi3b-plus/vivanta-rpi3b-plus.img of=/dev/rdiskN bs=4m
+sync && diskutil eject /dev/diskN
+```
+The Broadcom firmware blobs are **downloaded, not committed** (`images/`
+is gitignored) — mind their licence if you redistribute the image.
+Linux has no `hdiutil`: build the same file set with `mkfs.vfat` + `mtools`
+(or a Buildroot `genimage` config, as BalanSir does).
 
-**SD card:** FAT32 boot partition with Raspberry Pi firmware files
-(`bootcode.bin`, `start.elf`, `fixup.dat`, `config.txt`) + `kernel8.img`.
-Minimal `config.txt`:
+`config.txt` shipped by the script (all lines matter):
 ```text
 arm_64bit=1
 kernel=kernel8.img
 enable_uart=1
-uart_2ndstage=1
+dtoverlay=miniuart-bt
+gpu_mem=64
+disable_overscan=1
 ```
-UART output on GPIO 14/15 at 115200 baud. First lines to expect:
-`Vivanta Boot Adapter (RPi3B+/BCM2837)`, `Enabling MMU...` with
+- `dtoverlay=miniuart-bt` is **required for serial output**: on the Pi 3 the
+  PL011 (UART0) is wired to Bluetooth by default, so without it Vivanta's
+  writes to `0x3F201000` go to the BT radio and GPIO 14/15 carry only the
+  mini UART. The overlay's `.dtbo` must be present under `overlays/` or the
+  firmware silently ignores the directive.
+- `enable_uart=1` pins the VPU core clock, which is the PL011 clock source
+  Vivanta assumes (250 MHz in `target-rpi3b-plus/src/main.rs`). If serial
+  output is garbled, this assumption is the first suspect (`init_uart_clock`
+  / actual PL011 clock), not the wire.
+- `gpu_mem=64` (default) keeps usable DRAM at 960 MiB, matching
+  `RPI_USABLE_END`; a larger split shrinks RAM below the model.
+
+UART output on GPIO 14/15 (header pins 8/10) at 115200 8N1. First lines to
+expect: `Vivanta Boot Adapter (RPi3B+/BCM2837)`, `Enabling MMU...` with
 `L1/L2 table encoding 0b10 (spec-correct)`, then the standard gate log.
 
 **⚠️ Feature-unification hazard:** this target enables
