@@ -16,7 +16,12 @@ use task::{TaskId, TaskState};
 use thread::{Priority, Thread, ThreadEntry, ThreadId, ThreadState};
 use vivanta_arch_api::pmm::FrameAllocator;
 
-pub const KERNEL_STACK_SIZE: usize = 16384;
+/// Per-thread kernel stack, physically contiguous. 64 KiB: the -O0 fork
+/// path alone needs ~35 KiB live (sys_fork's by-value AddressSpace plus
+/// duplicate_as/VaAllocator frames), and 16 KiB demonstrably overflowed
+/// into adjacent memory (measured SP 18 KiB past the bottom at fork
+/// entry), silently wiping live page tables. See INV-003.
+pub const KERNEL_STACK_SIZE: usize = 65536;
 
 static mut RUNQUEUE: Option<RunQueue> = None;
 static mut PROCESS_TABLE: Option<ProcessTable> = None;
@@ -332,7 +337,7 @@ pub fn create_kernel_thread(
     address_space: AddressSpaceId,
     priority: Priority,
 ) -> ThreadId {
-    // Kernel stack: KERNEL_STACK_SIZE (16 KiB) must be physically contiguous
+    // Kernel stack: KERNEL_STACK_SIZE (64 KiB) must be physically contiguous
     // so SP_EL1 is a valid single stack. Use the explicit contiguous contract.
     let stack_base = alloc
         .alloc_contiguous(KERNEL_STACK_SIZE / 4096)

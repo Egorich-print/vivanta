@@ -348,6 +348,50 @@ unsafe extern "C" {
     static execve_code_end: u8;
 }
 
+// M10.4 — genuine EL0 fork exercise: fork(), parent waitpids the child,
+// both check their return values. Parent exits 42 only if the reaped pid
+// matches; child exits 7. Any transport or semantic break lands on a
+// distinct diagnostic exit code.
+#[cfg(target_os = "none")]
+core::arch::global_asm!(
+    ".section .user.text.fork, \"ax\"",
+    ".globl fork_code_start",
+    "fork_code_start:",
+    "mov  x8, #7", // SYS_FORK
+    "svc  #0",
+    "cbz  x0, 1f", // x0==0 -> child
+    // parent: x0 = child pid
+    "mov  x19, x0",
+    "mov  x0, x19",
+    "mov  x1, #0", // status = NULL
+    "mov  x2, #0", // options = 0 (block)
+    "mov  x8, #8", // SYS_WAITPID
+    "svc  #0",
+    "cmp  x0, x19", // reaped == child?
+    "b.eq 2f",
+    "mov  x0, #11", // reap mismatch
+    "b    3f",
+    "2:",
+    "mov  x0, #42", // all good
+    "3:",
+    "mov  x8, #2", // EXIT(x0)
+    "svc  #0",
+    "b .",
+    "1:", // child
+    "mov  x0, #7",
+    "mov  x8, #2", // EXIT(7)
+    "svc  #0",
+    "b .",
+    ".globl fork_code_end",
+    "fork_code_end:",
+);
+// Referenced by vivanta-kernel through its own extern declarations.
+#[allow(dead_code)]
+unsafe extern "C" {
+    static fork_code_start: u8;
+    static fork_code_end: u8;
+}
+
 /// Addresses used for the faulting user task.
 pub const FAULT_CODE_VA: u64 = 0x5F00_0000;
 pub const FAULT_STACK_VA: u64 = 0x5F01_0000;

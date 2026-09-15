@@ -53,6 +53,8 @@ unsafe extern "C" {
     static unmapped_code_end: u8;
     static execve_code_start: u8;
     static execve_code_end: u8;
+    static fork_code_start: u8;
+    static fork_code_end: u8;
 }
 
 /// Allocator callback for arch boot MMU init.
@@ -108,7 +110,6 @@ unsafe fn gate_m10_3_execve(
                     (0x5D03_0000 + 4096) as usize,
                     ex_as,
                     pmm,
-                    system_state.memory_manager_mut(),
                     scheduler::thread::Priority::Normal,
                     None,
                 )
@@ -326,6 +327,162 @@ unsafe fn gate_fault_oom(
             a.unmap_all(&mut o_alloc).expect("teardown");
             vmm::unregister(oom_as).expect("unregister OomAS");
         }
+    }
+}
+
+/// Boot gate: two identical ELF images in two address spaces run
+/// concurrently and both exit(42) with no cross-talk (M7.12 ELF variant).
+/// #[inline(never)] keeps kernel_main's -O0 frame small (see gate_e2e_delta).
+#[inline(never)]
+unsafe fn gate_dual_elf(
+    pmm: &mut pmm::PmmBitmap,
+    pmm_backend: &mut PmmBackend,
+    system_state: &mut state::SystemState,
+    build_root: &impl Fn(&str, u64, u64, Option<(*const u8, usize, u64, u64)>) -> RootPageTable,
+) {
+    unsafe {
+        println!("M7.12 concurrent ELF gate:");
+        let elf: &[u8] = crate::syscall::find_builtin_program("/init").expect("builtin /init");
+        let mut tm = scheduler::task_manager::TaskManager::new();
+        let mut tids = [0u64; 2];
+        let mut ases = [0u64; 2];
+        for (i, name) in ["DualA", "DualB"].iter().enumerate() {
+            let root = build_root(name, 0, 0, None);
+            let as_id = vmm::register(root, vmm::AddressSpaceFlags::User);
+            let mut alloc = memory::AsPageTableAllocator::new(
+                system_state.memory_manager_mut() as *mut _,
+                &raw mut *pmm_backend as *mut dyn memory::MemoryBackend,
+                as_id,
+            );
+            let entry = crate::exec::load_elf(
+                elf,
+                vmm::address_space_mut_by(as_id),
+                &mut alloc,
+                crate::syscall::OBJ_ANONYMOUS,
+            )
+            .expect("dual load");
+            // Fresh allocator per AS below (each records tables under its
+            // own AS id); `alloc` itself holds only raw pointers, no Drop.
+            tids[i] = tm
+                .spawn_user(
+                    entry as usize,
+                    0x5C01_1000usize,
+                    as_id,
+                    pmm,
+                    scheduler::thread::Priority::Normal,
+                    None,
+                )
+                .expect("spawn dual task")
+                .id;
+            ases[i] = as_id;
+        }
+        for _ in 0..6 {
+            scheduler::yield_now();
+        }
+        for (i, tid) in tids.iter().enumerate() {
+            let task = tm.get(*tid).expect("dual task missing");
+            assert_eq!(
+                task.exit_code,
+                Some(42),
+                "dual task {} must exit(42) (got {:?})",
+                i,
+                task.exit_code
+            );
+            tm.reap_zombie(*tid);
+        }
+        for as_id in ases {
+            let mut alloc = memory::AsPageTableAllocator::new(
+                system_state.memory_manager_mut() as *mut _,
+                &raw mut *pmm_backend as *mut dyn memory::MemoryBackend,
+                as_id,
+            );
+            vmm::address_space_mut_by(as_id)
+                .unmap_all(&mut alloc)
+                .expect("dual teardown");
+            vmm::unregister(as_id).expect("dual unregister");
+        }
+        println!("  [DUAL] two concurrent ELF tasks exit(42) PASS");
+    }
+}
+
+/// Boot gate: genuine EL0 fork()/waitpid() round-trip (M10.4). The blob
+/// forks; the parent blocks in waitpid and exits 42 only for a matching
+/// reaped pid, the child exits 7. Covers the SVC fork transport and the
+/// block/wake/reap dance through real EL0 frames.
+/// #[inline(never)] keeps kernel_main's -O0 frame small (see gate_e2e_delta).
+#[inline(never)]
+unsafe fn gate_fork_el0(
+    pmm: &mut pmm::PmmBitmap,
+    pmm_backend: &mut PmmBackend,
+    system_state: &mut state::SystemState,
+    build_root: &impl Fn(&str, u64, u64, Option<(*const u8, usize, u64, u64)>) -> RootPageTable,
+) {
+    unsafe {
+        println!("M10.4 EL0 fork gate:");
+        let src = &raw const fork_code_start;
+        let len = (&raw const fork_code_end as usize) - (&raw const fork_code_start as usize);
+        let root = build_root(
+            "ForkAS",
+            0,
+            0,
+            Some((src, len, 0x5D04_0000u64, 0x5D05_0000u64)),
+        );
+        let fork_as = vmm::register(root, vmm::AddressSpaceFlags::User);
+        let mut tm = scheduler::task_manager::TaskManager::new();
+        let tid = tm
+            .spawn_user(
+                0x5D04_0000 as usize,
+                (0x5D05_0000 + 4096) as usize,
+                fork_as,
+                pmm,
+                scheduler::thread::Priority::Normal,
+                None,
+            )
+            .expect("spawn fork task")
+            .id;
+        for _ in 0..8 {
+            scheduler::yield_now();
+        }
+        let task = tm.get(tid).expect("fork task missing");
+        assert_eq!(
+            task.exit_code,
+            Some(42),
+            "EL0 fork round-trip must exit(42) (got {:?})",
+            task.exit_code
+        );
+        let blob_task = task.task_id;
+        println!("  [FORK-EL0] fork/waitpid round-trip exit(42) PASS");
+        // Teardown: reap the parent, then release the reaped child's
+        // address space and thread via its tombstone (waitpid already
+        // removed it from the table's live set).
+        tm.reap_zombie(tid);
+        scheduler::remove_thread(tid);
+        let mut p_alloc = memory::AsPageTableAllocator::new(
+            system_state.memory_manager_mut() as *mut _,
+            &raw mut *pmm_backend as *mut dyn memory::MemoryBackend,
+            fork_as,
+        );
+        vmm::address_space_mut_by(fork_as)
+            .unmap_all(&mut p_alloc)
+            .expect("unmap parent fork AS");
+        vmm::unregister(fork_as).expect("unregister ForkAS");
+        let child = scheduler::process_table()
+            .iter()
+            .find(|t| t.parent == Some(blob_task) && t.state == scheduler::task::TaskState::Exited)
+            .map(|t| (t.task_id, t.address_space, t.threads.first().copied()));
+        if let Some((_, child_as, Some(child_tid))) = child {
+            let mut c_alloc = memory::AsPageTableAllocator::new(
+                system_state.memory_manager_mut() as *mut _,
+                &raw mut *pmm_backend as *mut dyn memory::MemoryBackend,
+                child_as,
+            );
+            vmm::address_space_mut_by(child_as)
+                .unmap_all(&mut c_alloc)
+                .expect("unmap child fork AS");
+            scheduler::remove_thread(child_tid);
+            vmm::unregister(child_as).expect("unregister ForkChildAS");
+        }
+        println!("  [FORK-EL0] child teardown PASS");
     }
 }
 
@@ -851,7 +1008,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 (STACK_VA + 4096) as usize,
                 user_as1,
                 &mut pmm,
-                system_state.memory_manager_mut(),
                 scheduler::thread::Priority::Normal,
                 None, // no parent (root task)
             )
@@ -898,7 +1054,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 0x5F01_1000,
                 user_as2,
                 &mut pmm,
-                system_state.memory_manager_mut(),
                 scheduler::thread::Priority::Normal,
                 None,
             )
@@ -955,7 +1110,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     (SCEN_STACK_VA + 4096) as usize,
                     as_id,
                     &mut pmm,
-                    system_state.memory_manager_mut(),
                     scheduler::thread::Priority::Normal,
                     None,
                 )
@@ -1028,7 +1182,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     0x5C01_1000usize,
                     sys_as,
                     &mut pmm,
-                    system_state.memory_manager_mut(),
                     scheduler::thread::Priority::Normal,
                     None,
                 )
@@ -1086,7 +1239,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     0x5C01_1000usize, // dummy SP_EL0; program is naked
                     elf_as,
                     &mut pmm,
-                    system_state.memory_manager_mut(),
                     scheduler::thread::Priority::Normal,
                     None,
                 )
@@ -1108,6 +1260,12 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 .unmap_all(&mut as_alloc)
                 .expect("unmap_all at process teardown");
         }
+
+        // ------------------------------------------------------------------
+        gate_dual_elf(&mut pmm, &mut pmm_backend, &mut system_state, &build_root);
+
+        // ------------------------------------------------------------------
+        gate_fork_el0(&mut pmm, &mut pmm_backend, &mut system_state, &build_root);
 
         // ------------------------------------------------------------------
         gate_m10_3_execve(&mut pmm, &mut pmm_backend, &mut system_state, &build_root);
@@ -1205,7 +1363,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     0x5E01_1000,
                     parent_as,
                     &mut pmm,
-                    system_state.memory_manager_mut(),
                     scheduler::thread::Priority::Normal,
                     None,
                 )
@@ -1223,7 +1380,6 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                     0x5E01_1000,
                     child_as,
                     &mut pmm,
-                    system_state.memory_manager_mut(),
                     scheduler::thread::Priority::Normal,
                     Some(parent_pid),
                 )
