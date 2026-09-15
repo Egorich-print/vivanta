@@ -1,4 +1,3 @@
-use crate::memory::{AllocationRequirements, MemoryResourceManager};
 use crate::scheduler;
 use crate::scheduler::task::{ProcessHandle, Task, TaskId, TaskState};
 use crate::scheduler::thread::Priority;
@@ -23,8 +22,10 @@ impl TaskManager {
     ///
     /// Allocates:
     /// - Kernel stack (4 pages from PMM via `alloc`)
-    /// - User stack (from MRM via `mrm`)
     /// - A Thread registered in the runqueue
+    ///
+    /// The user stack VA is caller-mapped (boot ghosts or an explicit
+    /// reservation); no MRM frame is allocated here.
     ///
     /// Returns the new TaskId on success.
     pub fn spawn_user(
@@ -33,7 +34,6 @@ impl TaskManager {
         user_stack_va: usize,
         address_space: AddressSpaceId,
         alloc: &mut impl FrameAllocator,
-        mrm: &mut MemoryResourceManager,
         priority: Priority,
         parent: Option<TaskId>,
     ) -> Result<ProcessHandle, &'static str> {
@@ -42,10 +42,6 @@ impl TaskManager {
             .ok_or("kernel stack contiguous alloc failed")?
             .addr;
         let kernel_stack_top = (stack_base as usize) + crate::scheduler::KERNEL_STACK_SIZE;
-
-        let user_stack = mrm
-            .allocate(&AllocationRequirements::new(4096), 0)
-            .ok_or("user stack allocation failed")?;
 
         let thread_id = scheduler::create_user_thread(
             kernel_stack_top,
@@ -60,8 +56,6 @@ impl TaskManager {
         if let Some(parent_id) = parent {
             task.set_parent(parent_id);
         }
-        task.add_object(user_stack);
-
         let handle = scheduler::pt().create(task);
 
         // Update parent's children list
@@ -105,19 +99,6 @@ impl TaskManager {
 
         let h = handle.ok_or("process table full")?;
         Ok(h)
-    }
-
-    /// Mark a Task as zombie.
-    ///
-    /// The owned MemoryObjects will be freed on the next
-    /// `cleanup_zombies` call.
-    pub fn kill(&mut self, task_id: TaskId) -> Result<(), &'static str> {
-        if let Some(task) = scheduler::pt().lookup_mut(task_id) {
-            task.state = TaskState::Zombie;
-            Ok(())
-        } else {
-            Err("task not found")
-        }
     }
 
     /// Count of tasks.

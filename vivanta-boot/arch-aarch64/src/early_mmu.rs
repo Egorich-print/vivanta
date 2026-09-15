@@ -1,3 +1,11 @@
+//! Minimal early-MMU for the rpi3b-plus standalone diagnostic ONLY.
+//!
+//! Deliberately NOT unified with the runtime MMU (`mmu.rs` + `PageTableGuard`):
+//! this builds a throwaway 4 GiB identity window (T0SZ=32, MAIR Attr1 =
+//! Device) with zero allocator dependency so a board with unknown DRAM can
+//! print "After MMU" before anything else exists. The kernel path never calls
+//! this module; unifying the two configs would couple the diagnostic to
+//! runtime TCR/MAIR evolution for no benefit.
 use crate::barrier;
 use crate::paging::descriptor::*;
 use crate::paging::{MappingFlags, PageTable, Permissions};

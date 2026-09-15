@@ -92,12 +92,23 @@ impl SignalState {
         }
     }
 
+    /// Bit for a signal number. u64 arithmetic throughout: the old i32
+    /// shifts would panic on overflow in debug builds if the `Signal`
+    /// enum ever gains a discriminant >= 31.
+    #[inline]
+    fn mask_bit(sig: u8) -> u64 {
+        if sig >= 64 {
+            return 0;
+        }
+        1u64 << sig
+    }
+
     pub fn is_blocked(&self, sig: Signal) -> bool {
         // SIGKILL (and SIGSTOP if ever added) is unblockable per POSIX.
         if sig == Signal::Kill {
             return false;
         }
-        (self.blocked & (1 << (sig as u8))) != 0
+        (self.blocked & Self::mask_bit(sig as u8)) != 0
     }
 
     /// Raw signal-number check for sigaction path (accepts 1..31).
@@ -105,7 +116,7 @@ impl SignalState {
         if sig == SIGKILL {
             return false;
         }
-        (self.blocked & (1u64 << sig)) != 0
+        (self.blocked & Self::mask_bit(sig)) != 0
     }
 
     pub fn block(&mut self, sig: Signal) {
@@ -113,11 +124,11 @@ impl SignalState {
         if sig == Signal::Kill {
             return;
         }
-        self.blocked |= 1 << (sig as u8);
+        self.blocked |= Self::mask_bit(sig as u8);
     }
 
     pub fn unblock(&mut self, sig: Signal) {
-        self.blocked &= !(1 << (sig as u8));
+        self.blocked &= !Self::mask_bit(sig as u8);
     }
 
     // NOTE (scope fence): async delivery of `pending` to EL0 is NOT

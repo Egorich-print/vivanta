@@ -366,19 +366,15 @@ pub fn sys_kill(pid: u64, sig: u64) -> u64 {
                 crate::scheduler::thread::ThreadState::Terminated,
             );
         }
-        // Wake parent and clean children vec
+        // Wake the parent (SIGCHLD) and any waiter for this pid; waiters
+        // for "any child" (id 0) match too — wake_waiters wakes both, so
+        // one call covers the parentless case as well.
         if let Some(parent_id) = parent {
             if let Some(parent_task) = process_table().lookup_mut(parent_id) {
                 parent_task.signals.send(crate::signal::Signal::Chld);
             }
-            crate::scheduler::wake_waiters(pid);
-        } else {
-            // No parent — still wake any waiter for this specific pid
-            crate::scheduler::wake_waiters(pid);
         }
-        // Also wake any waiter for any child (0) — handle by also waking 0 queue? wake_waiters already handles 0==any in its logic when waking child.
-        // But waiters for any child (wait_id 0) are woken when we call wake_waiters(pid) because condition is waited_for==0 || waited_for==pid.
-        // So single call is enough.
+        crate::scheduler::wake_waiters(pid);
         return 0;
     }
 
