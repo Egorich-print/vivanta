@@ -47,20 +47,10 @@ ARMv7 systems, from emulated QEMU machines to real boards and old smartphones
  *demand-fills on first access*, changes protection via `mprotect`, releases via `munmap`,
  *exercises COW fork semantics*, and exits cleanly. **All 9 QEMU gates pass.**
 
-> **M9 COW COMPLETE** — Copy-on-Write for anonymous private memory is implemented and verified.
-> First genuine ELF64 AArch64 userland program runs in EL0 via syscall ABI,
- *demand-fills on first access*, changes protection via `mprotect`, releases via `munmap`,
- *exercises COW fork semantics*, and exits cleanly. **All 9 QEMU gates pass.**
-
-> **M9 COW COMPLETE** — Copy-on-Write for anonymous private memory is implemented and verified.
-> First genuine ELF64 AArch64 userland program runs in EL0 via syscall ABI,
- *demand-fills on first access*, changes protection via `mprotect`, releases via `munmap`,
- *exercises COW fork semantics*, and exits cleanly. **All 9 QEMU gates pass.**
-
 > **G-M7 CLOSED** — Syscall ABI + VM syscalls + Process model **COMPLETE**
 > **M9 COW COMPLETE** — Copy-on-Write for anonymous private memory **COMPLETE**
 
-> **M7 GREEN BASELINE — PASS** (2026-08-11). QEMU-correct baseline: all four gates verified on a clean clone.
+> **M5.0 GREEN BASELINE — PASS** (2026-08-11). QEMU-correct baseline: all four gates verified on a clean clone.
 > Honest status is "QEMU-correct", not "hardware-correct" — one deferred ARM MMU descriptor-encoding issue requires validation on physical hardware.
 
 ---

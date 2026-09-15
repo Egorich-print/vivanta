@@ -2,7 +2,9 @@
 
 ## Status
 
-Open
+Closed (fixes landed; header flipped 2026-09-09 during P0 audit — resolution
+and 5-min stability evidence were already in §Resolution, only the header
+was stale)
 
 ## Date
 

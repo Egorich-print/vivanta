@@ -1,6 +1,7 @@
 # Vivanta Status
 
-> Last updated: 2026-08-21 (mission 2)
+> Last updated: 2026-09-09 (P0 mission — see "P0 corrective mission" below;
+> prior header was stale since mission 2)
 
 ## Toolchain
 
@@ -89,11 +90,15 @@ deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
   `vivanta-boot/docs/investigations/WX-user-code-ap-encoding.md`;
   boot-time `[WX]` readback verification + EL0 store-to-code-page negative test)
 - Identity — ⚠️ nominal only (counter-based UUID; no crypto/Ed25519 — scope fence)
-- Process Model — ⚠️ lifecycle incomplete: `Task::exit()` never called,
-  `running_count()` always 0, exit_code/zombie/reap are dead APIs (candidate M6)
-- Signals — ⚠️ enum only, no delivery path (scope fence)
-- Syscalls — ⚠️ SYS_READ is a stub returning 0; mmap returns -ENOMEM (post-M5)
+- Process Model — ✅ fork/waitpid/kill/getpid/getppid/exit/execve live (M10.2);
+  tombstones reused with generations, live_count excludes Exited (P0 mission)
+- Signals — ⚠️ dispositions + SIGKILL/SIGCHLD paths work; async EL0 delivery
+  explicitly absent (scope fence, documented in `kernel/src/signal.rs`)
+- Syscalls — ✅ 14/16 live (READ + SIGPROCMASK reserved → ENOSYS per ADR-033);
+  mmap/munmap/mprotect + negatives proven from EL0 (M7.2 + user-init exit 42)
 - User threads — ✅ EL0 demo, EFAULT test, fault-containment test all pass
+- ELF/execve — ✅ genuine EL0 `execve("/init")` → exit(42) proven (M10.3 gate);
+  new-image stack at top of user domain; icache maintained on exec path
 
 ## Post-M5 deferred artifacts
 
@@ -121,11 +126,38 @@ deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
 
 | Platform | Status |
 |----------|--------|
-| qemu-aarch64 | Active, boots to kernel_main, EL0 demo + preemption work |
+| qemu-aarch64 | Active, boots to kernel_main, 19/19 gates PASS (P0 mission 2026-09-09) |
 | rk3568 | Diagnostic only (does not link vivanta-kernel) |
 | rpi3b+ | Standalone diagnostic (early_mmu identity map) |
 | qemu-armv7a | Frozen (arch-armv7a is an empty stub; removed from workspace members) |
-| allwinner-h616 / amlogic / sdm660 | Stalled / planned |
+| allwinner-h616 / amlogic / sdm660 | Stalled / planned (x96q gained an EL2→EL1 drop, compile-checked only) |
+
+## P0 corrective mission (2026-09-09)
+
+Fixed all §3.1-class defects found by the 2026-09-08 audit, with regression
+gates in the QEMU boot matrix (now 19 PASS, 0 panics):
+
+- `execve` stack moved into the user VA domain (was above `USER_VA_END`, every
+  execve failed); new image gets icache maintenance; frame.sp no longer
+  overwritten (SVC epilogue restores SP_EL1 from it — the old code hung the
+  return path); user SP installed via `msr sp_el0`.
+- `unmap_all` releases VA reservations (`va.free`) and skips HW unmap for
+  Lazy/Reserved pieces (previously panicked the walker on never-touched Lazy).
+- Process table: `live_count`/`count` exclude `Exited` tombstones; `create`
+  reuses tombstone slots preserving bumped generations (was a lifetime cap of
+  64 tasks plus unbounded Vec growth → heap OOM).
+- Signals: async EL0 delivery documented as absent (scope fence);
+  `SignalState::take()` removed; self-SIGKILL now terminates via `thread_exit`.
+- Fault paths: capacity pre-check before HW mutation (was `.expect()` panic).
+- Boot stack 128→256 KiB: the 82 KiB `-O0` kernel_main frame plus gate
+  temporaries overflowed into `.bss` (silent console death pre-dump); gates
+  now live in `#[inline(never)]` fns.
+- MMU table encoding behind `spec-table-desc` feature (default QEMU `0b11`
+  unchanged; feature build hangs at MMU enable exactly as documented).
+
+Deferred with rationale: `UserPtr` adoption in hot syscalls, `register()`
+panic→Result conversion, kernel W^X, MAIR/TCR unification — all touch proven
+paths for no P0 gain; revisit after next functional milestone.
 
 ## Scope fence (holds through any next milestone until explicitly lifted)
 
