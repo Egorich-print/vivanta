@@ -51,6 +51,8 @@ unsafe extern "C" {
     static kread_code_end: u8;
     static unmapped_code_start: u8;
     static unmapped_code_end: u8;
+    static execve_code_start: u8;
+    static execve_code_end: u8;
 }
 
 /// Allocator callback for arch boot MMU init.
@@ -77,7 +79,323 @@ pub unsafe extern "Rust" fn boot_alloc_frame(ctx: *mut ()) -> u64 {
     }
 }
 
-/// The one and only vivanta_kernel entry point.
+/// Boot gate: M10.3 EL0 execve gate.
+/// #[inline(never)] keeps kernel_main's -O0 frame small (see gate_e2e_delta).
+#[inline(never)]
+unsafe fn gate_m10_3_execve(
+    pmm: &mut pmm::PmmBitmap,
+    pmm_backend: &mut PmmBackend,
+    system_state: &mut state::SystemState,
+    build_root: &impl Fn(&str, u64, u64, Option<(*const u8, usize, u64, u64)>) -> RootPageTable,
+) {
+    unsafe {
+        println!("M10.3 EL0 execve gate:");
+        {
+            let src = &raw const execve_code_start;
+            let len =
+                (&raw const execve_code_end as usize) - (&raw const execve_code_start as usize);
+            let root = build_root(
+                "ExecveAS",
+                0,
+                0,
+                Some((src, len, 0x5D02_0000u64, 0x5D03_0000u64)),
+            );
+            let ex_as = vmm::register(root, vmm::AddressSpaceFlags::User);
+            let mut tm = scheduler::task_manager::TaskManager::new();
+            let tid = tm
+                .spawn_user(
+                    0x5D02_0000 as usize,
+                    (0x5D03_0000 + 4096) as usize,
+                    ex_as,
+                    pmm,
+                    system_state.memory_manager_mut(),
+                    scheduler::thread::Priority::Normal,
+                    None,
+                )
+                .expect("spawn execve task")
+                .id;
+            scheduler::yield_now();
+            scheduler::yield_now();
+            let task = tm.get(tid).expect("execve task missing");
+            assert_eq!(
+                task.exit_code,
+                Some(42),
+                "EL0 execve must yield user-init exit(42) (got {:?})",
+                task.exit_code
+            );
+            println!("  [EXECVE] EL0 execve(\"/init\") -> exit(42) PASS");
+            tm.reap_zombie(tid);
+            // user-init leaves its image + stack mapped: release them
+            // before unregister (same teardown as the M8.4 gate).
+            let mut ex_alloc = memory::AsPageTableAllocator::new(
+                system_state.memory_manager_mut() as *mut _,
+                &raw mut *pmm_backend as *mut dyn memory::MemoryBackend,
+                ex_as,
+            );
+            vmm::address_space_mut_by(ex_as)
+                .unmap_all(&mut ex_alloc)
+                .expect("unmap_all at execve teardown");
+            vmm::unregister(ex_as).expect("unregister ExecveAS");
+        }
+    }
+}
+
+/// Boot gate: P0 double-execve (VA reclaim) gate.
+/// #[inline(never)] keeps kernel_main's -O0 frame small (see gate_e2e_delta).
+#[inline(never)]
+unsafe fn gate_double_execve(
+    pmm_backend: &mut PmmBackend,
+    system_state: &mut state::SystemState,
+    build_root: &impl Fn(&str, u64, u64, Option<(*const u8, usize, u64, u64)>) -> RootPageTable,
+) {
+    unsafe {
+        println!("P0 double-execve (VA reclaim) gate:");
+        {
+            use vivanta_arch_api::mmu::MappingFlags as ApiMFlags;
+            let elf = crate::syscall::find_builtin_program("/init").expect("builtin /init");
+            let root = build_root("DblExecAS", 0, 0, None);
+            let de_as = vmm::register(root, vmm::AddressSpaceFlags::User);
+            let mut de_alloc = memory::AsPageTableAllocator::new(
+                system_state.memory_manager_mut() as *mut _,
+                &raw mut *pmm_backend as *mut dyn memory::MemoryBackend,
+                de_as,
+            );
+            let stack_flags = ApiMFlags::user() | ApiMFlags::read_write();
+            let a = vmm::address_space_mut_by(de_as);
+            let e1 = crate::exec::load_elf(elf, a, &mut de_alloc, crate::syscall::OBJ_ANONYMOUS)
+                .expect("first load");
+            a.reserve_at(
+                0x3FFF_F000,
+                4096,
+                stack_flags,
+                crate::syscall::OBJ_ANONYMOUS,
+            )
+            .expect("first stack");
+            let n1 = a.mappings.len();
+            a.unmap_all(&mut de_alloc).expect("unmap between execs");
+            assert_eq!(a.mappings.len(), 0, "unmap_all must empty the shadow");
+            let e2 = crate::exec::load_elf(elf, a, &mut de_alloc, crate::syscall::OBJ_ANONYMOUS)
+                .expect("second load");
+            a.reserve_at(
+                0x3FFF_F000,
+                4096,
+                stack_flags,
+                crate::syscall::OBJ_ANONYMOUS,
+            )
+            .expect("second stack — VA must be free again");
+            assert_eq!(e1, e2, "both loads must agree on entry");
+            assert_eq!(a.mappings.len(), n1, "second image must match first");
+            println!("  [EXEC2] double load+stack in one AS PASS");
+            a.unmap_all(&mut de_alloc).expect("teardown");
+            vmm::unregister(de_as).expect("unregister DblExecAS");
+        }
+    }
+}
+
+/// Boot gate: P0 process-table lifetime gate.
+/// #[inline(never)] keeps kernel_main's -O0 frame small (see gate_e2e_delta).
+#[inline(never)]
+unsafe fn gate_ptable_lifetime() {
+    println!("P0 process-table lifetime gate:");
+    {
+        let base = scheduler::process_table().live_count();
+        for _ in 0..70 {
+            let t = scheduler::task::Task::new(0, 0, 0);
+            let h = scheduler::process_table()
+                .create(t)
+                .expect("create must not exhaust on reaped slots");
+            // Detach the phantom thread id: these table-only tasks own no
+            // threads, and leaving tid 0 linked would let task_for_thread
+            // resolve (and sys_kill terminate a live thread) through them.
+            scheduler::process_table()
+                .lookup_mut(h.id)
+                .unwrap()
+                .threads
+                .clear();
+            scheduler::process_table().remove(h.id);
+        }
+        assert_eq!(
+            scheduler::process_table().live_count(),
+            base,
+            "live count must return to baseline"
+        );
+        println!("  [PTABLE] 70 create/reap cycles, live={} PASS", base);
+    }
+}
+
+/// Boot gate: P0 kill/SIGCHLD gate.
+/// #[inline(never)] keeps kernel_main's -O0 frame small (see gate_e2e_delta).
+#[inline(never)]
+unsafe fn gate_kill_sigchld() {
+    println!("P0 kill/SIGCHLD gate:");
+    {
+        let parent = scheduler::process_table()
+            .create(scheduler::task::Task::new(0, 0, 0))
+            .expect("parent")
+            .id;
+        scheduler::process_table()
+            .lookup_mut(parent)
+            .unwrap()
+            .threads
+            .clear();
+        let mut child_task = scheduler::task::Task::new(0, 0, 0);
+        // Table-only task owns no threads: clear the phantom tid 0 linkage
+        // so sys_kill cannot terminate a live thread through this entry.
+        child_task.threads.clear();
+        child_task.set_parent(parent);
+        let child = scheduler::process_table()
+            .create(child_task)
+            .expect("child")
+            .id;
+        scheduler::process_table()
+            .lookup_mut(parent)
+            .unwrap()
+            .add_child(child);
+        let r = crate::syscall::sys_kill(child, 9);
+        assert_eq!(r, 0, "kill must succeed");
+        assert_eq!(
+            scheduler::process_table().lookup(child).unwrap().state,
+            scheduler::task::TaskState::Zombie,
+            "SIGKILLed child must be Zombie"
+        );
+        assert!(
+            scheduler::process_table()
+                .children_of(parent)
+                .contains(&child),
+            "zombie must stay reapable"
+        );
+        let got_chld = scheduler::process_table()
+            .lookup(parent)
+            .and_then(|t| t.signals.pending)
+            .is_some_and(|s| matches!(s, crate::signal::Signal::Chld));
+        assert!(got_chld, "parent must have pending SIGCHLD");
+        println!("  [KILL] SIGKILL->Zombie + SIGCHLD PASS");
+        scheduler::process_table()
+            .lookup_mut(child)
+            .unwrap()
+            .exit(-9);
+        scheduler::process_table().remove(child);
+        scheduler::process_table()
+            .lookup_mut(parent)
+            .unwrap()
+            .exit(0);
+        scheduler::process_table().remove(parent);
+    }
+}
+
+/// Boot gate: P0 fault-OOM (full table) gate.
+/// #[inline(never)] keeps kernel_main's -O0 frame small (see gate_e2e_delta).
+#[inline(never)]
+unsafe fn gate_fault_oom(
+    pmm_backend: &mut PmmBackend,
+    system_state: &mut state::SystemState,
+    build_root: &impl Fn(&str, u64, u64, Option<(*const u8, usize, u64, u64)>) -> RootPageTable,
+) {
+    unsafe {
+        println!("P0 fault-OOM (full table) gate:");
+        {
+            use vivanta_arch_api::mmu::MappingFlags as ApiMFlags;
+            let root = build_root("OomAS", 0, 0, None);
+            let oom_as = vmm::register(root, vmm::AddressSpaceFlags::User);
+            let mut o_alloc = memory::AsPageTableAllocator::new(
+                system_state.memory_manager_mut() as *mut _,
+                &raw mut *pmm_backend as *mut dyn memory::MemoryBackend,
+                oom_as,
+            );
+            let flags = ApiMFlags::user() | ApiMFlags::read_write();
+            let a = vmm::address_space_mut_by(oom_as);
+            let mut first = 0u64;
+            for i in 0..63 {
+                let va = a
+                    .reserve_lazy(4096, flags, crate::syscall::OBJ_ANONYMOUS, 4096)
+                    .expect("fill slot");
+                if i == 0 {
+                    first = va;
+                }
+            }
+            assert_eq!(a.mappings.len(), 63);
+            let ok = a.resolve_lazy_fault(first, false, &mut o_alloc);
+            assert!(!ok, "resolve on a full table must refuse, not panic");
+            assert_eq!(
+                a.mappings.len(),
+                63,
+                "failed resolve must not mutate shadow"
+            );
+            assert!(a.query(first).is_some(), "lazy piece must survive refusal");
+            println!("  [OOM] full-table resolve refuses cleanly PASS");
+            a.unmap_all(&mut o_alloc).expect("teardown");
+            vmm::unregister(oom_as).expect("unregister OomAS");
+        }
+    }
+}
+
+/// P0 end-to-end resource gate: load + duplicate + full teardown in
+/// fresh roots must return PMM, table-registry and COW-registry counts
+/// exactly to baseline. Lives in its own #[inline(never)] function so the
+/// boot path keeps a small kernel_main frame.
+#[inline(never)]
+unsafe fn gate_e2e_delta(
+    pmm: &mut pmm::PmmBitmap,
+    pmm_backend: &mut PmmBackend,
+    system_state: &mut state::SystemState,
+) {
+    use vivanta_arch_api::mmu::MappingFlags as ApiMFlags;
+    println!("P0 end-to-end resource-delta gate:");
+    let elf = crate::syscall::find_builtin_program("/init").expect("builtin /init");
+    let free_pre = pmm.free_count();
+    let tables_pre = vmm::tables::total();
+    let cow_pre = vmm::cow_refcount::total();
+    let proot_f = pmm.alloc_frame().expect("e2e parent root");
+    unsafe { core::ptr::write_bytes(proot_f.addr as *mut u8, 0, 4096) };
+    let proot = RootPageTable(proot_f.addr as usize);
+    let pas = vmm::register(proot, vmm::AddressSpaceFlags::User);
+    let mut p_alloc = unsafe {
+        memory::AsPageTableAllocator::new(
+            system_state.memory_manager_mut() as *mut _,
+            &raw mut *pmm_backend as *mut dyn memory::MemoryBackend,
+            pas,
+        )
+    };
+    let pa = unsafe { vmm::address_space_mut_by(pas) };
+    crate::exec::load_elf(elf, pa, &mut p_alloc, crate::syscall::OBJ_ANONYMOUS).expect("e2e load");
+    pa.reserve_at(
+        0x3FFF_F000,
+        4096,
+        ApiMFlags::user() | ApiMFlags::read_write(),
+        crate::syscall::OBJ_ANONYMOUS,
+    )
+    .expect("e2e stack");
+    let croot_f = pmm.alloc_frame().expect("e2e child root");
+    unsafe { core::ptr::write_bytes(croot_f.addr as *mut u8, 0, 4096) };
+    let croot = RootPageTable(croot_f.addr as usize);
+    let child_id = vmm::peek_next_as_id();
+    let mut c_alloc = crate::vmm::faults::make_allocator(child_id).expect("e2e child alloc");
+    let dup = pa.duplicate_as(croot, &mut c_alloc).expect("e2e duplicate");
+    let cas = vmm::register_child(dup, croot);
+    unsafe { vmm::address_space_mut_by(cas) }
+        .unmap_all(&mut c_alloc)
+        .expect("e2e child unmap");
+    unsafe { vmm::address_space_mut_by(pas) }
+        .unmap_all(&mut p_alloc)
+        .expect("e2e parent unmap");
+    vmm::unregister(cas).expect("e2e unregister child");
+    vmm::unregister(pas).expect("e2e unregister parent");
+    pmm.free_frame(croot_f);
+    pmm.free_frame(proot_f);
+    assert_eq!(pmm.free_count(), free_pre, "PMM frames must balance");
+    assert_eq!(
+        vmm::tables::total(),
+        tables_pre,
+        "table registry must balance"
+    );
+    assert_eq!(
+        vmm::cow_refcount::total(),
+        cow_pre,
+        "COW registry must balance"
+    );
+    println!("  [E2E] load/dup/teardown deltas all zero PASS");
+}
+
 pub unsafe fn kernel_main(info: &BootInfo) -> ! {
     unsafe {
         println!();
@@ -736,7 +1054,9 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         // ------------------------------------------------------------------
         println!("M8.4 ELF userland gate:");
         {
-            static ELF: &[u8] = include_bytes!("../../user-init/user-init.elf");
+            // Single ELF image: reuse the execve builtin registry instead of
+            // a second include_bytes! copy of the same file.
+            let elf: &[u8] = crate::syscall::find_builtin_program("/init").expect("builtin /init");
             let root = build_root("ElfAS", 0, 0, None);
             let elf_as = vmm::register(root, vmm::AddressSpaceFlags::User);
             let mut as_alloc = memory::AsPageTableAllocator::new(
@@ -745,7 +1065,7 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
                 elf_as,
             );
             let entry = crate::exec::load_elf(
-                ELF,
+                elf,
                 vmm::address_space_mut_by(elf_as),
                 &mut as_alloc,
                 crate::syscall::OBJ_ANONYMOUS,
@@ -790,6 +1110,19 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
         }
 
         // ------------------------------------------------------------------
+        gate_m10_3_execve(&mut pmm, &mut pmm_backend, &mut system_state, &build_root);
+
+        gate_double_execve(&mut pmm_backend, &mut system_state, &build_root);
+
+        gate_ptable_lifetime();
+
+        gate_kill_sigchld();
+
+        gate_fault_oom(&mut pmm_backend, &mut system_state, &build_root);
+
+        // ------------------------------------------------------------------
+        gate_e2e_delta(&mut pmm, &mut pmm_backend, &mut system_state);
+
         // M9 COW gate: duplicate an AS with a Present Anonymous page,
         // child writes (COW break), verify parent sees the OLD value and
         // child sees its OWN new value.
