@@ -35,7 +35,7 @@ jobs:
             target/aarch64-unknown-none/debug/vivanta-target-rk3568 vivanta-target-rk3568.bin
           cp target/aarch64-unknown-none/debug/vivanta-target-qemu-aarch64 .
           cp user-init/user-init.elf .
-          sha256sum vivanta-target-qemu-aarch64 vivanta-target-rk3568.bin user-init.elf > SHA256SUMS
+          sha256sum vivanta-target-qemu-aarch64 vivanta-target-rk3568.bin user-init.elf > SHA256SUMS-kernel
           ls -la
       - uses: actions/upload-artifact@v4
         with:
@@ -44,7 +44,7 @@ jobs:
             vivanta-boot/vivanta-target-qemu-aarch64
             vivanta-boot/vivanta-target-rk3568.bin
             vivanta-boot/user-init.elf
-            vivanta-boot/SHA256SUMS
+            vivanta-boot/SHA256SUMS-kernel
           if-no-files-found: error
 
   image:
@@ -67,15 +67,15 @@ jobs:
         run: |
           ./tools/build-user-init.sh
           ./tools/make-rpi3b-image.sh
-          ( cd images/rpi3b-plus && sha256sum vivanta-rpi3b-plus.img kernel8.img > SHA256SUMS )
-          cat images/rpi3b-plus/SHA256SUMS
+          ( cd images/rpi3b-plus && sha256sum vivanta-rpi3b-plus.img kernel8.img > SHA256SUMS-rpi3b )
+          cat images/rpi3b-plus/SHA256SUMS-rpi3b
       - uses: actions/upload-artifact@v4
         with:
           name: rpi3b-image
           path: |
             vivanta-boot/images/rpi3b-plus/vivanta-rpi3b-plus.img
             vivanta-boot/images/rpi3b-plus/kernel8.img
-            vivanta-boot/images/rpi3b-plus/SHA256SUMS
+            vivanta-boot/images/rpi3b-plus/SHA256SUMS-rpi3b
           if-no-files-found: error
 
   publish:
@@ -101,7 +101,7 @@ jobs:
           - \`vivanta-target-qemu-aarch64\` — QEMU \`virt\` kernel ELF
           - \`vivanta-target-rk3568.bin\` — flat RK3568 kernel binary
           - \`user-init.elf\` — the embedded EL0 userland image
-          - \`SHA256SUMS\` next to each artifact
+          - \`SHA256SUMS-kernel\` / \`SHA256SUMS-rpi3b\` checksums
 
           Not validated on physical hardware yet. Honest status: QEMU-correct." \
             dist/kernel-binaries/* dist/rpi3b-image/*
