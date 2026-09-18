@@ -78,17 +78,14 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Boot the real kernel under TCG. Emulation is TCG cortex-a53 in both CI and
-  # local runs, so this is the same proven configuration, just slower.
+  # Boot the real kernel. On an AArch64 runner the guest runs natively through
+  # QEMU's KVM backend (host and guest are the same architecture); x86_64
+  # runners would have to fall back to TCG, where this gate intermittently
+  # deadlocked at M10.4.
   qemu:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     needs: [build]
-    # ADVISORY, not disabled: this gate is green locally and passed here once,
-    # but on x86_64 TCG the M10.4 EL0-fork gate intermittently deadlocks right
-    # after `fork()` (the parent's waitpid is never satisfied). That looks like
-    # a kernel timing bug, not a harness bug, so the job stays visible with its
-    # real status instead of being deleted. Flip to blocking once it is fixed.
-    continue-on-error: true
+    continue-on-error: true   # provisional: flip to blocking after green on KVM
     steps:
       - uses: actions/checkout@v4
       - name: tools
@@ -97,9 +94,22 @@ jobs:
         with:
           name: qemu-kernel-${{ github.run_number }}
           path: out
-      - name: QEMU gate matrix (TCG cortex-a53)
+      - name: pick accelerator (KVM if available, else TCG)
+        run: |
+          echo "host arch: $(uname -m)"
+          if [ -w /dev/kvm ]; then
+            echo "KVM available — running the guest natively"
+            echo "QEMU_ACCEL=kvm"   >> "$GITHUB_ENV"
+            echo "QEMU_CPU=host"    >> "$GITHUB_ENV"
+          else
+            echo "no /dev/kvm — falling back to TCG"
+            echo "QEMU_ACCEL=tcg"   >> "$GITHUB_ENV"
+            echo "QEMU_CPU=cortex-a53" >> "$GITHUB_ENV"
+          fi
+          ls -l /dev/kvm 2>/dev/null || true
+      - name: QEMU gate matrix
         env:
-          QEMU_TIMEOUT: "600"   # x86_64 emulating aarch64 is slower than native
+          QEMU_TIMEOUT: "600"
         run: |
           ls -la out
           chmod +x out/vivanta-target-qemu-aarch64

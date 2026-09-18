@@ -3,13 +3,15 @@
 # qemu-gates.sh — boot the AArch64 kernel under QEMU and verify the boot
 # gate matrix from its serial log.
 #
-# This is the CI gate AND the local gate: the exact same invocation runs in
-# both places (TCG cortex-a53, matching the proven local configuration).
+# This is the CI gate AND the local gate: TCG cortex-a53 by default, matching
+# the proven local configuration. On an AArch64 host with /dev/kvm, set
+# QEMU_ACCEL=kvm QEMU_CPU=host to run the guest natively instead.
 # The kernel never exits, so we watch the log and stop as soon as the last
 # terminal marker shows up (or bail early on a panic).
 #
 # Usage:  tools/qemu-gates.sh [kernel.elf] [timeout_seconds]
 #         QEMU_TIMEOUT=600 tools/qemu-gates.sh path/to/kernel.elf
+#         QEMU_ACCEL=kvm QEMU_CPU=host tools/qemu-gates.sh path/to/kernel.elf
 # Exit:   0 = all required markers present, no panic; 1 = otherwise.
 # ---------------------------------------------------------------------------
 set -euo pipefail
@@ -59,8 +61,15 @@ echo "==> QEMU gate matrix (timeout ${TIMEOUT}s)"
 echo "    kernel: ${KERNEL}"
 echo "    log:    ${LOG}"
 
+# Accelerator: TCG by default (portable, cross-arch). On an AArch64 host with
+# /dev/kvm, run the gate natively via QEMU's KVM backend instead:
+#   QEMU_ACCEL=kvm QEMU_CPU=host tools/qemu-gates.sh <kernel>
+ACCEL="${QEMU_ACCEL:-tcg}"
+CPU="${QEMU_CPU:-cortex-a53}"
+echo "    accel:  ${ACCEL}  (cpu ${CPU})"
+
 qemu-system-aarch64 \
-    -M virt -cpu cortex-a53 -m 512M -nographic \
+    -M virt -cpu "${CPU}" -accel "${ACCEL}" -m 512M -nographic \
     -kernel "${KERNEL}" \
     -serial mon:stdio >"${LOG}" 2>&1 &
 QEMU_PID=$!
