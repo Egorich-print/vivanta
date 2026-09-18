@@ -1,5 +1,10 @@
 # RK3568 NVR Board — Hardware Reference
 
+> **⚠️ Superseded (2026-07-25 snapshot).** The canonical hardware reference and
+> the U-Boot / eMMC bring-up runbook now live in
+> `docs/hardware/rk3568/` (`board-info.md`, `uboot-emmc-bringup.md`). This copy is
+> kept only for history.
+
 ## Board Identification
 
 U-Boot reports:

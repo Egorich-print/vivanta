@@ -82,54 +82,12 @@ Locations verified:
 
 ### Mainline U-Boot (rebuild 2026-09-04)
 
-To enable eMMC support, mainline U-Boot v2026.07 was rebuilt with:
+Mainline U-Boot `v2026.07` (`evb-rk3568_defconfig`) was rebuilt with
+SPL + external TPL + BL31 to add the missing eMMC support; only
+`idbloader.img` (TPL+SPL+BL31) and the FIT `u-boot.itb` are flashed.
 
-```
-Source: u-boot v2026.07 (https://source.denx.de/u-boot/u-boot.git)
-Defconfig: evb-rk3568_defconfig
-Toolchain: aarch64-linux-gnu-gcc 13.3.0 (BuildRoot aarch64 in Lima VM)
-BL31: rkbin/bin/rk35/rk3568_bl31_v1.46.elf (ATF, rockchip binary)
-TPL: rkbin/bin/rk35/rk3568_ddr_1560MHz_v1.26.bin (DDR4 1560 MHz init)
-SPL: enabled (CONFIG_SPL=y from defconfig)
-ROCKCHIP_EXTERNAL_TPL: enabled
-```
-
-**Build commands (validated):**
-```bash
-cd ~/uboot-rk3568/u-boot
-make mrproper
-make evb-rk3568_defconfig
-make CROSS_COMPILE=aarch64-linux-gnu- \
-     BL31=~/rkbin/bin/rk35/rk3568_bl31_v1.46.elf \
-     ROCKCHIP_TPL=~/rkbin/bin/rk35/rk3568_ddr_1560MHz_v1.26.bin \
-     -j10
-```
-
-**Output artifacts:**
-| File | Size | Purpose |
-|------|------|---------|
-| `idbloader.img` | 178,176 bytes (178 KB) | TPL + SPL + BL31, for BootROM |
-| `u-boot.itb` | 1,080,832 bytes (1 MB) | FIT image: U-Boot + DTB + ATF |
-| `u-boot.bin` | 883,808 bytes (884 KB) | Plain U-Boot binary (no SPL) |
-| `spl/u-boot-spl.bin` | 115,539 bytes (116 KB) | SPL only |
-
-**Known idbloader warning (benign):**
-```
-Image 'simple-bin' is missing optional external blobs but is still functional: tee-os
-```
-TEE/OS (OP-TEE) is optional; idbloader works without it.
-
-**MMC/SDHCI/eMMC strings verified in binary:**
-- `/mmc@fe310000` (eMMC)
-- `/mmc@fe2b0000` (SD card)
-- `rk3568_sdhci_set_clock`
-- `CONFIG_CMD_MMC`
-- HS200/HS400 modes, RPMB, cap-mmc-highspeed
-
-**Boot chain on RK3568 with this build:**
-```
-BootROM → TPL (DDR init) → SPL (load U-Boot from flash) → BL31 (ATF) → U-Boot proper
-```
+→ Build recipe, artifact table, boot chain, flashing and recovery:
+**[`uboot-emmc-bringup.md`](uboot-emmc-bringup.md)**.
 
 ### Boot script
 
@@ -532,104 +490,12 @@ For early bring-up, kernel entry code writes debug characters to UART:
 
 ## Flash Programming & Recovery
 
-### USB OTG / Maskrom recovery
+See **[`uboot-emmc-bringup.md`](uboot-emmc-bringup.md)** for the full procedures:
 
-The board has a Micro-USB OTG port. In normal operation the BootROM tries SPI NAND
-first, then falls through other boot sources. If nothing is valid it enters
-**Maskrom mode** (USB VID `0x2207`, PID `0x350a`) and waits for rockusb protocol
-commands on USB OTG.
-
-**Symptoms of maskrom mode:**
-- Long continuous buzzer tone (vs. short rapid beeps when U-Boot is running)
-- No UART output
-- USB device enumerates as "Unnamed Device" with VID 0x2207 / PID 0x350a
-
-**Verified on macOS (Apple Silicon, Homebrew):**
-
-```bash
-# Build rkdeveloptool from source (1.32 is upstream, no RK3568 in rkflashtool)
-brew install autoconf automake libusb pkg-config
-cd /tmp && git clone --depth 1 https://github.com/rockchip-linux/rkdeveloptool.git
-cd rkdeveloptool && ./autogen.sh
-LIBUSB1_CFLAGS="$(pkg-config --cflags libusb-1.0)" \
-LIBUSB1_LIBS="$(pkg-config --libs libusb-1.0)" ./configure
-make CXXFLAGS="-O2 -g -Wno-vla-cxx-extension" -j4
-# Binary: /tmp/rkdeveloptool/rkdeveloptool
-
-# Verify board is detected:
-./rkdeveloptool ld
-#   DevNo=1 Vid=0x2207,Pid=0x350a,LocationID=1  Maskrom
-```
-
-**Mac-native recovery tools installed via Homebrew:**
-
-```bash
-brew install rkflashtool    # rkflashtool 6.1 (no RK3568 PID in device list)
-brew install rkdeveloptool  # built from source above (preferred for RK3568)
-brew install openocd        # for JTAG via FT232H (uses libftdi)
-brew install libftdi        # FT232H userspace library
-```
-
-### Flash procedure (validated partial 2026-09-04)
-
-1. Build mainline U-Boot + idbloader (see "Mainline U-Boot" section above).
-2. Enter maskrom mode: erase SPI NAND or hold maskrom key.
-3. Connect Micro-USB OTG; board enumerates as `0x2207:0x350a`.
-4. Upload idbloader to board's SRAM via `db` command.
-5. From there, write `u-boot.itb` to eMMC or SPI NAND via `wl` command.
-
-**Caveat — macOS USB bulk transfer issue:** on macOS, libusb bulk transfers to
-the rockusb device fail with `kIOReturnNoDevice` / pipe stalls even though
-control transfers and device enumeration work. Workarounds:
-- Use Linux VM (Lima) with USB passthrough
-- Use a different host machine
-- Use JTAG via FT232H + OpenOCD (slower but reliable)
-
-### Recovery via JTAG (FT232H + OpenOCD)
-
-The board has TP1/TP4 test points near U28/R452 (likely JTAG). The
-FT232H module (USB-UART/I2C/SPI/JTAG) can connect to these:
-
-```
-FT232H       RK3568 JTAG
--------      -----------
-AD0 (TCK) →  TCK
-AD1 (TMS) →  TMS
-AD2 (TDO) →  TDO
-AD3 (TDI) →  TDI
-GND      →  GND
-```
-
-Then OpenOCD:
-```bash
-openocd -f interface/ftdi/ft232h_module_swd.cfg \
-        -f target/rk3568.cfg
-# Halt CPU, load idbloader to 0x20500000, set PC, resume
-```
-
-The proven flash approach for this U-Boot (no flow control, no serial download protocol):
-
-```python
-for i in range(0, len(words), 64):
-    chunk = words[i:i+64]
-    base = ADDR + i * 4
-    s.write(f'mm.l 0x{base:08x}\n'.encode())
-    time.sleep(0.1)
-    for v in chunk:
-        s.write(f'0x{v:08x}\n'.encode())
-        time.sleep(0.06)
-    s.write(b'.\n')
-    time.sleep(0.15)
-    s.reset_input_buffer()
-```
-
-**Rules**:
-- 64 words per chunk max (NS16550 64-byte FIFO limit)
-- 0.06s minimum per-word delay (allows U-Boot to drain FIFO)
-- 0.1s delay before chunk (mm.l startup echo)
-- 0.15s delay after chunk (mm.l exit + prompt sync)
-- `reset_input_buffer()` to discard echo without per-word reads
-- Burst mode (>1 word without inter-word delay) causes data corruption
+- **A. Serial `mm.l` upload** (vendor U-Boot console; proven timings, script).
+- **B. USB OTG / Maskrom** + `rkdeveloptool` (macOS build steps; incl. the
+  macOS USB bulk-transfer caveat).
+- **C. JTAG (FT232H + OpenOCD)** on TP1/TP4.
 
 ### Autoboot behavior
 
