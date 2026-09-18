@@ -13,8 +13,17 @@ This page is a short public-facing summary.
 | M3 | Process model: tasks, threads, scheduler, syscalls | ✅ |
 | M4 | Execution foundation: privilege transitions, EL0 | ✅ |
 | M4.5 | First user-space program (hello world via syscalls) | ✅ |
-| M5 | Memory Resource Manager (ADR-025) | in progress |
-| M6+ | Userspace services, IPC, drivers, networking | planned |
+| M5.0 | QEMU-correct recovery baseline (green-baseline) | ✅ PASS / CLOSED |
+| M6.0 | User VM: fault-driven mapping, transactional paging semantics | ✅ CLOSED |
+| G-M7 | Syscall ABI + VM syscalls + process model | ✅ CLOSED |
+| M9 | Copy-on-Write for anonymous private memory | ✅ COMPLETE |
+| M10 | Process lifecycle: `fork`/`execve`/`waitpid`, EL0 round-trips | ✅ gates green |
+| M11+ | Userspace services, IPC, drivers, networking | planned (scope fence) |
+
+The current goal is to validate M10 on the declared hardware target and keep
+the QEMU gate matrix green; new subsystems stay behind the scope fence until
+then. See [STATUS.md](STATUS.md) and the
+[master roadmap](docs/architecture/master-roadmap.md).
 
 ## Design principles
 
@@ -32,10 +41,10 @@ This page is a short public-facing summary.
 
 | Platform | Status |
 |----------|--------|
-| qemu-aarch64 | Active — boots to `kernel_main`, user-space EL0 works |
-| rk3568 | Active (bring-up) |
-| rpi3b+ | Active |
-| qemu-armv7a | Active |
+| qemu-aarch64 | Active — boots to `kernel_main`, 22/22 gates PASS, EL0 userland |
+| rpi3b+ | Active target — SD image builds (`tools/make-rpi3b-image.sh`), awaits silicon |
+| rk3568 | Diagnostic only (does not link the kernel) |
+| qemu-armv7a | Frozen (`arch-armv7a` is a stub) |
 | allwinner-h616 / amlogic / sdm660 | Stalled / planned |
 
 ## Long-term vision

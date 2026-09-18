@@ -1,7 +1,8 @@
 # Vivanta Status
 
-> Last updated: 2026-09-09 (P0 mission — see "P0 corrective mission" below;
-> prior header was stale since mission 2)
+> Last updated: 2026-09-18 (CI/CD added; QEMU gate matrix re-verified locally
+> at 22/22 PASS — see `docs/tooling/ci-cd.md`)
+> Prior update: 2026-09-09 (P0 mission — see "P0 corrective mission" below)
 
 ## Toolchain
 
