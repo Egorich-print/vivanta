@@ -60,6 +60,8 @@ Added:
 - `vivanta-boot/tools/qemu-gates.sh` — boots the kernel under QEMU and verifies
   18 serial-log markers (22/22 gate matrix, 0 panics), locally and in CI.
 - `vivanta-boot/tools/ci-local.sh` — one-command local replay of the pipeline.
+- `vivanta-boot/tools/rust-objcopy.sh` — resolves `rust-objcopy` from the
+  toolchain sysroot (the `llvm-tools` component, not on PATH by default).
 - `docs/tooling/ci-cd.md` — pipeline, release flow, local ritual, known traps.
 
 Changed:

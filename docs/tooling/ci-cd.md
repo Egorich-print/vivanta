@@ -50,6 +50,7 @@ them, so a local green run means a CI green run modulo emulation speed.
 | `mkstemp failed ... File exists` | BSD `mktemp` needs the template to end in `XXXXXX` | `mktemp /tmp/x.XXXXXX` then append the suffix |
 | `mkfs.vfat: command not found` | `mtools`/`dosfstools` missing | `brew install mtools dosfstools` / `apt-get install -y mtools dosfstools` |
 | `gh release create` → 403 | workflow lacks `contents: write` | only `release.yml` gets write; `ci.yml` stays read-only |
+| `rust-objcopy: command not found` on the runner | it lives in the `llvm-tools` component, which rustup does not put on PATH (locally it came from cargo-binutils) | call `tools/rust-objcopy.sh`, which resolves it from the toolchain sysroot |
 
 ## Build assets (`assets` release)
 

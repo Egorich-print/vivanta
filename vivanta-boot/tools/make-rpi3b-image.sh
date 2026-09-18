@@ -39,7 +39,7 @@ PART_START=8192   # LBA — Raspberry Pi OS convention
 mkdir -p "${OUT_DIR}"
 echo "==> building ${TARGET}"
 cargo build -p "${TARGET}" --target aarch64-unknown-none
-rust-objcopy -O binary "${ELF}" "${KERNEL}"
+./tools/rust-objcopy.sh -O binary "${ELF}" "${KERNEL}"
 echo "    kernel8.img: $(ls -lh "${KERNEL}" | awk '{print $5}')"
 
 # 2. Firmware (cached under images/) ----------------------------------------

@@ -31,9 +31,8 @@ jobs:
       - name: package binaries
         working-directory: vivanta-boot
         run: |
-          rust-objcopy -O binary target/aarch64-unknown-none/debug/vivanta-target-rk3568 \
-            vivanta-target-rk3568.bin
-          cp target/aarch64-unknown-none/debug/vivanta-target-qemu-aarch64 .
+          ./tools/rust-objcopy.sh -O binary target/aarch64-unknown-none/debug/vivanta-target-rk3568 \
+            vivanta-target-rk3568.bin          cp target/aarch64-unknown-none/debug/vivanta-target-qemu-aarch64 .
           cp user-init/user-init.elf .
           sha256sum vivanta-target-qemu-aarch64 vivanta-target-rk3568.bin user-init.elf > SHA256SUMS
           ls -la
