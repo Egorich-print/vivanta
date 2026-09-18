@@ -11,8 +11,11 @@
 #   partition (contrast BalanSir, whose A/B rootfs layout is irrelevant here).
 #
 # Requirements: cargo + rust-objcopy (rustup component add llvm-tools),
-# curl, python3, and macOS hdiutil. On Linux use mkfs.vfat+mtools or
-# buildroot genimage with the same file set (see PLATFORM_BRINGUP.md §5).
+# curl, python3, plus mtools + dosfstools (mkfs.vfat, mcopy, mdir) —
+# install with `brew install mtools dosfstools` (macOS) or
+# `apt-get install -y mtools dosfstools` (Linux). The FAT assembly is
+# deliberately portable so the exact same script builds the image locally
+# and in CI.
 #
 # The Broadcom firmware blobs are downloaded, NOT committed (images/ is
 # gitignored) — redistribute the image accordingly (firmware LICENCE terms).
@@ -28,7 +31,7 @@ FW_DIR="${OUT_DIR}/firmware"
 FW_OVERLAYS="${FW_DIR}/overlays"
 KERNEL="${OUT_DIR}/kernel8.img"
 IMG="${OUT_DIR}/vivanta-rpi3b-plus.img"
-FW_BASE="https://raw.githubusercontent.com/raspberrypi/firmware/master/boot"
+FW_BASE="${VIVANTA_FW_BASE:-https://raw.githubusercontent.com/raspberrypi/firmware/master/boot}"
 FAT_MB=64
 PART_START=8192   # LBA — Raspberry Pi OS convention
 
@@ -78,47 +81,37 @@ gpu_mem=64
 disable_overscan=1
 EOF
 
-# 4. Assemble the FAT32 boot partition --------------------------------------
-command -v hdiutil >/dev/null 2>&1 || {
-    echo "ERROR: hdiutil not found (macOS). On Linux build the image with" >&2
-    echo "       mkfs.vfat + mtools, same file set — see PLATFORM_BRINGUP.md §5." >&2
-    exit 1
-}
+# 4. Assemble the FAT32 boot partition (portable: mkfs.vfat + mtools) --------
+for t in mkfs.vfat mmd mcopy mdir; do
+    command -v "${t}" >/dev/null 2>&1 || {
+        echo "ERROR: '${t}' not found. Install mtools + dosfstools:" >&2
+        echo "       macOS: brew install mtools dosfstools" >&2
+        echo "       Linux: apt-get install -y mtools dosfstools" >&2
+        exit 1
+    }
+done
 
-BOOT_DMG="${OUT_DIR}/boot.vfat.dmg"
-MNT="$(mktemp -d)/vivanta-boot"
-rm -f "${BOOT_DMG}"
-# macOS: strip xattrs and prevent AppleDouble ._ sidecars on the FAT volume
-# (they are junk the firmware ignores, but they must not be shipped).
-export COPYFILE_DISABLE=1
-if command -v xattr >/dev/null 2>&1; then
-    xattr -c "${FW_DIR}"/* "${FW_OVERLAYS}"/* "${KERNEL}" "${OUT_DIR}/config.txt" 2>/dev/null || true
-fi
-hdiutil create -size "${FAT_MB}m" -fs MS-DOS -volname VIVANTA "${BOOT_DMG}" >/dev/null
-hdiutil attach -nobrowse -mountpoint "${MNT}" "${BOOT_DMG}" >/dev/null
-mkdir -p "${MNT}/overlays"
-cp "${FW_DIR}/bootcode.bin" "${FW_DIR}/start.elf" "${FW_DIR}/fixup.dat" \
-   "${FW_DIR}/bcm2710-rpi-3-b-plus.dtb" "${MNT}/"
-cp "${FW_OVERLAYS}/miniuart-bt.dtbo" "${MNT}/overlays/"
-cp "${KERNEL}" "${MNT}/kernel8.img"
-cp "${OUT_DIR}/config.txt" "${MNT}/config.txt"
-if command -v dot_clean >/dev/null 2>&1; then
-    dot_clean -m "${MNT}" 2>/dev/null || true
-fi
-sync
-hdiutil detach "${MNT}" >/dev/null
+BOOT_IMG="${OUT_DIR}/boot.vfat"
+rm -f "${BOOT_IMG}"
+# -C creates the image file; BLOCK-COUNT is in 1 KiB units (64 * 1024 KiB).
+mkfs.vfat -C -F 32 -n VIVANTA "${BOOT_IMG}" $((FAT_MB * 1024)) >/dev/null
+mmd -i "${BOOT_IMG}" ::/overlays
+mcopy -i "${BOOT_IMG}" \
+    "${FW_DIR}/bootcode.bin" "${FW_DIR}/start.elf" \
+    "${FW_DIR}/fixup.dat" "${FW_DIR}/bcm2710-rpi-3-b-plus.dtb" ::/
+mcopy -i "${BOOT_IMG}" "${FW_OVERLAYS}/miniuart-bt.dtbo" ::/overlays/
+mcopy -i "${BOOT_IMG}" "${KERNEL}" ::/kernel8.img
+mcopy -i "${BOOT_IMG}" "${OUT_DIR}/config.txt" ::/config.txt
 
 # 5. Wrap into a partition table (MBR, partition at LBA 8192) ----------------
-python3 - "${BOOT_DMG}" "${IMG}" "${PART_START}" <<'PY'
+python3 - "${BOOT_IMG}" "${IMG}" "${PART_START}" <<'PY'
 import os, struct, shutil, sys
 boot, out, start = sys.argv[1], sys.argv[2], int(sys.argv[3])
-total = os.path.getsize(boot)
-fat_sectors = (total - 512) // 512            # drop hdiutil's own MBR
+fat_sectors = os.path.getsize(boot) // 512
 with open(out, "wb") as f:
     f.truncate((start + fat_sectors) * 512)
 with open(boot, "rb") as i, open(out, "r+b") as o:
-    i.seek(512)                                # FAT VBR must land on `start`
-    o.seek(start * 512)
+    o.seek(start * 512)                        # FAT VBR lands on `start`
     shutil.copyfileobj(i, o)
 with open(out, "r+b") as f:
     for vbr in (0, 6):                         # VBR + its backup: hidden sectors
@@ -135,17 +128,15 @@ with open(out, "r+b") as f:
     f.seek(0); f.write(mbr)
 print(f"    image: {fat_sectors} FAT sectors, partition at LBA {start}")
 PY
-rm -f "${BOOT_DMG}"
+rm -f "${BOOT_IMG}"
 
 # 6. Verify ------------------------------------------------------------------
 echo "==> verifying image contents"
-hdiutil attach -nobrowse -mountpoint "${MNT}" "${IMG}" >/dev/null
-( cd "${MNT}" && find . -type f | sort )
-hdiutil detach "${MNT}" >/dev/null
+mdir -i "${IMG}@@$((PART_START * 512))" ::/ | sed 's/^/    /'
 
 echo
 echo "==> done: ${IMG} ($(ls -lh "${IMG}" | awk '{print $5}'))"
-shasum -a 256 "${IMG}" || true
+shasum -a 256 "${IMG}" || sha256sum "${IMG}" || true
 echo
 echo "Flash (replace N with the SD disk, e.g. disk4 shown by 'diskutil list'):"
 echo "  diskutil unmountDisk /dev/diskN"

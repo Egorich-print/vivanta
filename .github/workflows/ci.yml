@@ -1,0 +1,138 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # Fast, dependency-free checks. Fail in seconds, not minutes.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: rustfmt
+        working-directory: vivanta-boot
+        run: |
+          cargo fmt --all -- --check
+          ( cd user-init && cargo fmt --check )
+      - name: shell syntax (tracked *.sh)
+        run: |
+          fail=0
+          while IFS= read -r f; do
+            bash -n "$f" || { echo "syntax error: $f"; fail=1; }
+          done < <(git ls-files '*.sh')
+          [ "$fail" = 0 ] || exit 1
+          echo "all tracked shell scripts parse"
+      - name: python syntax (tracked *.py)
+        run: |
+          while IFS= read -r f; do python3 -m py_compile "$f" || exit 1; done < <(git ls-files '*.py')
+          echo "all tracked python files compile"
+      - name: executable bits
+        run: |
+          bad=$(git ls-files -s | awk '$1=="100644" && $4 ~ /\.sh$/ {print $4}')
+          if [ -n "$bad" ]; then echo "these must be 755:"; echo "$bad"; exit 1; fi
+          echo "exec bits ok"
+
+  # Host-runnable units run natively on x86_64 — no emulation involved.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: host unit tests (native x86_64)
+        working-directory: vivanta-boot
+        run: cargo test -p vivanta-vm -p vivanta-exec --target x86_64-unknown-linux-gnu
+
+  build:
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      # user-init.elf is gitignored and embedded by the kernel via include_bytes!,
+      # so it MUST be built before anything that links vivanta-kernel.
+      - name: build EL0 userland
+        working-directory: vivanta-boot
+        run: ./tools/build-user-init.sh
+      - name: check workspace (compile coverage)
+        working-directory: vivanta-boot
+        run: cargo check --workspace
+      # Note: build the QEMU target on its own. A bare `--workspace` build would
+      # unify target-rpi3b-plus's `spec-table-desc` feature into arch-aarch64 and
+      # produce a QEMU kernel that hangs at MMU enable.
+      - name: build QEMU AArch64 target
+        working-directory: vivanta-boot
+        run: cargo build -p vivanta-target-qemu-aarch64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qemu-kernel-${{ github.run_number }}
+          path: vivanta-boot/target/aarch64-unknown-none/debug/vivanta-target-qemu-aarch64
+          if-no-files-found: error
+          retention-days: 14
+
+  # Boot the real kernel under TCG. Emulation is TCG cortex-a53 in both CI and
+  # local runs, so this is the same proven configuration, just slower.
+  qemu:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - uses: actions/checkout@v4
+      - name: tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-arm
+      - uses: actions/download-artifact@v4
+        with:
+          name: qemu-kernel-${{ github.run_number }}
+          path: out
+      - name: QEMU gate matrix (TCG cortex-a53)
+        env:
+          QEMU_TIMEOUT: "600"   # x86_64 emulating aarch64 is slower than native
+        run: |
+          ls -la out
+          chmod +x out/vivanta-target-qemu-aarch64
+          bash vivanta-boot/tools/qemu-gates.sh "$PWD/out/vivanta-target-qemu-aarch64" "$QEMU_TIMEOUT"
+
+  # SD image for the declared hardware target. The FAT assembly is portable
+  # (mkfs.vfat + mtools), so the same script runs here and locally.
+  image:
+    runs-on: ubuntu-latest
+    needs: [lint]
+    steps:
+      - uses: actions/checkout@v4
+      - name: tools
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq mtools dosfstools
+      - name: build EL0 userland
+        working-directory: vivanta-boot
+        run: ./tools/build-user-init.sh
+      - name: fetch RPi firmware (release "assets")
+        env:
+          GH_TOKEN: ${{ github.token }}
+        continue-on-error: true   # fall back to upstream raspberrypi/firmware
+        run: |
+          mkdir -p vivanta-boot/images/rpi3b-plus/firmware
+          gh release download assets -R "$GITHUB_REPOSITORY" \
+            --pattern 'rpi3b-firmware-*.tar.gz' --output fw.tar.gz --clobber
+          tar xzf fw.tar.gz -C vivanta-boot/images/rpi3b-plus/firmware
+          ls -la vivanta-boot/images/rpi3b-plus/firmware
+      - name: build SD image
+        working-directory: vivanta-boot
+        run: ./tools/make-rpi3b-image.sh
+      - name: checksums
+        working-directory: vivanta-boot/images/rpi3b-plus
+        run: sha256sum vivanta-rpi3b-plus.img kernel8.img > SHA256SUMS && cat SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpi3b-image-${{ github.run_number }}
+          path: |
+            vivanta-boot/images/rpi3b-plus/vivanta-rpi3b-plus.img
+            vivanta-boot/images/rpi3b-plus/kernel8.img
+            vivanta-boot/images/rpi3b-plus/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 14

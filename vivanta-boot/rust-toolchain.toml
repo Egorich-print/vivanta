@@ -7,3 +7,6 @@
 [toolchain]
 channel = "1.98.0"
 targets = ["aarch64-unknown-none"]
+# rustfmt: local + CI formatting gate. llvm-tools: rust-objcopy for the RPi
+# kernel8.img / RK3568 .bin conversions in tools/make-rpi3b-image.sh.
+components = ["rustfmt", "clippy", "llvm-tools"]

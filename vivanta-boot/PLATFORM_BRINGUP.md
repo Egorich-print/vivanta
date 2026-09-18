@@ -88,9 +88,15 @@ sudo dd if=images/rpi3b-plus/vivanta-rpi3b-plus.img of=/dev/rdiskN bs=4m
 sync && diskutil eject /dev/diskN
 ```
 The Broadcom firmware blobs are **downloaded, not committed** (`images/`
-is gitignored) — mind their licence if you redistribute the image.
-Linux has no `hdiutil`: build the same file set with `mkfs.vfat` + `mtools`
-(or a Buildroot `genimage` config, as BalanSir does).
+is gitignored) — mind their licence if you redistribute the image. CI unpacks
+them from the tech release tagged `assets` into `images/rpi3b-plus/firmware/`
+(the script's cache); locally they are fetched from upstream on first build.
+The FAT assembly uses `mkfs.vfat` + `mtools`, so the identical script runs on
+macOS and Linux — install the tools first:
+```sh
+brew install mtools dosfstools          # macOS
+apt-get install -y mtools dosfstools    # Debian/Ubuntu
+```
 
 `config.txt` shipped by the script (all lines matter):
 ```text
