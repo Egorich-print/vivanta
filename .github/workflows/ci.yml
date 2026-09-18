@@ -78,14 +78,15 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Boot the real kernel. On an AArch64 runner the guest runs natively through
-  # QEMU's KVM backend (host and guest are the same architecture); x86_64
-  # runners would have to fall back to TCG, where this gate intermittently
-  # deadlocked at M10.4.
+  # Boot the real kernel on an AArch64 runner. Host and guest are the same
+  # architecture, so QEMU runs the guest without cross-ISA translation and the
+  # gate is fast and deterministic. KVM is not exposed on GitHub-hosted
+  # runners today (no /dev/kvm), but the job auto-selects it if that changes.
+  # An x86_64 runner would force cross-ISA TCG, which intermittently hung at
+  # the M10.4 fork gate (removed from that path on purpose).
   qemu:
     runs-on: ubuntu-24.04-arm
     needs: [build]
-    continue-on-error: true   # provisional: flip to blocking after green on KVM
     steps:
       - uses: actions/checkout@v4
       - name: tools
@@ -102,7 +103,7 @@ jobs:
             echo "QEMU_ACCEL=kvm"   >> "$GITHUB_ENV"
             echo "QEMU_CPU=host"    >> "$GITHUB_ENV"
           else
-            echo "no /dev/kvm — falling back to TCG"
+            echo "no /dev/kvm — same-arch TCG"
             echo "QEMU_ACCEL=tcg"   >> "$GITHUB_ENV"
             echo "QEMU_CPU=cortex-a53" >> "$GITHUB_ENV"
           fi

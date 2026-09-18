@@ -168,14 +168,17 @@ Deferred with rationale: `UserPtr` adoption in hot syscalls, `register()`
 panic→Result conversion, kernel W^X, MAIR/TCR unification — all touch proven
 paths for no P0 gain; revisit after next functional milestone.
 
-## Known CI caveat (2026-09-18)
+## CI QEMU gate (2026-09-18)
 
-The QEMU gate matrix is green locally (native TCG) and passed once on the
-GitHub x86_64 runner, but on that runner it intermittently deadlocks at the
-M10.4 EL0-fork gate: `fork()` returns, then the parent's `waitpid` is never
-satisfied until the job times out. The CI `qemu` job is therefore **advisory**
-(`continue-on-error: true`) until this is root-caused — see
-`docs/tooling/ci-cd.md`. Everything else in CI is blocking.
+The gate boots the kernel under QEMU on an **AArch64 runner** (`ubuntu-24.04-arm`),
+so host and guest share an architecture and the run is fast and deterministic.
+GitHub does not expose `/dev/kvm` on hosted runners; the job auto-selects KVM if
+that changes. The job is **blocking**.
+
+History: on an x86_64 runner the gate ran under cross-ISA TCG and intermittently
+deadlocked at the M10.4 EL0-fork gate (`fork()` returns, then the parent's
+`waitpid` is never satisfied). Re-running on an AArch64 runner cleared it —
+same-arch TCG, no cross-ISA translation. See `docs/tooling/ci-cd.md`.
 
 ## Scope fence (holds through any next milestone until explicitly lifted)
 

@@ -18,14 +18,15 @@ workflow_dispatch → release → attach artifacts to a GitHub Release
   `aarch64-unknown-none`, so host tests pass `--target x86_64-unknown-linux-gnu`.
 - **build** — builds the EL0 `user-init.elf`, `cargo check --workspace`, then the
   QEMU target standalone; uploads the kernel ELF as an artifact.
-- **qemu** — boots the artifact under `-M virt -cpu cortex-a53` (TCG) and checks
-  the serial log with `tools/qemu-gates.sh` (18 required markers, no panic).
-  `QEMU_TIMEOUT=600` because x86_64 emulation is slower than native.
-  **Advisory (`continue-on-error: true`)**: the gate is green locally and passed
-  once on the runner, but on x86_64 TCG it intermittently deadlocks at the
-  M10.4 EL0-fork gate — `fork()` returns, then the parent's `waitpid` is never
-  satisfied. That points at a kernel timing bug, so the job stays visible with
-  its real status; flip it back to blocking when the hang is fixed.
+- **qemu** — boots the artifact on an **AArch64 runner** (`ubuntu-24.04-arm`)
+  and checks the serial log with `tools/qemu-gates.sh` (18 required markers, no
+  panic). Host and guest share an architecture, so QEMU runs without cross-ISA
+  translation: fast and deterministic, and the job is **blocking**. GitHub does
+  not expose `/dev/kvm` on hosted runners, but the job auto-selects KVM if that
+  ever changes.
+  (History: on an x86_64 runner the same gate ran under cross-ISA TCG and
+  intermittently deadlocked at the M10.4 EL0-fork gate; moving to an AArch64
+  runner fixed it.)
 - **image** — builds the RPi3B+ SD image portably (`mkfs.vfat` + `mtools`).
 - **release** — `workflow_dispatch` with a tag (default `v0.1.0-alpha`); builds
   the kernel binaries and the SD image, then `gh release create` with
