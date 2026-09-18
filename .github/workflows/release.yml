@@ -92,7 +92,7 @@ jobs:
           find dist -type f | sort
           flags="--prerelease"
           [ "${{ inputs.prerelease }}" = "true" ] || flags=""
-          gh release create "${{ inputs.tag }}" $flags \
+          gh release create "${{ inputs.tag }}" -R "$GITHUB_REPOSITORY" $flags \
             --title "Vivanta ${{ inputs.tag }}" \
             --notes "Experimental bare-metal AArch64 kernel, built from \`${{ github.sha }}\`.
 
