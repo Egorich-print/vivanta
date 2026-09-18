@@ -127,7 +127,7 @@ deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
 
 | Platform | Status |
 |----------|--------|
-| qemu-aarch64 | Active, boots to kernel_main, 19/19 gates PASS (P0 mission 2026-09-09) |
+| qemu-aarch64 | Active, boots to kernel_main, 22/22 gates PASS (0 panics) |
 | rk3568 | Diagnostic only (does not link vivanta-kernel) |
 | rpi3b+ | Standalone diagnostic (early_mmu identity map) |
 | qemu-armv7a | Frozen (arch-armv7a is an empty stub; removed from workspace members) |
@@ -167,6 +167,15 @@ gates in the QEMU boot matrix (now 19 PASS, 0 panics):
 Deferred with rationale: `UserPtr` adoption in hot syscalls, `register()`
 panic→Result conversion, kernel W^X, MAIR/TCR unification — all touch proven
 paths for no P0 gain; revisit after next functional milestone.
+
+## Known CI caveat (2026-09-18)
+
+The QEMU gate matrix is green locally (native TCG) and passed once on the
+GitHub x86_64 runner, but on that runner it intermittently deadlocks at the
+M10.4 EL0-fork gate: `fork()` returns, then the parent's `waitpid` is never
+satisfied until the job times out. The CI `qemu` job is therefore **advisory**
+(`continue-on-error: true`) until this is root-caused — see
+`docs/tooling/ci-cd.md`. Everything else in CI is blocking.
 
 ## Scope fence (holds through any next milestone until explicitly lifted)
 

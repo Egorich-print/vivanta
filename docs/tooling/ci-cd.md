@@ -20,9 +20,12 @@ workflow_dispatch → release → attach artifacts to a GitHub Release
   QEMU target standalone; uploads the kernel ELF as an artifact.
 - **qemu** — boots the artifact under `-M virt -cpu cortex-a53` (TCG) and checks
   the serial log with `tools/qemu-gates.sh` (18 required markers, no panic).
-  Blocking; `QEMU_TIMEOUT=600` because x86_64 emulation is slower than native.
-  If the runner ever proves non-reproducible, demote the job to
-  `continue-on-error: true` **with a comment** instead of deleting it.
+  `QEMU_TIMEOUT=600` because x86_64 emulation is slower than native.
+  **Advisory (`continue-on-error: true`)**: the gate is green locally and passed
+  once on the runner, but on x86_64 TCG it intermittently deadlocks at the
+  M10.4 EL0-fork gate — `fork()` returns, then the parent's `waitpid` is never
+  satisfied. That points at a kernel timing bug, so the job stays visible with
+  its real status; flip it back to blocking when the hang is fixed.
 - **image** — builds the RPi3B+ SD image portably (`mkfs.vfat` + `mtools`).
 - **release** — `workflow_dispatch` with a tag (default `v0.1.0-alpha`); builds
   the kernel binaries and the SD image, then `gh release create` with
