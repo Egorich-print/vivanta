@@ -1,7 +1,7 @@
 # Vivanta Status
 
 > Last updated: 2026-09-18 (CI/CD added; QEMU gate matrix re-verified locally
-> at 22/22 PASS — see `docs/tooling/ci-cd.md`)
+> covering the 22 milestone gate groups, 0 panics — see `docs/tooling/ci-cd.md`)
 > Prior update: 2026-09-09 (P0 mission — see "P0 corrective mission" below)
 
 ## Toolchain
@@ -56,7 +56,7 @@ backlog за консервативным full-flush.
 - MappingSet ⇔ hardware verifier — ✅ mechanical per-piece check
   (Present ⇔ valid leaf + exact permission bits; Lazy ⇔ no leaf)
 - Limitations: MappingSet fixed at 64 slots (demo-scale, heap-backed
-  storage is follow-up); MAX_ADDRESS_SPACES=8 retained (fault path
+  storage is follow-up); MAX_ADDRESS_SPACES=16 retained (fault path
   identifies AS by TTBR0 match — no ID reuse possible); EL0-originated
   lazy fills not yet resolved (containment unchanged)
 
@@ -127,7 +127,7 @@ deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
 
 | Platform | Status |
 |----------|--------|
-| qemu-aarch64 | Active, boots to kernel_main, 22/22 gates PASS (0 panics) |
+| qemu-aarch64 | Active, boots to kernel_main, 18/18 CI markers PASS (0 panics) |
 | rk3568 | Diagnostic only (does not link vivanta-kernel) |
 | rpi3b+ | Standalone diagnostic (early_mmu identity map) |
 | qemu-armv7a | Frozen (arch-armv7a is an empty stub; removed from workspace members) |
@@ -162,7 +162,7 @@ gates in the QEMU boot matrix (now 19 PASS, 0 panics):
   18 KiB past the bottom — second INV-003 instance); `context_fork` sets
   child x30 to `eret_to_user_stub` (first scheduled fork child jumped to
   ELR=0 before); gates M7.12-dual-ELF and M10.4-EL0-fork green. Matrix at
-  22/22 PASS (13 pre-existing + 9 new), 0 panics.
+  22/22 milestone gate groups PASS (13 pre-existing + 9 new), 0 panics.
 
 Deferred with rationale: `UserPtr` adoption in hot syscalls, `register()`
 panic→Result conversion, kernel W^X, MAIR/TCR unification — all touch proven

@@ -21,8 +21,9 @@ Raspberry Pi 3B+, SoC Qualcomm). Ядро — `no_std` Cargo-workspace на Rust
 ## Статус
 
 **QEMU-correct, но ещё не hardware-correct.** На QEMU `virt` AArch64-ядро
-доходит до `kernel_main`, проходит всю матрицу гейтов (**22/22 PASS, 0 паник**)
-и запускает настоящий EL0-userland. Валидации на кремнии пока нет.
+доходит до `kernel_main`, проходит матрицу загрузочных гейтов (**18 обязательных
+маркеров в CI, без паник**, покрывающих 22 группы гейтов по вехам) и запускает
+настоящий EL0-userland. Валидации на кремнии пока нет.
 
 | Область | Статус |
 |---------|--------|
@@ -35,13 +36,18 @@ Raspberry Pi 3B+, SoC Qualcomm). Ядро — `no_std` Cargo-workspace на Rust
 | Модель процессов (задачи, потоки, таблица процессов, жизненный цикл) | ✅ |
 | ELF64 AArch64 загрузчик (с валидацией, W^X) | ✅ |
 | Граница пользовательской памяти (`access_ok`, `-EFAULT`) и сдерживание EL0-ошибок | ✅ |
-| Системные вызовы (`read`, `write`, `exit`, `yield`, `mmap`, `munmap`, `mprotect`, `fork`, `waitpid`, `execve`) | ✅ |
+| Живые системные вызовы: `write`, `exit`, `yield`, `mmap`, `munmap`, `mprotect`, `fork`, `waitpid`, `execve`, `kill`, `getpid`, `getppid`, `rt_sigaction` | ✅ |
+| Зарезервированные вызовы: `read`, `rt_sigprocmask`, `rt_sigreturn` возвращают `-ENOSYS` | — |
 | EL0-userland: hello через `write`, `execve`, round-trip `fork`/`waitpid` | ✅ |
-| Сигналы: `SIGKILL`/`SIGCHLD` на синхронных путях | ✅ |
+| Сигналы: `SIGKILL`/`SIGCHLD` на синхронных путях | ✅ (асинхронная доставка не реализована) |
+
+`execve` реализован **только для встроенного образа `/init`** — файловой системы
+нет, `argv`/`envp` пока не кладутся на пользовательский стек.
 
 Вне области (сознательно не реализовано): IPC · хранилища · драйверы · сеть ·
 Ed25519/BIP-39 идентичность · TTBR1/ASID · асинхронная доставка сигналов в EL0.
-См. [STATUS.md](STATUS.md).
+См. [STATUS.md](STATUS.md) и
+[бэклог глобального аудита](docs/audit/2026-09-24-global-audit.md).
 
 ## Быстрый старт (QEMU AArch64)
 
@@ -78,7 +84,8 @@ syscall: exit(0)
 
 ## Непрерывная интеграция
 
-Каждый push и pull request запускает [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+Пуш в `main` и pull request в `main` запускают
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 - **lint** — `rustfmt`, синтаксис shell/python, exec-биты;
 - **test** — host unit-тесты (`vivanta-vm`, `vivanta-exec`) нативно на x86_64;
@@ -86,10 +93,11 @@ syscall: exit(0)
 - **qemu** — загрузка ядра под `cortex-a53` (TCG) с проверкой матрицы гейтов;
 - **image** — сборка прошиваемого SD-образа для Raspberry Pi 3B+.
 
-Релизы по тегу публикуются через
-[`.github/workflows/release.yml`](.github/workflows/release.yml) в
-[Releases](https://github.com/Egorich-print/vivanta/releases): SD-образ,
-`kernel8.img`, QEMU-ELF, плоский бинарник для RK3568 и EL0-образ.
+Релизы публикуются ручным запуском
+[`.github/workflows/release.yml`](.github/workflows/release.yml) с указанием тега
+в [Releases](https://github.com/Egorich-print/vivanta/releases): SD-образ,
+`kernel8.img`, QEMU-ELF, плоский бинарник **диагностического адаптера** RK3568
+и EL0-образ.
 Детали и локальный ритуал: [`docs/tooling/ci-cd.md`](docs/tooling/ci-cd.md).
 
 ## Запуск на Raspberry Pi 3B+

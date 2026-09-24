@@ -16,7 +16,7 @@
 | **unlocked** | **no** | **Bootloader is LOCKED — all flash operations will be rejected until Mi Unlock is completed** |
 | anti | 4 | Anti-rollback fused at version 4: firmware with lower anti-version refuses to boot. Custom payloads are unaffected (ABL checks only signed firmware images), but stock downgrades below the V12-era are permanently blocked |
 | crc | 1 | CRC check enabled |
-| token | `VQEBIAEQbe2B4CWYYLkJqKlJFQj+fwMGd2h5cmVkAgQOoF7o` | Base64 MiUL unlock token; ASN.1-ish structure contains literal "whyred" device marker + account binding data. This is what Mi Unlock Tool signs against |
+| token | **REDACTED** (was published here before 2026-09-18) | Base64 MiUL unlock token; ASN.1-ish structure contains a literal "whyred" device marker plus account-binding data. This is what Mi Unlock Tool signs against. **The value was removed because this repository is public — treat any previously published copy as compromised and rotate/revoke it.** |
 | hw-revision | 10000 | |
 | battery-voltage | 4148 mV | healthy for flashing |
 | off-mode-charge | 0 | |

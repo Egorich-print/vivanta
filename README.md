@@ -20,8 +20,9 @@ Raspberry Pi 3B+, Qualcomm SoCs). The kernel is a `no_std` Rust workspace.
 ## Status
 
 **QEMU-correct, not yet hardware-correct.** On QEMU `virt` the AArch64 kernel
-boots to `kernel_main`, runs the full gate matrix (**22/22 PASS, 0 panics**)
-and runs genuine EL0 userland. There is no on-silicon validation yet.
+boots to `kernel_main`, runs the boot gate matrix (**18 required serial markers
+in CI, no panics**, covering the 22 milestone gate groups) and runs genuine EL0
+userland. There is no on-silicon validation yet.
 
 | Area | State |
 |------|-------|
@@ -34,13 +35,18 @@ and runs genuine EL0 userland. There is no on-silicon validation yet.
 | Process model (tasks, threads, process table, lifecycle) | ✅ |
 | ELF64 AArch64 loader (validated, W^X) | ✅ |
 | User memory boundary (`access_ok`, `-EFAULT`) + EL0 fault containment | ✅ |
-| Syscalls (`read`, `write`, `exit`, `yield`, `mmap`, `munmap`, `mprotect`, `fork`, `waitpid`, `execve`) | ✅ |
+| Syscalls live: `write`, `exit`, `yield`, `mmap`, `munmap`, `mprotect`, `fork`, `waitpid`, `execve`, `kill`, `getpid`, `getppid`, `rt_sigaction` | ✅ |
+| Syscalls reserved: `read`, `rt_sigprocmask`, `rt_sigreturn` return `-ENOSYS` | — |
 | EL0 userland: hello via `write`, `execve`, `fork`/`waitpid` round-trip | ✅ |
-| Signals: `SIGKILL`/`SIGCHLD` on synchronous paths | ✅ |
+| Signals: `SIGKILL`/`SIGCHLD` on synchronous paths | ✅ (async delivery is not implemented) |
+
+`execve` is implemented for the **built-in `/init` image only** — there is no
+filesystem, and `argv`/`envp` are not yet placed on the user stack.
 
 Scope fence (deliberately not implemented yet): IPC · storage · drivers ·
 networking · Ed25519/BIP-39 identity · TTBR1/ASID · asynchronous EL0 signal
-delivery. See [STATUS.md](STATUS.md).
+delivery. See [STATUS.md](STATUS.md) and the
+[global audit backlog](docs/audit/2026-09-24-global-audit.md).
 
 ## Quick start (QEMU AArch64)
 
@@ -77,7 +83,8 @@ To check the boot automatically (same gate CI runs):
 
 ## Continuous integration
 
-Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
+Pushes to `main` and pull requests targeting `main` run
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 - **lint** — `rustfmt`, shell/python syntax, executable bits;
 - **test** — host unit tests (`vivanta-vm`, `vivanta-exec`) natively on x86_64;
@@ -85,11 +92,11 @@ Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/
 - **qemu** — boots the kernel under `cortex-a53` TCG and verifies the gate matrix;
 - **image** — builds the flashable Raspberry Pi 3B+ SD image.
 
-Tagged builds are published from
-[`.github/workflows/release.yml`](.github/workflows/release.yml) to
+Releases are published by manually dispatching
+[`.github/workflows/release.yml`](.github/workflows/release.yml) with a tag, to
 [Releases](https://github.com/Egorich-print/vivanta/releases): the SD image,
-`kernel8.img`, the QEMU kernel ELF, a flat RK3568 binary and the EL0 image.
-Details and the local ritual: [`docs/tooling/ci-cd.md`](docs/tooling/ci-cd.md).
+`kernel8.img`, the QEMU kernel ELF, a flat RK3568 **diagnostic adapter** binary
+and the EL0 image. Details and the local ritual: [`docs/tooling/ci-cd.md`](docs/tooling/ci-cd.md).
 
 ## Running on a Raspberry Pi 3B+
 
