@@ -38,6 +38,8 @@ PART_START=8192   # LBA — Raspberry Pi OS convention
 # 1. Kernel ------------------------------------------------------------------
 mkdir -p "${OUT_DIR}"
 echo "==> building ${TARGET}"
+# The kernel embeds the gitignored EL0 image at compile time.
+[ -f user-init/user-init.elf ] || ./tools/build-user-init.sh
 cargo build -p "${TARGET}" --target aarch64-unknown-none
 ./tools/rust-objcopy.sh -O binary "${ELF}" "${KERNEL}"
 echo "    kernel8.img: $(ls -lh "${KERNEL}" | awk '{print $5}')"

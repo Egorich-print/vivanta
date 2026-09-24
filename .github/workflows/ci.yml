@@ -73,7 +73,7 @@ jobs:
         run: cargo build -p vivanta-target-qemu-aarch64
       - uses: actions/upload-artifact@v4
         with:
-          name: qemu-kernel-${{ github.run_number }}
+          name: qemu-kernel-${{ github.run_number }}-${{ github.run_attempt }}
           path: vivanta-boot/target/aarch64-unknown-none/debug/vivanta-target-qemu-aarch64
           if-no-files-found: error
           retention-days: 14
@@ -93,7 +93,7 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq qemu-system-arm
       - uses: actions/download-artifact@v4
         with:
-          name: qemu-kernel-${{ github.run_number }}
+          name: qemu-kernel-${{ github.run_number }}-${{ github.run_attempt }}
           path: out
       - name: pick accelerator (KVM if available, else TCG)
         run: |
@@ -146,7 +146,7 @@ jobs:
         run: sha256sum vivanta-rpi3b-plus.img kernel8.img > SHA256SUMS && cat SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: rpi3b-image-${{ github.run_number }}
+          name: rpi3b-image-${{ github.run_number }}-${{ github.run_attempt }}
           path: |
             vivanta-boot/images/rpi3b-plus/vivanta-rpi3b-plus.img
             vivanta-boot/images/rpi3b-plus/kernel8.img

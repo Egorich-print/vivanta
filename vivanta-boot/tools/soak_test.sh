@@ -28,7 +28,8 @@ PIDFILE="${PIDFILE_BASE}.pid"
 echo "=== Vivanta M5.0 G4+ soak test (${DURATION}s) ==="
 echo "log: ${LOG}"
 
-# Build the QEMU target first.
+# Build the QEMU target first (the kernel embeds the gitignored EL0 image).
+[ -f user-init/user-init.elf ] || ./tools/build-user-init.sh
 cargo build -p vivanta-target-qemu-aarch64 >/dev/null
 
 # Launch QEMU.

@@ -14,6 +14,12 @@ case "${ADAPTER}" in
 esac
 
 echo "=== Building ${PACKAGE} ==="
+# The EL0 image is embedded by vivanta-kernel at compile time and is
+# gitignored, so a fresh clone needs it before any kernel-linking target.
+case "${ADAPTER}" in
+    vivanta-target-rk3568) : ;;  # diagnostic: does not link the kernel
+    *) [ -f user-init/user-init.elf ] || ./tools/build-user-init.sh ;;
+esac
 cargo build -p "${PACKAGE}"
 
 case "${ADAPTER}" in
@@ -23,9 +29,7 @@ case "${ADAPTER}" in
         BIN="images/vivanta-rk3568.bin"
         mkdir -p images
         echo "=== Converting to flat binary ==="
-        rust-objcopy -O binary "${ELF}" "${BIN}"
-        echo "=== Converting to flat binary ==="
-        rust-objcopy -O binary "${ELF}" "${BIN}"
+        ./tools/rust-objcopy.sh -O binary "${ELF}" "${BIN}"
         ls -lh "${BIN}"
 
         # Verify ARM64 header
@@ -59,7 +63,7 @@ with open('${BIN}','rb') as f:
         ELF="target/aarch64-unknown-none/debug/vivanta-target-x96q"
         BIN="vivanta-x96q.bin"
         echo "=== Converting to flat binary ==="
-        rust-objcopy -O binary "${ELF}" "${BIN}"
+        ./tools/rust-objcopy.sh -O binary "${ELF}" "${BIN}"
         ls -lh "${BIN}"
         file "${BIN}"
         echo "=== U-Boot commands for X96Q (Allwinner H313): ==="
