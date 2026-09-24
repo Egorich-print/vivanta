@@ -184,6 +184,17 @@ pub unsafe extern "Rust" fn context_fork(
         let child_frame_ptr = (child_stack_top - FRAME_SIZE) as *mut ExceptionFrame;
         core::ptr::copy_nonoverlapping(parent_frame, child_frame_ptr, 1);
 
+        // frame.sp is the SP_EL1 the lower-EL vector saved (a kernel address),
+        // but eret_to_user_stub loads that slot as the child's SP_EL0. A fork
+        // child inherits the parent's *user* stack, so take it from SP_EL0.
+        let user_sp: usize;
+        core::arch::asm!(
+            "mrs {}, sp_el0",
+            out(reg) user_sp,
+            options(nomem, nostack, preserves_flags)
+        );
+        (*child_frame_ptr).sp = user_sp as u64;
+
         // Modify child's return value (x0) to 0
         (*child_frame_ptr).x[0] = 0;
 

@@ -319,16 +319,27 @@ pub fn sys_waitpid(pid: u64, status: *mut i32, options: u64) -> u64 {
 pub fn sys_kill(pid: u64, sig: u64) -> u64 {
     println!("  syscall: kill(pid={}, sig={})", pid, sig);
 
-    // Find the target task — filter tombstones (Exited not killable)
-    let is_live = process_table()
-        .lookup(pid)
-        .is_some_and(|t| t.state != crate::scheduler::task::TaskState::Exited);
-    if !is_live {
-        println!("  kill: no such task {}", pid);
+    // Find the target task. A Zombie already recorded its exit code and a
+    // reaped tombstone is gone; SIGKILLing either would overwrite the code
+    // the parent is about to observe in waitpid.
+    let killable = process_table().lookup(pid).is_some_and(|t| {
+        matches!(
+            t.state,
+            crate::scheduler::task::TaskState::Created | crate::scheduler::task::TaskState::Running
+        )
+    });
+    if !killable {
+        println!("  kill: no killable task {}", pid);
         return EINVAL; // ESRCH
     }
 
-    let Some(signal) = crate::signal::Signal::from_num(sig as u8) else {
+    // Reject out-of-range signal numbers instead of truncating them: sig=265
+    // would otherwise alias to 9 == SIGKILL.
+    let Ok(sig) = u8::try_from(sig) else {
+        println!("  kill: signal out of range {}", sig);
+        return EINVAL;
+    };
+    let Some(signal) = crate::signal::Signal::from_num(sig) else {
         println!("  kill: invalid signal {}", sig);
         return EINVAL;
     };
@@ -498,16 +509,6 @@ pub fn sys_sigaction(sig: u64, act: u64, oldact: u64) -> u64 {
             return EINVAL;
         }
     }
-    0
-}
-
-/// Sigreturn stub: placeholder for user handler return trampoline.
-///
-/// Real rt_sigreturn would restore the saved ExceptionFrame / blocked mask
-/// from the signal frame pushed by the delivery path. For now it simply
-/// returns 0 so the build and syscall dispatch are wired.
-pub fn sys_sigreturn() -> u64 {
-    println!("  syscall: rt_sigreturn() -> stub 0");
     0
 }
 

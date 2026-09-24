@@ -97,7 +97,16 @@ pub fn wake_waiters(child_task_id: TaskId) {
     *wait_queue() = remaining;
 
     for waiter in to_wake {
-        thread_set_state(waiter, ThreadState::Ready);
+        // Only a genuinely blocked thread may become runnable again. A waiter
+        // that SIGKILL already terminated must stay Terminated, otherwise a
+        // later child exit resurrects a killed thread (kernel/src/signal.rs
+        // has no async delivery to unblock it).
+        let blocked = rq()
+            .get(waiter)
+            .is_some_and(|t| t.state == ThreadState::Blocked);
+        if blocked {
+            thread_set_state(waiter, ThreadState::Ready);
+        }
     }
 }
 

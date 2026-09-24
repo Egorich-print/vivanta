@@ -185,9 +185,11 @@ impl AddressSpace {
             return Err(VmmError::MappingTableFull);
         }
 
-        // SAFETY: each Present run is fully covered by live mappings;
-        // Lazy/Reserved pieces have no hardware image to clear.
-        self.for_present_runs(vaddr, size, |run_start, run_len| unsafe {
+        // SAFETY: each hardware-backed run (Present or CoW) is fully covered
+        // by live mappings. COW leaves MUST be cleared too: a stale leaf would
+        // keep translating after the shadow is gone, and the frame can be
+        // returned to the PMM while that leaf still points at it.
+        self.for_hardware_runs(vaddr, size, |run_start, run_len, _| unsafe {
             vivanta_arch_api::mmu::mmu_unmap(self.root, run_start, run_len, alloc);
         });
 
@@ -226,17 +228,19 @@ impl AddressSpace {
         Ok(())
     }
 
-    /// Invoke `f(run_start, run_len)` for every maximal run of *Present*
-    /// shadow pieces inside `[vaddr, vaddr+size)`. Lazy/Reserved pieces
-    /// have no hardware image and are skipped; adjacent Present pieces are
-    /// coalesced so the hardware is touched once per contiguous run.
-    fn for_present_runs(&self, vaddr: u64, size: u64, mut f: impl FnMut(u64, u64)) {
+    /// Invoke `f(run_start, run_len, cow_only)` for every maximal run of
+    /// *hardware-backed* shadow pieces inside `[vaddr, vaddr+size)`.
+    /// Lazy/Reserved pieces have no descriptor and are skipped; adjacent
+    /// pieces are coalesced so the hardware is touched once per run.
+    /// `cow_only` is true when every piece in the run is COW, so the caller
+    /// can keep write suppression in hardware (ADR-034).
+    fn for_hardware_runs(&self, vaddr: u64, size: u64, mut f: impl FnMut(u64, u64, bool)) {
         let range_end = vaddr + size;
-        let mut pieces: alloc::vec::Vec<(u64, u64)> = self
+        let mut pieces: alloc::vec::Vec<(u64, u64, bool)> = self
             .mappings
             .iter()
             .filter(|m| {
-                m.backing == Backing::Present
+                matches!(m.backing, Backing::Present | Backing::CoW)
                     && m.virt_range.base < range_end
                     && vaddr < m.virt_range.end()
             })
@@ -244,18 +248,21 @@ impl AddressSpace {
                 (
                     m.virt_range.base.max(vaddr),
                     m.virt_range.end().min(range_end),
+                    m.backing == Backing::CoW,
                 )
             })
             .collect();
         pieces.sort_unstable();
         let mut i = 0;
         while i < pieces.len() {
-            let (start, mut end) = pieces[i];
+            let (start, mut end) = (pieces[i].0, pieces[i].1);
+            let mut cow_only = pieces[i].2;
             while i + 1 < pieces.len() && pieces[i + 1].0 == end {
                 end = pieces[i + 1].1;
+                cow_only &= pieces[i + 1].2;
                 i += 1;
             }
-            f(start, end - start);
+            f(start, end - start, cow_only);
             i += 1;
         }
     }
@@ -990,14 +997,21 @@ impl AddressSpace {
             return Err(VmmError::MappingTableFull);
         }
 
-        // 3. Program hardware — but only over Present runs. Lazy/Reserved
-        // pieces have no descriptors to rewrite (ADR-032 §1); their
-        // permission change is metadata-only and takes effect when the
-        // page materializes.
+        // 3. Program hardware — over every hardware-backed run. Lazy/Reserved
+        // pieces have no descriptors to rewrite (ADR-032 §1); their permission
+        // change is metadata-only and takes effect when the page materializes.
+        // COW runs keep the write bit OFF in hardware so writes still fault
+        // into copy-on-write (ADR-034); their shadow permissions decide the
+        // mode the frame is re-mapped with after the break.
         //
-        // SAFETY: each run is fully covered by Present mappings.
-        self.for_present_runs(vaddr, size, |run_start, run_len| unsafe {
-            vivanta_arch_api::mmu::mmu_protect(self.root, run_start, run_len, new_flags, alloc);
+        // SAFETY: each run is fully covered by live hardware-backed mappings.
+        self.for_hardware_runs(vaddr, size, |run_start, run_len, cow_only| unsafe {
+            let hw_flags = if cow_only {
+                MappingFlags::from_bits(new_flags.bits() & !0b001)
+            } else {
+                new_flags
+            };
+            vivanta_arch_api::mmu::mmu_protect(self.root, run_start, run_len, hw_flags, alloc);
         });
 
         // 4. Commit shadow pieces. Every piece keeps its ORIGINAL

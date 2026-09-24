@@ -129,7 +129,7 @@ pub extern "Rust" fn syscall_dispatch(
         ),
         SYS_RT_SIGACTION => process::sys_sigaction(arg0, arg1, arg2),
         SYS_RT_SIGPROCMASK => ENOSYS, // stub: reserved for future sigprocmask
-        SYS_RT_SIGRETURN => process::sys_sigreturn(),
+        SYS_RT_SIGRETURN => ENOSYS,   // reserved: no async delivery path (scope fence)
         _ => {
             println!("  syscall: unknown num={}", num);
             ENOSYS
