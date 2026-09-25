@@ -110,19 +110,6 @@ pub fn wake_waiters(child_task_id: TaskId) {
     }
 }
 
-/// Remove current thread from wait queue (e.g., on signal/interrupt).
-pub fn remove_from_wait_queue() {
-    let _g = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
-    let current_id = current_thread_id();
-    let mut remaining = VecDeque::new();
-    for entry in wait_queue().drain(..) {
-        if entry.0 != current_id {
-            remaining.push_back(entry);
-        }
-    }
-    *wait_queue() = remaining;
-}
-
 /// Read the current ThreadId.
 pub fn current_thread_id() -> ThreadId {
     CURRENT_THREAD.load(Ordering::Relaxed)
@@ -198,30 +185,6 @@ pub fn current_thread_address_space() -> AddressSpaceId {
     rq().get(current_thread_id())
         .map(|t| t.address_space)
         .unwrap_or(0)
-}
-
-/// Get mutable access to a thread by ID (for execve context update).
-pub fn get_thread_mut(tid: ThreadId) -> Option<&'static mut Thread> {
-    rq().get_mut(tid)
-}
-
-/// Put current thread to sleep for `ticks` timer ticks.
-pub fn sleep(ticks: u64) {
-    let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
-
-    let current_id = current_thread_id();
-
-    // Get current tick count from timer
-    let current_tick = unsafe { vivanta_arch_api::boot::timer::ticks() };
-
-    // Set sleep_until on thread
-    if let Some(t) = rq().get_mut(current_id) {
-        t.sleep_until = Some(current_tick + ticks);
-        t.state = ThreadState::Sleeping;
-    }
-
-    // Yield to another thread
-    yield_now();
 }
 
 /// Wake up a sleeping thread.

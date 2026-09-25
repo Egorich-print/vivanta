@@ -38,6 +38,8 @@ pub struct Task {
     pub generation: u32,
     pub address_space: AddressSpaceId,
     pub threads: Vec<ThreadId>,
+    /// Reserved for MemoryObject ownership (ADR-031): a task owns the objects
+    /// it maps. No writer exists yet, so this is always empty.
     pub owned_objects: Vec<MemoryObject>,
     pub state: TaskState,
     pub parent: Option<TaskId>,
@@ -60,14 +62,6 @@ impl Task {
             exit_code: None,
             signals: SignalState::new(),
         }
-    }
-
-    pub fn add_thread(&mut self, thread_id: ThreadId) {
-        self.threads.push(thread_id);
-    }
-
-    pub fn add_object(&mut self, obj: MemoryObject) {
-        self.owned_objects.push(obj);
     }
 
     /// Mark the task as terminated (zombie) with the given exit code.

@@ -1,3 +1,0 @@
-[build]
-target = "armv7a-none-eabi"
-rustflags = ["-C", "link-arg=-Ttarget-qemu-armv7a/linker.ld"]

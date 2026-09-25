@@ -1033,14 +1033,10 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             taskman.running_count()
         );
 
-        // Verify Task structure via TaskManager
-        if let Some(task) = taskman.get(tid) {
-            println!(
-                "  Task[{}]: {} object(s) owned",
-                tid,
-                task.owned_objects.len()
-            );
-        }
+        // Verify Task structure via TaskManager. (The old "N object(s) owned"
+        // line is gone: with add_object() dead the field can only ever be 0,
+        // so it printed a constant, not a measurement.)
+        taskman.get(tid).expect("boot task missing");
 
         println!();
         println!("Boot thread yielding to user thread");

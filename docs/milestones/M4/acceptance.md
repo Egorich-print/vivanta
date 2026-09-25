@@ -98,7 +98,7 @@ Three threads (boot + persistent + terminating) round-robin via `yield_now()`:
 
 | # | Criterion | Importance |
 |---|-----------|-----------|
-| C9 | `cargo build -p target-test` passes | Build-time proof of arch independence |
+| C9 | ~~`cargo build -p target-test` passes~~ | **RETIRED 2026-09-25**: `target-test` never referenced `kernel_main`, so the kernel was never linked and 13 `arch-api` symbols were missing from its stub — it proved nothing. See `docs/audit/2026-09-24-global-audit.md`. |
 | C10 | `cargo build -p target-qemu-aarch64` compiles clean | No warnings, no errors |
 | C11 | scheduler does not depend on arch-aarch64 | Verified by target-test linkage |
 | C12 | Cooperative switching stable over 1000+ iterations | Extended run shows no crashes |
@@ -170,7 +170,7 @@ M4 is successful if and only if:
 1. All M4 mandatory criteria (C1-C8) pass.
 2. The full experiment demonstrates:
    - Boot → Cooperative multi-thread execution → Timer tick measurement → Thread exit → Continued execution with remaining threads
-3. `cargo build -p target-test` passes (arch independence proof)
+3. ~~`cargo build -p target-test` passes (arch independence proof)~~ — RETIRED 2026-09-25: the stub never linked the kernel (see C9).
 4. `cargo build -p target-qemu-aarch64` compiles clean
 5. No new abstractions (Process, Capability, VMM, IPC, userspace) introduced
 

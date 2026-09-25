@@ -130,7 +130,7 @@ deferred ARM MMU portability issue (L1/L2 table descriptor encoding, see
 | qemu-aarch64 | Active, boots to kernel_main, 18/18 CI markers PASS (0 panics) |
 | rk3568 | Diagnostic only (does not link vivanta-kernel) |
 | rpi3b+ | Standalone diagnostic (early_mmu identity map) |
-| qemu-armv7a | Frozen (arch-armv7a is an empty stub; removed from workspace members) |
+| qemu-armv7a | Frozen — the `target-qemu-armv7a` crate was removed (unbuildable: not a member, ARMv7 core not in the pinned toolchain); `arch-armv7a` remains an empty stub kept per ADR-011 |
 | allwinner-h616 / amlogic / sdm660 | Stalled / planned (x96q gained an EL2→EL1 drop, compile-checked only) |
 
 ## P0 corrective mission (2026-09-09)

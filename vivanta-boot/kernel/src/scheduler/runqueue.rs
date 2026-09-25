@@ -138,15 +138,9 @@ impl RunQueue {
     pub fn iter(&self) -> impl Iterator<Item = &Thread> {
         self.threads.iter().filter_map(|s| s.as_ref())
     }
-
-    /// Iterate over all active threads mutably.
-    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut Thread> {
-        self.threads.iter_mut().filter_map(|s| s.as_mut())
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunQueueError {
     ThreadNotFound,
-    QueueFull,
 }

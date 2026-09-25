@@ -31,10 +31,6 @@ members = [
     "target-rpi3b-plus",
     "target-suma-q5",
 
-    # --- Test / proof ---
-    "arch-test-stub",
-    "target-test",
-    "target-mmu-test",
 ]
 
 [profile.dev]

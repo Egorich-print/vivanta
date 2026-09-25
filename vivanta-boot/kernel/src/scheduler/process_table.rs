@@ -48,7 +48,7 @@ impl ProcessTable {
         // are resource-free; reusing them keeps the Vec bounded across
         // fork/reap churn (otherwise every cycle pushes ~1 KiB until the
         // kernel heap OOMs). The tombstone's bumped generation is kept so
-        // handles to the reaped task stay stale (lookup_handle).
+        // handles to the reaped task stay stale (generation field).
         for slot in self.tasks.iter_mut() {
             let slot_gen = match slot {
                 None => 0,
@@ -69,16 +69,6 @@ impl ProcessTable {
             id: pid,
             generation: 0,
         })
-    }
-
-    /// Generation-validated lookup: stale handles resolve to None.
-    pub fn lookup_handle(&self, h: ProcessHandle) -> Option<&Task> {
-        self.lookup(h.id).filter(|t| t.generation == h.generation)
-    }
-
-    pub fn lookup_handle_mut(&mut self, h: ProcessHandle) -> Option<&mut Task> {
-        self.lookup_mut(h.id)
-            .filter(|t| t.generation == h.generation)
     }
 
     /// Lookup task by ID.

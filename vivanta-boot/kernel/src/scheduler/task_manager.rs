@@ -126,12 +126,6 @@ impl TaskManager {
             .count()
     }
 
-    /// Get task by ID.
-    /// Generation-validated lookup.
-    pub fn get_handle(&self, h: ProcessHandle) -> Option<&Task> {
-        scheduler::pt().lookup_handle(h)
-    }
-
     pub fn get(&self, task_id: TaskId) -> Option<&Task> {
         scheduler::pt().lookup(task_id)
     }

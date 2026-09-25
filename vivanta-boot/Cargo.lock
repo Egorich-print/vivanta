@@ -23,13 +23,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "vivanta-arch-test-stub"
-version = "0.1.0"
-dependencies = [
- "vivanta-arch-api",
-]
-
-[[package]]
 name = "vivanta-boot-common"
 version = "0.1.0"
 dependencies = [
@@ -55,10 +48,6 @@ dependencies = [
  "vivanta-exec",
  "vivanta-vm",
 ]
-
-[[package]]
-name = "vivanta-mmu-test"
-version = "0.1.0"
 
 [[package]]
 name = "vivanta-platform-allwinner-h616"
@@ -155,17 +144,6 @@ dependencies = [
  "vivanta-boot-info",
  "vivanta-kernel",
  "vivanta-platform-amlogic",
-]
-
-[[package]]
-name = "vivanta-target-test"
-version = "0.1.0"
-dependencies = [
- "vivanta-arch-api",
- "vivanta-arch-test-stub",
- "vivanta-boot-common",
- "vivanta-boot-info",
- "vivanta-kernel",
 ]
 
 [[package]]

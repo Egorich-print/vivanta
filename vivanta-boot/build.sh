@@ -79,7 +79,7 @@ with open('${BIN}','rb') as f:
         ./tools/make-rpi3b-image.sh
         ;;
 
-    vivanta-target-qemu-aarch64|vivanta-target-qemu-armv7a)
+    vivanta-target-qemu-aarch64)
         KERNEL="target/aarch64-unknown-none/debug/${PACKAGE}"
         echo "=== Launching QEMU (ELF mode) ==="
         qemu-system-aarch64 \
