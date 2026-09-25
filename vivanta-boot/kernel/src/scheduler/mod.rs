@@ -417,9 +417,6 @@ pub fn yield_now() {
     thread_set_state(current_id, ThreadState::Ready);
     thread_set_state(next_id, ThreadState::Running);
 
-    // Store the ThreadId, not a slot index (G4 §8).
-    CURRENT_THREAD.store(next_id, Ordering::Relaxed);
-
     // Activate address space if different
     let next_as = rq().get(next_id).unwrap().address_space;
 
@@ -432,6 +429,14 @@ pub fn yield_now() {
             vivanta_arch_api::mmu::activate_address_space(root);
         }
     }
+
+    // Publish the new identity as the LAST thing before the switch. Interrupts
+    // are not really masked in this kernel, so the window between moving
+    // CURRENT_THREAD and actually switching is a race: a tick landing in it
+    // would save this thread's registers into the *next* thread's slot.
+    // Doing the (potentially TLB-flushing) address-space switch first keeps
+    // that window down to the switch call itself.
+    CURRENT_THREAD.store(next_id, Ordering::Relaxed);
 
     // Perform context switch
     unsafe {
@@ -582,9 +587,6 @@ pub fn thread_exit(exit_code: i32) -> ! {
         thread_set_state(next_id, ThreadState::Running);
     }
 
-    // Store the ThreadId, not a slot index.
-    CURRENT_THREAD.store(next_id, Ordering::Relaxed);
-
     // Activate address space if different
     let next = rq().get(next_id).unwrap();
     if next.address_space != current_as {
@@ -596,6 +598,10 @@ pub fn thread_exit(exit_code: i32) -> ! {
             vivanta_arch_api::mmu::activate_address_space(root);
         }
     }
+
+    // Publish the new identity as the last thing before the switch (same
+    // reasoning as in yield_now).
+    CURRENT_THREAD.store(next_id, Ordering::Relaxed);
 
     // Perform context switch
     unsafe {
