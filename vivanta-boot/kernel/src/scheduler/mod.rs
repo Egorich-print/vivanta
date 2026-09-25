@@ -444,8 +444,13 @@ pub fn yield_now() {
             next_ctx,
         );
     }
-    // After context switch we are running as `next`, which was already set
-    // to Running before the switch.
+    // We are running as `next` again (it was set Running before the switch).
+    // Interrupt state is not part of the saved context, so adopt the
+    // kernel-wide policy explicitly and drop the guard WITHOUT restoring: the
+    // DAIF it captured belongs to the outgoing thread, and restoring it here
+    // can leave the incoming thread with IRQs masked forever.
+    unsafe { vivanta_arch_api::interrupts::enable_interrupts() };
+    core::mem::forget(_guard);
 }
 
 pub fn schedule_tick() {
@@ -603,6 +608,12 @@ pub fn thread_exit(exit_code: i32) -> ! {
             next_ctx,
         );
     }
+    // Only reached if the switch to `next` immediately yields back here
+    // (a yield_now() of the successor). Enable IRQs for this thread and drop
+    // the guard without restoring the outgoing thread's DAIF — same reason as
+    // in yield_now().
+    unsafe { vivanta_arch_api::interrupts::enable_interrupts() };
+    core::mem::forget(_guard);
     unreachable!()
 }
 
