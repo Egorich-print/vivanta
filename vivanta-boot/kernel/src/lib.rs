@@ -1199,6 +1199,10 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             scheduler::yield_now();
             scheduler::yield_now();
             let task = tm.get(tid).expect("vmsys task missing");
+            println!(
+                "[DIAG] vmsys gate: task_id={} state={:?} threads={:?} exit={:?}",
+                task.task_id, task.state, task.threads, task.exit_code
+            );
             assert_eq!(
                 task.exit_code,
                 Some(42),
