@@ -24,7 +24,7 @@ architecture-independent kernel with an ARM backend.
 | 4 | Scheduler split (policy in kernel, mechanism in arch) | Done |
 | 5 | Arch API contract purification | Done |
 | 6 | Dependency validation | Done |
-| 7 | Build-time proof with `arch-test-stub` | Done |
+| 7 | ~~Build-time proof with `arch-test-stub`~~ | **RETRACTED 2026-09-25** (see note) |
 
 ### Dependency Graph (Final)
 
@@ -78,18 +78,19 @@ scheduler reschedule).
 | Modified | `target-qemu-aarch64/src/main.rs`, `boot/aarch64/qemu_kernel/src/main.rs` |
 | Modified | `Cargo.toml` (workspace), `build.sh` |
 
-### Build-Time Proof
+### Build-Time Proof — RETRACTED 2026-09-25
 
-```bash
-cargo build -p target-test
-```
-
-Links `kernel` + `arch-test-stub` without any real architecture, proving
-the kernel does not depend on any specific ISA.
+The `cargo build -p target-test` step claimed to link `kernel` against
+`arch-test-stub` without a real architecture. It did not: `target-test` never
+referenced `kernel_main`, so the kernel was never linked, and the stub was
+missing 13 `arch-api` symbols the kernel actually calls. Both crates are
+deleted. The architectural rule (kernel does not depend on a concrete ISA) is
+enforced by dependency direction in `vivanta-boot/Cargo.toml` — `kernel`
+depends on `arch-api` only, and each `target-*` picks the architecture.
 
 ### Pre-existing Issues (not resolved by this sprint)
 
-- `target-qemu-armv7a` — lifetime bug: `set_console(&uart)` requires `'static`
+- ~~`target-qemu-armv7a` — lifetime bug: `set_console(&uart)` requires `'static`~~ — crate deleted 2026-09-25 (unbuildable: not a workspace member, ARMv7 core not in the pinned toolchain)
 - `target-qemu-aarch64` — EL0 bootstrap Data Abort at FAR `0x60`
 - Several `#![warn(static_mut_refs)]` (safe in single-core context)
 - `arch-armv7a` — frozen stub, not yet implemented

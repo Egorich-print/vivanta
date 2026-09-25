@@ -4,6 +4,9 @@
 > **Purpose**: Independent evaluation of the Vivanta roadmap and architectural decisions.
 > **Output format**: Specified at the end of this document.
 
+
+> **Retired claim (2026-09-25).** This document predates the cleanup and still describes the `target-test` / `arch-test-stub` "build-time ISA-independence proof" as valid. It was never valid: `target-test` did not reference `kernel_main`, so the kernel was never linked, and the stub lacked 13 `arch-api` symbols. Both crates are deleted; the rule is enforced by dependency direction. See `docs/audit/2026-09-25-cleanup.md`.
+
 ---
 
 ## 1. Project Context

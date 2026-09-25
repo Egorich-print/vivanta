@@ -3,6 +3,9 @@
 > **Current baseline:** V2/M5 (Phase A–E complete), M1.0, M1.1 complete
 > **Last updated:** 2026-07-27
 
+
+> **Retired claim (2026-09-25).** This document predates the cleanup and still describes the `target-test` / `arch-test-stub` "build-time ISA-independence proof" as valid. It was never valid: `target-test` did not reference `kernel_main`, so the kernel was never linked, and the stub lacked 13 `arch-api` symbols. Both crates are deleted; the rule is enforced by dependency direction. See `docs/audit/2026-09-25-cleanup.md`.
+
 ## Quick Reference
 
 | Field | Value |

@@ -1,15 +1,23 @@
 # Vivanta Architectural Evolution Plan
 
-## 0. M4 — Execution Foundation (2026-07-16) — Current State
+## 0. M4 — Execution Foundation (2026-07-16) — state as of that milestone
 
 > Status: ✅ **Complete**. Base tag: `M4` (amended commit `37172c3`).
+
+> **Обновлено 2026-09-25.** `target-test`/`arch-test-stub` **удалены**: `target-test`
+> никогда не ссылался на `kernel_main`, поэтому ядро не линковалось, а в стабе не
+> хватало 13 символов `arch-api`. Утверждение «проверено target-test» было неверным;
+> реальную гарантию даёт направление зависимостей в `vivanta-boot/Cargo.toml`.
+> См. `docs/audit/2026-09-25-cleanup.md`.
 
 ### M4.0 – M4.3: Kernel Thread Environment
 
 - **Cooperative round-robin scheduling** (3 threads: boot + persistent + terminating)
 - **Thread lifecycle**: `create_kernel_thread`, `thread_exit`, `thread_trampoline`, `cleanup()`, idle WFI
 - **Timer at ~79 Hz** on QEMU (CNTP, IRQ 30, tick counting)
-- **Architecture-independent kernel** (verified by `target-test`)
+- **Architecture-independent kernel** (claim retracted 2026-09-25: the
+  `target-test` proof never linked the kernel — see note below)
+> **Обновлено 2026-09-25.** `target-test`/`arch-test-stub` **удалены**: `target-test`
 - **Repository restructuring**: `boot/` → `archive/`, `kernel/src/memory/` → `kernel-memory-frozen/`
 - **5 ADRs** (ADR-011 through ADR-015)
 

@@ -20,7 +20,7 @@ NOT hardware-correct»**.
 | `boot_common` | 1 644 |
 | `arch-api` | 468 |
 | `platform-*` (6) | 395 |
-| `target-*` (9) | 1 772 |
+| `target-*` (6) | 1 772 |
 | `arch-armv7a` | 8 (пустой стаб) |
 
 ## Слои и контракты

@@ -1,5 +1,8 @@
 # Session Summary — 2026-07-17
 
+
+> **Retired claim (2026-09-25).** This document predates the cleanup and still describes the `target-test` / `arch-test-stub` "build-time ISA-independence proof" as valid. It was never valid: `target-test` did not reference `kernel_main`, so the kernel was never linked, and the stub lacked 13 `arch-api` symbols. Both crates are deleted; the rule is enforced by dependency direction. See `docs/audit/2026-09-25-cleanup.md`.
+
 ## Milestone Status
 
 | Milestone | Status | Tag |

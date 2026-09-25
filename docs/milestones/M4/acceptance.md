@@ -127,7 +127,7 @@ Writing to the on-stack `ExceptionFrame` from within the IRQ handler (as require
 
 ### Other Issues
 
-- `target-qemu-armv7a` — lifetime bug (pre-existing, frozen)
+- ~~`target-qemu-armv7a` — lifetime bug (pre-existing, frozen)~~ — crate deleted 2026-09-25; it was not a workspace member and could not be built with the pinned toolchain
 - EL0 Data Abort (frozen per ADR-011)
 - `arch-armv7a` — frozen stub (ADR-011)
 - Several `#![warn(static_mut_refs)]` — safe in single-core context
