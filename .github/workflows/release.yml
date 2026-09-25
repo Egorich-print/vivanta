@@ -66,15 +66,20 @@ jobs:
           ref: ${{ inputs.tag }}
       - name: tools
         run: sudo apt-get update -qq && sudo apt-get install -y -qq mtools dosfstools
-      - name: fetch RPi firmware (release "assets")
+      - name: fetch RPi firmware (release "assets", else upstream)
         env:
           GH_TOKEN: ${{ github.token }}
-        continue-on-error: true   # fall back to upstream raspberrypi/firmware
         run: |
           mkdir -p vivanta-boot/images/rpi3b-plus/firmware
-          gh release download assets -R "$GITHUB_REPOSITORY" \
-            --pattern 'rpi3b-firmware-*.tar.gz' --output fw.tar.gz --clobber
-          tar xzf fw.tar.gz -C vivanta-boot/images/rpi3b-plus/firmware
+          if gh release download assets -R "$GITHUB_REPOSITORY" \
+               --pattern 'rpi3b-firmware-*.tar.gz' --output fw.tar.gz --clobber \
+             && [ -s fw.tar.gz ]; then
+            tar xzf fw.tar.gz -C vivanta-boot/images/rpi3b-plus/firmware
+            echo "firmware: from release assets"
+          else
+            rm -f fw.tar.gz
+            echo "firmware: assets release unavailable — make-rpi3b-image.sh will fetch upstream"
+          fi
       - name: build SD image
         working-directory: vivanta-boot
         run: |

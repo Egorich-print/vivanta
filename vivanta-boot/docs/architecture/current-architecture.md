@@ -19,7 +19,6 @@ NOT hardware-correct»**.
 | `arch-aarch64` | 3 034 |
 | `boot_common` | 1 644 |
 | `arch-api` | 468 |
-| `arch-test-stub` | 138 |
 | `platform-*` (6) | 395 |
 | `target-*` (9) | 1 772 |
 | `arch-armv7a` | 8 (пустой стаб) |
@@ -43,7 +42,12 @@ boot-info / boot_common — ABI-типы, console (spinlock+IRQ guard), FDT-ск
 Инварианты: `kernel` никогда не импортирует `arch-*` напрямую; `platform-*` не
 зависит от `kernel`/`arch-*`; `boot-info` zero-dep; только `target-*` выбирает
 и платформу, и арх; никаких циклов зависимостей. Арх-независимость `kernel`
-доказана крейтом `arch-test-stub` + `target-test` (build-time proof).
+обеспечивается направлением зависимостей в `vivanta-boot/Cargo.toml`.
+
+> **Обновлено 2026-09-25.** Крейты `arch-test-stub` и `target-test` удалены:
+> `target-test` никогда не ссылался на `kernel_main`, поэтому ядро не линковалось,
+> а в стабе не хватало 13 символов `arch-api`. Заявление «доказано target-test»
+> было неверным. См. `docs/audit/2026-09-25-cleanup.md`.
 
 ## Платформы (статус 2026-08-11)
 

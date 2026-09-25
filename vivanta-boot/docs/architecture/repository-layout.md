@@ -27,10 +27,11 @@ Final binaries linking platform + kernel + arch.
 
 ```
 target-qemu-aarch64/   — QEMU AArch64
-target-qemu-armv7a/    — QEMU ARMv7-A
 target-rk3568/         — Rockchip RK3568
 target-lavender/       — SDM660 (Lavender)
-target-test/            — Build-time proof (links arch-test-stub)
+target-x96q/           — Allwinner H313
+target-rpi3b-plus/     — Raspberry Pi 3B+ (SD-image pipeline)
+target-suma-q5/        — Sumavision Q5
 ```
 
 Responsibility: select platform, select arch, produce the final ELF.

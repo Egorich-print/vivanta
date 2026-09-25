@@ -100,7 +100,7 @@ Three threads (boot + persistent + terminating) round-robin via `yield_now()`:
 |---|-----------|-----------|
 | C9 | ~~`cargo build -p target-test` passes~~ | **RETIRED 2026-09-25**: `target-test` never referenced `kernel_main`, so the kernel was never linked and 13 `arch-api` symbols were missing from its stub — it proved nothing. See `docs/audit/2026-09-24-global-audit.md`. |
 | C10 | `cargo build -p target-qemu-aarch64` compiles clean | No warnings, no errors |
-| C11 | scheduler does not depend on arch-aarch64 | Verified by target-test linkage |
+| C11 | scheduler does not depend on arch-aarch64 | **RETIRED 2026-09-25**: the claimed proof (`target-test` linkage) never existed — see C9. The architectural rule itself still holds and is enforced by dependency direction in `vivanta-boot/Cargo.toml`. |
 | C12 | Cooperative switching stable over 1000+ iterations | Extended run shows no crashes |
 
 ### 3.3 Must NOT Prove ( ❌ Excluded )
