@@ -310,6 +310,11 @@ pub fn create_task_for_thread(
 /// owning `Task` record exists, because `thread_exit` records the exit code
 /// through that record. Publishing earlier lets a timer IRQ schedule a user
 /// thread whose exit code is then silently dropped.
+/// Test-only: runqueue snapshot for gate diagnostics.
+pub fn run_queue_snapshot() -> alloc::vec::Vec<(ThreadId, ThreadState)> {
+    rq().iter().map(|t| (t.id, t.state)).collect()
+}
+
 pub fn publish_thread(id: ThreadId) {
     thread_set_state(id, ThreadState::Ready);
 }
@@ -563,6 +568,15 @@ pub fn thread_exit(exit_code: i32) -> ! {
             }
         }
     }
+
+    vivanta_boot_common::println!(
+        "  [DIAG] thread_exit code={} tid={} rq={:?}",
+        exit_code,
+        current_id,
+        rq().iter()
+            .map(|t| (t.id, t.state))
+            .collect::<alloc::vec::Vec<_>>()
+    );
 
     // Remove previously terminated threads (never the current one — it is
     // still present; we mark it Terminated after cleanup).
