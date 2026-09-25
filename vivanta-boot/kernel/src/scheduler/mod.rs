@@ -524,36 +524,52 @@ pub fn thread_exit(exit_code: i32) -> ! {
     // M6 (G6-A/G6-B): notify the owning Task of this thread's exit code.
     // Only the LAST thread of a task transitions it to Exited; intermediate
     // threads just end (state stays Running until the last one).
-    if let Some(tid) = task_for_thread(current_id) {
-        let remaining = pt()
-            .lookup(tid)
-            .map(|t| {
-                t.threads
-                    .iter()
-                    .filter(|th| **th != current_id && rq().get(**th).is_some())
-                    .count()
-            })
-            .unwrap_or(0);
-        if remaining == 0 {
-            if let Some(task) = pt().lookup_mut(tid) {
-                if task.state != TaskState::Exited {
-                    task.exit(exit_code);
-                    let parent = task.parent;
-                    vivanta_boot_common::println!(
-                        "  [task] Task {} -> Exited code={} parent={:?}",
-                        tid,
-                        exit_code,
-                        parent
-                    );
-                    // Send SIGCHLD to parent and wake waiters for this child (tid)
-                    if let Some(parent_id) = parent {
-                        if let Some(parent_task) = pt().lookup_mut(parent_id) {
-                            parent_task.signals.send(crate::signal::Signal::Chld);
+    match task_for_thread(current_id) {
+        None => vivanta_boot_common::println!("[DIAG] exit: NO TASK for thread {}", current_id),
+        Some(tid) => {
+            let remaining = pt()
+                .lookup(tid)
+                .map(|t| {
+                    t.threads
+                        .iter()
+                        .filter(|th| **th != current_id && rq().get(**th).is_some())
+                        .count()
+                })
+                .unwrap_or(0);
+            if remaining != 0 {
+                vivanta_boot_common::println!(
+                    "[DIAG] exit: task {} has {} live sibling threads {:?} (exiting thread {})",
+                    tid,
+                    remaining,
+                    pt().lookup(tid).map(|t| t.threads.clone()),
+                    current_id
+                );
+            }
+            if remaining == 0 {
+                if let Some(task) = pt().lookup_mut(tid) {
+                    if task.state != TaskState::Exited {
+                        task.exit(exit_code);
+                        let parent = task.parent;
+                        vivanta_boot_common::println!(
+                            "  [task] Task {} -> Exited code={} parent={:?}",
+                            tid,
+                            exit_code,
+                            parent
+                        );
+                        // Send SIGCHLD to parent and wake waiters for this child (tid)
+                        if let Some(parent_id) = parent {
+                            if let Some(parent_task) = pt().lookup_mut(parent_id) {
+                                parent_task.signals.send(crate::signal::Signal::Chld);
+                            }
                         }
+                        // Wake waiters waiting for tid (specific) or 0 (any)
+                        // SAFETY: wake_waiters is IRQ-guarded; correct id is the exiting child's TaskId
+                        wake_waiters(tid);
+                    } else {
+                        vivanta_boot_common::println!("[DIAG] exit: task {} already Exited", tid);
                     }
-                    // Wake waiters waiting for tid (specific) or 0 (any)
-                    // SAFETY: wake_waiters is IRQ-guarded; correct id is the exiting child's TaskId
-                    wake_waiters(tid);
+                } else {
+                    vivanta_boot_common::println!("[DIAG] exit: task {} vanished", tid);
                 }
             }
         }
