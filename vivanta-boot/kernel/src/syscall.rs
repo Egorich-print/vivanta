@@ -42,11 +42,13 @@ pub const SYS_RT_SIGRETURN: u64 = 15;
 pub const EPERM_I: i64 = -1;
 pub const ENOMEM_I: i64 = -12;
 pub const EFAULT_I: i64 = -14;
+pub const ECHILD_I: i64 = -10;
 pub const EINVAL_I: i64 = -22;
 pub const ENOSYS_I: i64 = -38;
 
 const ENOMEM: u64 = ENOMEM_I as u64;
 const EFAULT: u64 = EFAULT_I as u64;
+const ECHILD: u64 = ECHILD_I as u64;
 const EINVAL: u64 = EINVAL_I as u64;
 const ENOSYS: u64 = ENOSYS_I as u64;
 

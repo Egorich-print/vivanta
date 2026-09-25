@@ -470,18 +470,22 @@ unsafe fn gate_fork_el0(
             .iter()
             .find(|t| t.parent == Some(blob_task) && t.state == scheduler::task::TaskState::Exited)
             .map(|t| (t.task_id, t.address_space, t.threads.first().copied()));
-        if let Some((_, child_as, Some(child_tid))) = child {
-            let mut c_alloc = memory::AsPageTableAllocator::new(
-                system_state.memory_manager_mut() as *mut _,
-                &raw mut *pmm_backend as *mut dyn memory::MemoryBackend,
-                child_as,
-            );
-            vmm::address_space_mut_by(child_as)
-                .unmap_all(&mut c_alloc)
-                .expect("unmap child fork AS");
-            scheduler::remove_thread(child_tid);
-            vmm::unregister(child_as).expect("unregister ForkChildAS");
-        }
+        // Strict: the gate exists to prove the forked child's resources are
+        // released. If the child cannot be found, the teardown never ran and
+        // the old `if let` printed PASS anyway.
+        let Some((_, child_as, Some(child_tid))) = child else {
+            panic!("fork child task not found — teardown was not exercised");
+        };
+        let mut c_alloc = memory::AsPageTableAllocator::new(
+            system_state.memory_manager_mut() as *mut _,
+            &raw mut *pmm_backend as *mut dyn memory::MemoryBackend,
+            child_as,
+        );
+        vmm::address_space_mut_by(child_as)
+            .unmap_all(&mut c_alloc)
+            .expect("unmap child fork AS");
+        scheduler::remove_thread(child_tid);
+        vmm::unregister(child_as).expect("unregister ForkChildAS");
         println!("  [FORK-EL0] child teardown PASS");
     }
 }

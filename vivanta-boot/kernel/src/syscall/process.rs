@@ -2,7 +2,7 @@
 ///
 /// These handle process lifecycle: fork, exit, waitpid, kill, getpid, getppid.
 use crate::scheduler::{current_thread, process_table, stack_allocator, task_for_thread};
-use crate::syscall::{EFAULT, EINVAL, ENOMEM};
+use crate::syscall::{ECHILD, EFAULT, EINVAL, ENOMEM};
 use crate::vmm::address_space::{
     KERNEL_ADDRESS_SPACE_ID, find_by_root, lookup_root, register_child,
 };
@@ -249,7 +249,7 @@ pub fn sys_waitpid(pid: u64, status: *mut i32, options: u64) -> u64 {
             } else {
                 // No such child
                 println!("  waitpid: no matching child {}", pid);
-                return EINVAL; // ECHILD
+                return ECHILD;
             }
         };
 
@@ -295,7 +295,7 @@ pub fn sys_waitpid(pid: u64, status: *mut i32, options: u64) -> u64 {
         };
         if !has_children {
             println!("  waitpid: no matching child (ECHILD)");
-            return EINVAL;
+            return ECHILD;
         }
 
         // 3. Not yet exited
