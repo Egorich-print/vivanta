@@ -1069,6 +1069,10 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             .expect("spawn fault task");
         let ftid = ftid.id;
         println!("  fault task {} spawned, yielding to it", ftid);
+        println!(
+            "  [DIAG] before yield: rq={:?}",
+            scheduler::run_queue_snapshot()
+        );
         // Let the faulting task run; it faults and is terminated by the kernel.
         scheduler::yield_now();
         scheduler::yield_now();
