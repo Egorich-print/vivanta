@@ -174,6 +174,10 @@ pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
         },
     );
 
+    // The child may only become runnable now that its Task record exists
+    // (thread_exit records the exit code through that record).
+    crate::scheduler::publish_thread(child_thread_id);
+
     println!(
         "  fork: parent_tid={} parent_task={} child_thread={} child_task={}",
         current_id, parent_task_id, child_thread_id, child_task_id

@@ -3,7 +3,7 @@ use crate::scheduler::task::{ProcessHandle, Task, TaskId, TaskState};
 use crate::scheduler::thread::Priority;
 use crate::vmm::AddressSpaceId;
 use alloc::vec::Vec;
-use vivanta_arch_api::pmm::FrameAllocator;
+use vivanta_arch_api::pmm::{FrameAllocator, PhysFrame};
 
 /// Manages the lifecycle of all Tasks in the system.
 ///
@@ -56,17 +56,27 @@ impl TaskManager {
         if let Some(parent_id) = parent {
             task.set_parent(parent_id);
         }
-        let handle = scheduler::pt().create(task);
+        let Some(handle) = scheduler::pt().create(task) else {
+            // Table full: the thread stays unpublished, and its stack goes
+            // back to the allocator instead of leaking with a dead entry.
+            scheduler::remove_thread(thread_id);
+            for i in 0..(crate::scheduler::KERNEL_STACK_SIZE / 4096) {
+                alloc.free_frame(PhysFrame {
+                    addr: stack_base + (i * 4096) as u64,
+                });
+            }
+            return Err("process table full");
+        };
 
         // Update parent's children list
-        if let (Some(h), Some(parent_id)) = (handle, parent) {
+        if let Some(parent_id) = parent {
             if let Some(parent_task) = scheduler::pt().lookup_mut(parent_id) {
-                parent_task.add_child(h.id);
+                parent_task.add_child(handle.id);
             }
         }
 
-        let h = handle.ok_or("process table full")?;
-        Ok(h)
+        scheduler::publish_thread(thread_id);
+        Ok(handle)
     }
 
     /// Spawn a new kernel task.
@@ -87,18 +97,20 @@ impl TaskManager {
         if let Some(parent_id) = parent {
             task.set_parent(parent_id);
         }
-
-        let handle = scheduler::pt().create(task);
+        let Some(handle) = scheduler::pt().create(task) else {
+            scheduler::remove_thread(thread_id);
+            return Err("process table full");
+        };
 
         // Update parent's children list
-        if let (Some(h), Some(parent_id)) = (handle, parent) {
+        if let Some(parent_id) = parent {
             if let Some(parent_task) = scheduler::pt().lookup_mut(parent_id) {
-                parent_task.add_child(h.id);
+                parent_task.add_child(handle.id);
             }
         }
 
-        let h = handle.ok_or("process table full")?;
-        Ok(h)
+        scheduler::publish_thread(thread_id);
+        Ok(handle)
     }
 
     /// Count of tasks.

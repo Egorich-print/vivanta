@@ -279,7 +279,6 @@ pub fn create_thread_with_context(
         kernel_stack_pa: Some(kernel_stack_pa),
     };
     register(thread);
-    thread_set_state(id, ThreadState::Ready);
     id
 }
 
@@ -303,6 +302,16 @@ pub fn create_task_for_thread(
         }
     }
     handle.expect("process table full").id
+}
+
+/// Make a freshly created thread runnable.
+///
+/// Split from creation on purpose: a thread must not be schedulable before its
+/// owning `Task` record exists, because `thread_exit` records the exit code
+/// through that record. Publishing earlier lets a timer IRQ schedule a user
+/// thread whose exit code is then silently dropped.
+pub fn publish_thread(id: ThreadId) {
+    thread_set_state(id, ThreadState::Ready);
 }
 
 pub fn create_user_thread(
@@ -335,7 +344,6 @@ pub fn create_user_thread(
         kernel_stack_pa: Some((kernel_stack_top - KERNEL_STACK_SIZE) as u64),
     };
     register(thread);
-    thread_set_state(id, ThreadState::Ready);
     id
 }
 
@@ -376,7 +384,6 @@ pub fn create_kernel_thread(
         kernel_stack_pa: Some(stack_base),
     };
     register(thread);
-    thread_set_state(id, ThreadState::Ready);
     id
 }
 
