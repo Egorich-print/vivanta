@@ -168,17 +168,19 @@ Deferred with rationale: `UserPtr` adoption in hot syscalls, `register()`
 panic→Result conversion, kernel W^X, MAIR/TCR unification — all touch proven
 paths for no P0 gain; revisit after next functional milestone.
 
-## CI QEMU gate (2026-09-18)
+## CI QEMU gate (2026-09-25)
 
 The gate boots the kernel under QEMU on an **AArch64 runner** (`ubuntu-24.04-arm`),
-so host and guest share an architecture and the run is fast and deterministic.
-GitHub does not expose `/dev/kvm` on hosted runners; the job auto-selects KVM if
-that changes. The job is **blocking**.
+so host and guest share an architecture. GitHub does not expose `/dev/kvm` on
+hosted runners; the job auto-selects KVM if that changes.
 
-History: on an x86_64 runner the gate ran under cross-ISA TCG and intermittently
-deadlocked at the M10.4 EL0-fork gate (`fork()` returns, then the parent's
-`waitpid` is never satisfied). Re-running on an AArch64 runner cleared it —
-same-arch TCG, no cross-ISA translation. See `docs/tooling/ci-cd.md`.
+The job is currently **advisory** (`continue-on-error: true`) because of an open
+scheduler race: interrupts are not actually masked (`DAIFSet #2` serialises
+SError, not IRQ), so a timer tick can land inside a context switch. Symptoms are
+a lost user-task exit code or a forked child that never gets scheduled; the
+runner hits it in roughly 1 of 2–5 runs, while long local runs stay green.
+Measured diagnosis, the GIC delivery defect behind correct IRQ masking, and the
+fix order are in `docs/audit/2026-09-24-global-audit.md`.
 
 ## Scope fence (holds through any next milestone until explicitly lifted)
 
