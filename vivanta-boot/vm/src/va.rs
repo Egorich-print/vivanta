@@ -130,66 +130,61 @@ impl VaAllocator {
 
     /// Mark `[start, start+size)` as allocated without handing it out —
     /// used to reserve legacy/boot regions inside the domain.
+    ///
+    /// The whole range must lie inside a single free interval: a range that
+    /// straddles an allocated gap is rejected, because callers use this to
+    /// pin virtual addresses that must not overlap anything else. Failure
+    /// mutates nothing, so the free list stays canonical (I2/I3).
     pub fn reserve(&mut self, start: u64, size: u64) -> Result<(), VaError> {
         let region = VaRegion::new(start, size)?;
         if region.start < self.base || region.end() > self.end {
             return Err(VaError::ForeignRange);
         }
-        // Carve out of the free list.
-        let mut carved = 0usize;
-        let mut i = 0;
-        while i < self.used {
+        let Some(idx) = (0..self.used).find(|&i| {
             let r = self.free[i].expect("free slot invariant");
-            if region.overlaps(r.start, r.end()) {
-                // Split r into the parts outside `region`.
-                let head = region.start > r.start;
-                let tail = region.end() < r.end();
-                match (head, tail) {
-                    (true, true) => {
-                        if self.used >= MAX_FREE_RANGES {
-                            return Err(VaError::FreeListFull);
-                        }
-                        let lo = VaRegion {
-                            start: r.start,
-                            size: region.start - r.start,
-                        };
-                        let hi = VaRegion {
-                            start: region.end(),
-                            size: r.end() - region.end(),
-                        };
-                        self.free[i] = Some(lo);
-                        self.insert_at(self.used, hi);
-                        self.used += 1;
-                        carved += 1;
-                        i += 1;
-                    }
-                    (true, false) => {
-                        self.free[i] = Some(VaRegion {
-                            start: r.start,
-                            size: region.start - r.start,
-                        });
-                        carved += 1;
-                    }
-                    (false, true) => {
-                        self.free[i] = Some(VaRegion {
-                            start: region.end(),
-                            size: r.end() - region.end(),
-                        });
-                        carved += 1;
-                    }
-                    (false, false) => {
-                        self.remove_at(i);
-                        carved += 1;
-                        continue;
-                    }
-                }
-            }
-            i += 1;
-        }
-        if carved == 0 {
-            // Nothing free covered any part: either already fully allocated
-            // or outside the domain — both make the reservation invalid.
+            region.start >= r.start && region.end() <= r.end()
+        }) else {
+            // Either already allocated or crosses an allocated gap.
             return Err(VaError::DoubleFree);
+        };
+        let r = self.free[idx].expect("free slot invariant");
+        let head = region.start > r.start;
+        let tail = region.end() < r.end();
+        match (head, tail) {
+            (true, true) => {
+                // Check capacity before any mutation: a failed split must
+                // leave the free list exactly as it was.
+                if self.used >= MAX_FREE_RANGES {
+                    return Err(VaError::FreeListFull);
+                }
+                self.free[idx] = Some(VaRegion {
+                    start: r.start,
+                    size: region.start - r.start,
+                });
+                self.insert_at(
+                    self.used,
+                    VaRegion {
+                        start: region.end(),
+                        size: r.end() - region.end(),
+                    },
+                );
+                self.used += 1;
+            }
+            (true, false) => {
+                self.free[idx] = Some(VaRegion {
+                    start: r.start,
+                    size: region.start - r.start,
+                });
+            }
+            (false, true) => {
+                self.free[idx] = Some(VaRegion {
+                    start: region.end(),
+                    size: r.end() - region.end(),
+                });
+            }
+            (false, false) => {
+                self.remove_at(idx);
+            }
         }
         self.normalize();
         self.raise_water(region.end());
@@ -205,7 +200,13 @@ impl VaAllocator {
         if align == 0 || !align.is_power_of_two() || align % PAGE_SIZE != 0 {
             return Err(VaError::Unaligned);
         }
-        let rounded = size.div_ceil(PAGE_SIZE) * PAGE_SIZE;
+        // Page rounding with an explicit overflow check: near u64::MAX an
+        // unchecked multiply wraps (or panics in debug) and a wrapped size
+        // would look like a satisfiable request.
+        let rounded = match size.checked_add(PAGE_SIZE - 1) {
+            Some(v) => v & !(PAGE_SIZE - 1),
+            None => return Err(VaError::Overflow),
+        };
         for i in 0..self.used {
             let r = self.free[i].expect("free slot invariant");
             let aligned_start = match round_up(r.start, align) {

@@ -290,3 +290,82 @@ fn high_water_bounds_reverse_scan() {
     let b = va.alloc(PAGE_SIZE * 8, PAGE_SIZE).unwrap();
     assert_eq!(va.high_water(), b + PAGE_SIZE * 8);
 }
+
+// ---------------------------------------------------------------------------
+// Regression tests for the global audit (2026-09-24):
+//   - reserve() must not accept a range that straddles an allocated gap
+//   - reserve() must not mutate state before it can still fail
+//   - alloc() page rounding must not overflow
+// ---------------------------------------------------------------------------
+
+#[test]
+fn reserve_rejects_range_crossing_an_allocated_gap() {
+    let mut va = VaAllocator::try_new(BASE, END).unwrap();
+    // Pin a region in the middle, then try to reserve a range that straddles
+    // it: partially-free must be rejected, not carved.
+    let pin = BASE + PAGE_SIZE * 4;
+    va.reserve(pin, PAGE_SIZE * 2).unwrap();
+    let before_count = va.free_range_count();
+    let before_water = va.high_water();
+
+    let err = va.reserve(pin - PAGE_SIZE, PAGE_SIZE * 4).unwrap_err();
+    assert_eq!(err, VaError::DoubleFree);
+
+    // Failure mutates nothing (I2/I3 preserved).
+    assert_eq!(va.free_range_count(), before_count);
+    assert_eq!(va.high_water(), before_water);
+    assert!(!va.is_free(pin) && !va.is_free(pin + PAGE_SIZE));
+    assert!(va.is_free(pin - PAGE_SIZE) && va.is_free(pin + 2 * PAGE_SIZE));
+}
+
+#[test]
+fn reserve_is_transactional_when_the_free_list_is_full() {
+    let mut va = VaAllocator::try_new(BASE, END).unwrap();
+    // Fragment a single allocation into non-adjacent holes until exactly one
+    // free slot remains; a reserve strictly inside an interval needs a slot.
+    const PAGES: u64 = 600;
+    // A middle split needs one slot, so a full list must reject it.
+    let target = crate::va::MAX_FREE_RANGES;
+    let block = va.alloc(PAGE_SIZE * PAGES, PAGE_SIZE).unwrap();
+    let mut i = 2u64;
+    while va.free_range_count() < target {
+        va.free(block + PAGE_SIZE * i, PAGE_SIZE).unwrap();
+        i += 2;
+    }
+    let before = va.free_range_count();
+    assert_eq!(before, target);
+    // The tail interval is the largest one; reserve strictly inside it.
+    let (start, size) = crate::va::debug_interval(&va, before - 1).unwrap();
+    assert!(size >= 3 * PAGE_SIZE);
+    let err = va
+        .reserve(start + PAGE_SIZE, size - 2 * PAGE_SIZE)
+        .unwrap_err();
+    assert_eq!(err, VaError::FreeListFull);
+    // Nothing may have been carved before the failure.
+    assert_eq!(va.free_range_count(), before);
+    let (s2, z2) = crate::va::debug_interval(&va, before - 1).unwrap();
+    assert_eq!((s2, z2), (start, size));
+}
+
+#[test]
+fn alloc_page_rounding_does_not_overflow() {
+    let mut va = VaAllocator::try_new(BASE, END).unwrap();
+    let before = va.free_range_count();
+    // Rounding to the next page boundary would exceed u64::MAX.
+    assert_eq!(va.alloc(u64::MAX - 8, PAGE_SIZE), Err(VaError::Overflow));
+    assert_eq!(va.free_range_count(), before);
+    assert_eq!(va.high_water(), BASE);
+    // A page-multiple near the top is rejected deterministically too, never
+    // silently wrapped into a satisfiable request.
+    assert!(va.alloc(u64::MAX, PAGE_SIZE).is_err());
+    assert_eq!(va.free_range_count(), before);
+}
+
+#[test]
+fn disabled_allocator_rejects_everything() {
+    let mut va = VaAllocator::disabled();
+    assert!(va.is_disabled());
+    assert!(va.alloc(PAGE_SIZE, PAGE_SIZE).is_err());
+    assert!(va.reserve(0, PAGE_SIZE).is_err());
+    assert!(!va.is_free(PAGE_SIZE));
+}
