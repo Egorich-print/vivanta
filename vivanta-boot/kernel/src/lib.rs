@@ -2060,6 +2060,12 @@ pub unsafe fn kernel_main(info: &BootInfo) -> ! {
             let rcount = scheduler::running_thread_count();
             vivanta_boot_common::println!("  [G4] running_count={} (expect 1)", rcount);
             assert_eq!(rcount, 1, "G4 FAIL: expected exactly one Running thread");
+
+            // Failpoint harness summary (wave 1.1). Printed here, after every
+            // gate has run and outside any armed window, so reporting does
+            // not perturb the timing the harness is trying to observe.
+            #[cfg(feature = "sched-failpoint")]
+            scheduler::failpoint::report();
         }
 
         loop {

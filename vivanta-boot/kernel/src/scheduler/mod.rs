@@ -51,6 +51,29 @@ use alloc::collections::VecDeque;
 use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 static NEED_RESCHEDULE: AtomicBool = AtomicBool::new(false);
+
+/// Failpoint harness for the open scheduler race (mission 2026-10, wave 1.1).
+///
+/// Compiled out entirely unless the `sched-failpoint` cargo feature is on,
+/// so a release image carries no counters and no extra instructions.
+#[cfg(feature = "sched-failpoint")]
+pub mod failpoint;
+
+/// Where a context switch was initiated from.
+///
+/// The switch site needs its origin because the exception-frame base is only
+/// meaningful for a switch made from inside an exception handler — that is,
+/// from the timer reschedule path.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum SwitchOrigin {
+    /// A voluntary `yield_now()` from kernel code.
+    Voluntary,
+    /// The timer reschedule path: `scheduler_reschedule` → `maybe_reschedule`.
+    Timer,
+    /// Thread termination (`thread_exit`).
+    Exit,
+}
+
 /// The ThreadId of the currently running thread (NOT a runqueue index).
 /// Index-based `current` aliased stale threads after slot reuse; ThreadId is
 /// immutable and never reused, so churn (spawn A, B, kill A, spawn C) cannot
@@ -355,6 +378,16 @@ pub fn create_kernel_thread(
 // ---------------------------------------------------------------------------
 
 pub fn yield_now() {
+    yield_now_with(SwitchOrigin::Voluntary, 0)
+}
+
+fn yield_now_with(origin: SwitchOrigin, frame: usize) {
+    // The switch origin and the exception-frame base are consumed only by
+    // the failpoint harness. Without it they carry no information, so drop
+    // them explicitly rather than letting the compiler warn.
+    #[cfg(not(feature = "sched-failpoint"))]
+    let _ = (origin, frame);
+
     let _guard = unsafe { vivanta_arch_api::interrupts::disable_interrupts() };
 
     let current_id = current_thread_id();
@@ -403,6 +436,9 @@ pub fn yield_now() {
 
     // Perform context switch
     unsafe {
+        #[cfg(feature = "sched-failpoint")]
+        failpoint::record_switch(origin, frame);
+
         // Copy the next context out first (ArchContext is Copy) so the
         // runqueue is only mutably borrowed once — two rq() calls here would
         // alias the same static store.
@@ -419,6 +455,30 @@ pub fn yield_now() {
     // can leave the incoming thread with IRQs masked forever.
     unsafe { vivanta_arch_api::interrupts::enable_interrupts() };
     core::mem::forget(_guard);
+
+    // Failpoint F3 — nested scheduler entry inside the resume window.
+    //
+    // This is the open race (mission 2026-10). Unmasking interrupts above
+    // happens while the CPU is still inside the exception-handler call chain
+    // that led to the switch: the chain has not unwound past the vector
+    // epilogue yet, so the victim's ExceptionFrame at [SP_EL1 - 272] — which
+    // still holds the victim's EL0 state — is still live. A timer IRQ taken
+    // in that window pushes a SECOND frame over the first, destroying the
+    // victim's saved EL0 context; when the chain finally unwinds and erets,
+    // the thread resumes at the wrong PC and never completes its exit path.
+    //
+    // The failpoint reproduces the "second scheduler entry while an exception
+    // frame is live" condition deterministically instead of waiting for the
+    // hardware to deliver a tick inside a window a few instructions wide.
+    #[cfg(feature = "sched-failpoint")]
+    {
+        failpoint::RESUME_UNMASKS.fetch_add(1, Ordering::Relaxed);
+        if failpoint::is_armed(failpoint::FP_F3_RESUME_NESTED) {
+            failpoint::RESUME_NESTED_ENTRIES.fetch_add(1, Ordering::Relaxed);
+            schedule_tick();
+            maybe_reschedule(frame);
+        }
+    }
 }
 
 pub fn schedule_tick() {
@@ -426,12 +486,18 @@ pub fn schedule_tick() {
     NEED_RESCHEDULE.store(true, Ordering::Relaxed);
 }
 
-pub fn maybe_reschedule(_frame: usize) {
+pub fn maybe_reschedule(frame: usize) {
     if !NEED_RESCHEDULE.load(Ordering::Relaxed) {
         return;
     }
     NEED_RESCHEDULE.store(false, Ordering::Relaxed);
-    yield_now();
+    #[cfg(feature = "sched-failpoint")]
+    {
+        failpoint::CONSUMED_NO_SWITCH.fetch_add(1, Ordering::Relaxed);
+    }
+    // The exception-frame base is threaded down to the switch site: it is
+    // only meaningful for a switch made from inside an exception handler.
+    yield_now_with(SwitchOrigin::Timer, frame);
 }
 
 // ---------------------------------------------------------------------------
@@ -568,6 +634,9 @@ pub fn thread_exit(exit_code: i32) -> ! {
 
     // Perform context switch
     unsafe {
+        #[cfg(feature = "sched-failpoint")]
+        failpoint::record_switch(SwitchOrigin::Exit, 0);
+
         // Copy the next context out first (ArchContext is Copy) so the
         // runqueue is only mutably borrowed once — two rq() calls here would
         // alias the same static store.

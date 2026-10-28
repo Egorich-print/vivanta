@@ -12,6 +12,21 @@ test = false
 
 [features]
 trace-address-space = []
+# Scheduler race failpoint harness (mission 2026-10, wave 1.1).
+#
+# `sched-failpoint` compiles the harness in: counters, the report line, and
+# the injection points. Nothing fires — the harness only observes. This is
+# the CONTROL build: it must boot exactly like a release build, which proves
+# the harness code itself does not perturb the kernel.
+#
+# `sched-failpoint-fire` additionally arms F3, the nested scheduler entry
+# inside the resume window. That is the build that reproduces the race.
+#
+# With both features OFF every counter and every branch is compiled out, so
+# the release image is byte-for-byte the same as before — that is the
+# "zero impact when not armed" property, provable by disassembly.
+sched-failpoint = []
+sched-failpoint-fire = ["sched-failpoint"]
 
 [dependencies]
 vivanta-boot-info = { path = "../boot-info" }
