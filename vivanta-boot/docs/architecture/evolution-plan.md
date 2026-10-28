@@ -33,7 +33,7 @@
 | `RootPageTable` | `arch-api/src/mmu.rs` | Opaque `usize` handle — no TTBR/CR3/SATP in kernel |
 | `MappingSet` | `kernel/src/vmm/mapping.rs` | `Mapping` + `VirtRange` to describe VA→PA bindings |
 | `KernelAddressSpace` | `kernel/src/vmm/address_space.rs` | Singleton at id 0, initialised at boot |
-| Address Space Registry | `kernel/src/vmm/address_space.rs` | Static 8-slot array, `register()` returns `AddressSpaceId` |
+| Address Space Registry | `kernel/src/vmm/address_space.rs` | Static 16-slot array (`MAX_ADDRESS_SPACES = 16`, `:19`), `register()` returns `AddressSpaceId` |
 | `activate_address_space` | `arch-api/src/mmu.rs` + `arch-aarch64/src/mmu.rs` | TTBR0_EL1 ← root, DSB, TLBI VMALLE1IS, ISB |
 | Scheduler activation | `kernel/src/scheduler/mod.rs` | `yield_now()` and `thread_exit()` call `activate_address_space()` on AS mismatch |
 

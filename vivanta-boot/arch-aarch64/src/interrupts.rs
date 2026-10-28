@@ -11,15 +11,14 @@ pub use gic::{Gic, GicVersion};
 use crate::barrier;
 
 /// Enable IRQs at the CPU level (clear PSTATE.I bit).
-/// DAIF bit layout: bit0=D, bit1=A (SError), bit2=I (IRQ), bit3=F.
 ///
-/// IMPORTANT: `#2` masks SError, NOT IRQ — architecturally IRQ masking needs
-/// `#4`, so every `InterruptGuard` here only serialises SError. Switching to
-/// `#4` was measured and does NOT boot: with real IRQ masking the GIC stops
-/// delivering the timer after ~3 ticks (measured: PSTATE.I clear, DAIF low
-/// nibble 0, TICK_COUNT frozen), so the 100 Hz preemption path dies and a
-/// preemption worker spins forever. That GIC delivery defect is the real
-/// blocker for correct IRQ masking; see docs/audit/2026-09-24-global-audit.md.
+/// The `DAIFSet`/`DAIFClr` `imm4` field order is bit3=D (Debug),
+/// bit2=A (SError), bit1=I (IRQ), bit0=F (FIQ). PSTATE.I is bit 7, mirrored as
+/// bit 1 of the `imm4` field. So `msr DAIFSet, #2` sets the IRQ mask (I) and
+/// `msr DAIFClr, #2` clears it: IRQ masking here is correct. `#4` would set the
+/// SError mask (A) instead. Verified empirically on QEMU by reading DAIF after
+/// each instruction; see docs/audit/2026-09-24-global-audit.md and
+/// docs/planning/mission-2026-10/40-silicon-blockers.md.
 pub fn enable() {
     unsafe {
         core::arch::asm!("msr DAIFClr, #2", options(nostack));

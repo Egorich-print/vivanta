@@ -17,8 +17,11 @@ Vivanta derives a persistent cryptographic identity from hardware properties:
 - Identity used for: device attestation, secure boot verification,
   capability signing, network authentication
 
-The M1 experiment proved this concept works on real hardware. It is Vivanta's
-strongest architectural differentiator from "yet another Unix-like kernel."
+The M1 continuity experiment demonstrated the concept, but **not on hardware and
+not in Vivanta**: `docs/history/experiments/m1/` is a `std` host binary
+(`theseus-m1`, outside the 20-member workspace, no CI job builds it). No Vivanta
+kernel has ever booted on a physical board. It is Vivanta's intended
+architectural differentiator from "yet another Unix-like kernel."
 
 ## Status per ADR-011
 

@@ -1,3 +1,26 @@
+> **RETIRED (2026-09-29) — point-in-time record, superseded.**
+> This report is a snapshot of the corrective P0 mission. Its own dateline reads
+> **2026-09-09**, but the four commits it cites (`f6ed78f`, `cb17b7a`, `5005542`,
+> `795f119`) are all dated **2026-09-15** in git history, so the report was
+> written or amended after its stated date. Claims now stale:
+>
+> - **"19/19 QEMU gates PASS"** — the gate now requires **exactly 18 markers**
+>   (`vivanta-boot/tools/qemu-gates.sh`), and the CI job runs
+>   `continue-on-error: true` (**advisory**), so a green run never blocked a merge
+>   (`029057d`, 2026-09-25). See `docs/audit/2026-09-24-global-audit.md`.
+> - **Base `9757f55` + backup branch `backup/pre-p0-mission-2026-09-09`** — that
+>   base is the tip of the `backup/pre-p0-mission-2026-09-09` branch, not of `main`.
+> - **"0 panics" / clean regression** — a scheduler race was found afterwards
+>   (a timer tick can land inside a context switch and lose a user thread's exit
+>   code or leave a forked child unscheduled). Fixed attempts are in
+>   `4ddbbfe`, `d083f8e`, `465cbf4`, `82a2b94`, `602fe7b`; the race is still
+>   tracked open and documented in `docs/audit/2026-09-24-global-audit.md`.
+>
+> **Current state of the project lives in [`STATUS.md`](../../../STATUS.md) and
+> [`ROADMAP.md`](../../../ROADMAP.md).** The body below is preserved verbatim as
+> a historical record of what the mission believed at the time; it is not a
+> description of the kernel as it exists today.
+
 # AUTONOMOUS MISSION P0 REPORT — corrective mission (§3.1/§4 of the 2026-09-08 audit)
 
 **Date:** 2026-09-09

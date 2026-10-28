@@ -13,7 +13,9 @@ vivanta-platform-allwinner-h616 = { path = "../platform-allwinner-h616" }
 vivanta-kernel = { path = "../kernel" }
 
 # Bare-metal firmware binary (no_main + linker script): no host libtest.
-# Verified via QEMU boot.
+# Compile-checked only; not silicon-ready: 16 KiB boot stack, and the EL2 entry
+# writes CPTR_EL2 = 0b11<<20 (bits 20:21) instead of the CPACR_EL1 FPEN its own
+# comment calls for — TFP is bit 10, so FP/SIMD is not enabled on that path.
 [[bin]]
 name = "vivanta-target-x96q"
 path = "src/main.rs"

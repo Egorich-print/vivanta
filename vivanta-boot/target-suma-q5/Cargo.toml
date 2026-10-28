@@ -13,7 +13,8 @@ vivanta-platform-amlogic = { path = "../platform-amlogic" }
 vivanta-kernel = { path = "../kernel" }
 
 # Bare-metal firmware binary (no_main + linker script): no host libtest.
-# Verified via QEMU boot.
+# Cannot print: platform-amlogic never registers a console, so it panics
+# immediately on the first println!.
 [[bin]]
 name = "vivanta-target-suma-q5"
 path = "src/main.rs"

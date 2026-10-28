@@ -247,7 +247,7 @@ timer_handler(30) [timer.rs:89]
 | 5.1 | Timer frequency is detected correctly | ✅ | `mrs CNTFRQ_EL0` returns the QEMU generic timer frequency (~62.5 MHz) |
 | 5.2 | TVAL is reloaded on each tick | ❌ | **Critical bug**: `timer_init()` in `boot.rs` sets `CNTP_TVAL_EL0` directly via `msr`, but does NOT set the `TVAL` static atomic (`timer.rs: static TVAL: AtomicU32 = AtomicU32::new(0)`). The first tick reloads with `TVAL.load() = 0`, causing the timer to fire on every subsequent counter tick (~16 ns). This creates a timer storm. |
 | 5.3 | IRQ 30 routing is correct | ✅ | GICD_ISENABLER bit 30 is set. GIC CPU interface is enabled. `DAIFClr` unmasks IRQs. |
-| 5.4 | DAIFClr encoding is correct for target hardware | ⚠ | `interrupts.rs:17` uses `msr DAIFClr, #2` with a comment "QEMU 11.0.2 quirk". Per ARM spec, `#2` (0b0010) clears bit <1> = A (SError mask), not I (IRQ mask). `#4` (0b0100) would be correct per ARM spec. Works on QEMU due to a QEMU bug. Needs fix for real hardware. |
+| 5.4 | DAIFClr encoding is correct for target hardware | ✅ | `interrupts.rs` uses `msr DAIFClr, #2`. **Correction (2026-09-29):** the `imm4` field order is bit3=D, bit2=A (SError), bit1=I (IRQ), bit0=F, so `#2` (0b0010) clears **I (IRQ)** — which is correct. The earlier note that `#2` cleared A (SError) and that `#4` was needed inverted the encoding; `#4` (0b0100) would set **A (SError)**. Verified on QEMU by reading DAIF after each instruction (`#2` → I=0; `#4` → A=1). |
 | 5.5 | Timer fires before `sched_init_boot()` completes | ⚠ | Window between `timer_init()` (enables timer + GIC IRQ 30) and `sched_init_boot()` (creates RunQueue) is ~100 CPU cycles. At 10 ms first tick, this is safe. But if `TVAL` reloads with 0 (bug 5.2), the storm starts immediately after the first tick. |
 | 5.6 | IRQ 30 handler is registered before GIC enable | ✅ | `register_irq(30, timer_handler)` before `mmio_write32(GICD_ISENABLER)` |
 | 5.7 | EOI is called before reschedule | ✅ | `gic::eoi(irq_id)` in dispatcher.rs before `scheduler_reschedule()` |
@@ -317,7 +317,7 @@ stack_base                                     ← bottom of stack
 | Severity | Count | Items |
 |----------|-------|-------|
 | ✅ Confirmed | 32 | All boot path, scheduler init, cooperative switch, and preemptive switch invariants hold |
-| ⚠ Needs implementation | 3 | 3.6 (yield_now must not be called from IRQ context — enforced by IrqGuard), 4.6 (preempt may need IRQ masking during copy), 5.4 (DAIFClr QEMU quirk) |
+| ⚠ Needs implementation | 2 | 3.6 (yield_now must not be called from IRQ context — enforced by IrqGuard), 4.6 (preempt may need IRQ masking during copy) |
 | ❌ Incorrect assumption | 1 | 5.2 (timer storm: TVAL not initialized in boot.rs timer_init path) |
 
 ### Critical issues (must fix before M4.2)
@@ -327,9 +327,10 @@ stack_base                                     ← bottom of stack
    the demo (timer storm after first tick, causing excessive IRQs even in
    cooperative mode).
 
-2. **DAIFClr encoding (5.4):** Currently uses `#2` (clears A=SError mask
-   instead of I=IRQ mask per ARM spec). Works on QEMU 11.0.2. For real
-   hardware, needs `#4`. Ignore for M4 (QEMU-only), but document.
+2. **DAIFClr encoding (5.4) — CORRECTED 2026-09-29:** the original note claimed
+   `#2` clears the A (SError) mask and that silicon needs `#4`. That was an
+   inverted reading of the `imm4` field: `#2` clears the **I (IRQ)** mask, which
+   is correct, and `#4` sets the SError mask (A). No change needed.
 
 3. **context_switch_preempt + nested IRQ (4.6):** If an IRQ is taken during
    the `copy_nonoverlapping` in `context_switch_preempt`, the scheduler
@@ -369,7 +370,8 @@ cooperative thread demo:
 3. **IRQ masking during critical sections:** Implement `IrqGuard` in
    `kernel/src/scheduler/mod.rs`. Mask IRQs in `yield_now()`,
    `create_kernel_thread()`, `schedule_tick()`, `maybe_reschedule()`.
-   Use `msr DAIFSet, #2` for mask (QEMU) or `msr DAIFSet, #4` (ARM spec).
+   Use `msr DAIFSet, #2` — this sets the IRQ mask (I) and is correct on both
+   QEMU and silicon (`#4` would set the SError mask, A, not IRQ).
 
 4. **Add `create_kernel_thread()`:** Allocate 4 PMM frames, set up stack,
    call `context_init`, register in RunQueue.

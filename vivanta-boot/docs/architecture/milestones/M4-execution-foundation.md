@@ -20,7 +20,7 @@ Connect and validate the existing execution subsystems (scheduler, context switc
 - Three threads (boot + persistent + terminating) executed with round-robin cooperative switching via `yield_now()`
 - Boot thread remains a normal schedulable thread (no special bootstrap path)
 - `create_kernel_thread()`: PMM-allocated stacks (4 × 4 KiB per thread), `context_init()` → `ArchContext`
-- `IrqGuard` masks IRQs during critical sections (`DAIFSet/Clr #2`)
+- `IrqGuard` masks IRQs during critical sections (`DAIFSet/Clr #2` — `#2` is the IRQ mask, I; correct)
 - `init_boot()`: captures boot context (slot 0), creates idle WFI thread (slot 7)
 - Stable over 1.3M+ iterations with no crashes
 

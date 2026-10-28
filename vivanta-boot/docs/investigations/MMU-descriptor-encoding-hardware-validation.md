@@ -26,7 +26,13 @@ deferred ARM MMU portability issue", NOT "hardware-correct".
 ## What to validate on real hardware
 
 Target a physical ARM64 board (RK3568 is the declared validation target, or
-RPi3B+ which already uses `early_mmu`).
+RPi3B+ — but RPi3B+ does **not** currently use `early_mmu`:
+`arch-aarch64/src/early_mmu.rs` has zero callers anywhere in the tree
+(`arch-aarch64/src/lib.rs:13` marks it dead) and
+`target-rpi3b-plus/src/main.rs:132` calls `vivanta_kernel::kernel_main`. The
+`early_mmu`-centric validation strategy below therefore needs revisiting before
+RPi3B+ is usable as a vehicle for it. *Corrected 2026-09-29; this line previously
+claimed RPi3B+ "already uses `early_mmu`".*
 
 ### Step 1 — Prove the failure (optional)
 
@@ -46,7 +52,8 @@ Complete switch set (all must move together):
    any non-block as table (encoding-agnostic). After the switch it can be
    tightened to `desc & DESC_TYPE_MASK == 0b10`.
 4. `arch-aarch64/src/early_mmu.rs` `l1_table_desc()`: already emits `0b10`
-   (rpi3b path) — keep.
+   (`DESC_TABLE | addr`, with bit 0 clear) — keep. The module is real code but
+   currently unreferenced, so this file is the only thing keeping it honest.
 5. Walkers that check "is this a table vs block" (`mapper.rs`,
    `table_or_create` in `mmu.rs`, `walk_to_l3`) use `desc_is_table` /
    `desc_is_block`; they must be re-verified against `0b10` tables.

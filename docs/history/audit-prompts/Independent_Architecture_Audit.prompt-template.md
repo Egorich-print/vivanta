@@ -1,11 +1,80 @@
 # Independent Architecture Audit — Vivanta Roadmap
 
+> ## THIS IS NOT AN AUDIT. It is an unexecuted request.
+>
+> The file below is a **prompt template addressed to external LLM reviewers**
+> (ChatGPT, Gemini, Grok, DeepSeek). It contains no findings, no severities and
+> no verdicts. It ends in two questions — *"Overall architectural quality
+> (1–10)"* (§14) and *"Would you approve this roadmap for implementation in its
+> current form?"* — that were **never answered in this file**. Any reader who
+> found it in `docs/audit/` alongside two genuine audits would reasonably have
+> taken it for the result of an independent review. It is not one. The reviews
+> it asks for did happen; their dispositions are recorded in the
+> [Appendix: Post-Audit Decisions](#appendix-post-audit-decisions-2026-07-19)
+> at the bottom of this document, which lists 20 issues and the project's answer
+> to each — those are the only parts of this file that reflect real review.
+>
+> **Superseded by:**
+> - [`docs/audit/2026-09-24-global-audit.md`](../../audit/2026-09-24-global-audit.md)
+>   — the real global audit: five parallel review passes, findings verified by
+>   hand against the code.
+> - [`docs/audit/2026-09-25-cleanup.md`](../../audit/2026-09-25-cleanup.md)
+>   — what the cleanup removed.
+>
+> **Retracted 2026-09-25 (`273f9bc`).** Everything this file says about
+> `arch-test-stub`, `target-test` and `target-qemu-armv7a` is **retracted and was
+> never valid**:
+> - Row 24 of §3 asserts a validated architectural claim — *"Build-time proof:
+>   kernel links with arch-test-stub (no real ISA)"*. `target-test` never
+>   referenced `kernel_main`, so the kernel was never linked, and the stub was
+>   missing 13 `arch-api` symbols. It proved nothing.
+> - `arch-test-stub/` and `target-test/` are **deleted**. The architectural rule
+>   they claimed to prove still holds, but is enforced by dependency direction
+>   in `vivanta-boot/Cargo.toml`, not by a stub crate.
+> - `target-qemu-armv7a/` is **deleted**; it was never a workspace member and
+>   was absent from `Cargo.lock`.
+> - §9 tells the reader to *"assume the 25 validated architectural claims
+>   (§3) are accurate"*. That instruction is unsafe: one of the 25 is the
+>   retracted row 24.
+>
+> **Other known drift** (the file's own status snapshot stops at M4.5.2; eight
+> milestones have shipped since, and several referenced paths never existed):
+> - It quotes `PROJECT_STATE.md` three times. **No such file exists** — the
+>   identity/status document was replaced during the 2026-07-19 rename
+>   (`940832b`) and its content now lives in `docs/manifesto.md` (the file calls
+>   it `MANIFESTO.md`).
+> - It references `docs/adr/*` throughout. ADRs live in
+>   `vivanta-boot/docs/adr/` (18 files, ADR-011…035 with gaps). It also lists
+>   ADR-016 and refers to a roadmap citing ADR-024/025 — **none of ADR-016,
+>   ADR-024, ADR-025 exist**.
+> - §2.3 "Deferred → True preemption on QEMU — **Blocked**" is false.
+>   Timer-driven preemption at **100 Hz** runs on QEMU today
+>   (`vivanta-boot/arch-aarch64/src/timer.rs:8`); the earlier claim was closed
+>   by `44621c5` (2026-08-11).
+> - §4.1's workspace tree lists `platform-qemu/rk3568/sdm660/allwinner-h616`
+>   only; `platform-amlogic` and `platform-rpi3b` now exist, as do the
+>   `target-rk3568`, `target-rpi3b-plus` and `target-suma-q5` targets.
+> - The Appendix's artifact table points at `docs/adr/ADR-020…023` and
+>   `PROJECT_STATE.md`, which are at `vivanta-boot/docs/adr/` (or, in the case
+>   of `PROJECT_STATE.md`, do not exist).
+>
+> **What is preserved and why.** The prompt body below is a historical
+> artefact of how this project worked: architecture questions were put to
+> external models in a fixed, auditable form, and every issue raised was
+> answered with an explicit accept/reject decision rather than silently
+> dropped. That practice is worth reading. The *prompt* is preserved verbatim;
+> only the header above is new. **Do not read this file as a statement of what
+> Vivanta is or of how well it is built** — use `STATUS.md` and
+> [`docs/audit/2026-09-24-global-audit.md`](../../audit/2026-09-24-global-audit.md)
+> for that.
+
+---
+
+# ==== BEGIN ORIGINAL PROMPT TEMPLATE (unexecuted) ====
+
 > **Audience**: External LLM architecture reviewers (ChatGPT, Gemini, Grok, DeepSeek).
 > **Purpose**: Independent evaluation of the Vivanta roadmap and architectural decisions.
 > **Output format**: Specified at the end of this document.
-
-
-> **Retired claim (2026-09-25).** This document predates the cleanup and still describes the `target-test` / `arch-test-stub` "build-time ISA-independence proof" as valid. It was never valid: `target-test` did not reference `kernel_main`, so the kernel was never linked, and the stub lacked 13 `arch-api` symbols. Both crates are deleted; the rule is enforced by dependency direction. See `docs/audit/2026-09-25-cleanup.md`.
 
 ---
 
@@ -970,3 +1039,7 @@ Four independent audits (ChatGPT, DeepSeek, Gemini, Grok) reviewed the Vivanta r
 | Early RPi3 parallel target | Single developer cannot maintain 2+ physical targets. RPi3 after V3 Device Graph. |
 | Remove Driver trait | Three existing entities (UART, GIC, Timer) share lifecycle. Trait is contract, not abstraction. |
 | Timeline effort estimates | Research OS + single dev — estimates are noise. Milestone graph sufficient. |
+
+---
+
+# ==== END ORIGINAL PROMPT TEMPLATE ====

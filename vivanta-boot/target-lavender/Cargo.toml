@@ -13,7 +13,7 @@ vivanta-platform-sdm660 = { path = "../platform-sdm660" }
 vivanta-kernel = { path = "../kernel" }
 
 # Bare-metal firmware binary (no_main + linker script): no host libtest.
-# Verified via QEMU boot.
+# Prints a banner and spins; never calls kernel_main.
 [[bin]]
 name = "vivanta-target-lavender"
 path = "src/main.rs"
