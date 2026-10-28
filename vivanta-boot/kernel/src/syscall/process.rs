@@ -40,7 +40,12 @@ pub fn sys_exit(code: i32) -> ! {
 
 /// Fork current process: duplicate address space with COW.
 /// Returns child PID in parent, 0 in child.
-pub fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
+/// # Safety
+///
+/// `frame` must point to a valid, writable `ExceptionFrame` for the
+/// interrupted EL0 context — the one the SVC vector pushed. The caller
+/// (the syscall dispatcher) owns that invariant.
+pub unsafe fn sys_fork(as_root: u64, frame: *mut ExceptionFrame) -> u64 {
     println!("  syscall: fork()");
 
     // Get the current thread's info
@@ -576,7 +581,13 @@ fn copy_user_string(ptr: *const u8, max_len: usize) -> Result<alloc::string::Str
 /// Execve: replace current process image with new program.
 /// Overwrites the live SVC ExceptionFrame at *frame and returns 0;
 /// the vectors.rs eret epilogue will restore ELR/SP/SPSR from that frame.
-pub fn sys_execve(
+///
+/// # Safety
+///
+/// `frame` must point to a valid, writable `ExceptionFrame` for the
+/// interrupted EL0 context — the one the SVC vector pushed. `path` must be
+/// a valid NUL-terminated string in the caller's address space.
+pub unsafe fn sys_execve(
     frame: *mut ExceptionFrame,
     path: *const u8,
     _argv: *const *const u8,

@@ -95,6 +95,21 @@ fn page_round(len: u64) -> Option<u64> {
     len.checked_add(0xFFF).map(|v| v & !0xFFF)
 }
 
+// SAFETY NOTE for the raw-pointer argument below.
+//
+// `frame` is the ExceptionFrame that the SVC vector pushed on the current
+// kernel stack; it is valid and writable for the whole duration of the
+// call and is never retained. The arch-api boundary deliberately declares
+// this entry point as `safe fn` (Rust 2024 explicit `safe fn`), because the
+// pointer never escapes the kernel and is not attacker-controlled — it is
+// produced by the exception entry path itself. The two syscalls that write
+// through it (`sys_fork`, `sys_execve`) are `unsafe fn` in their own right,
+// so the contract is enforced at the point where it is actually used.
+//
+// Without this allow, clippy's `not_unsafe_ptr_arg_deref` fires on the
+// dispatcher even though the pointer is never dereferenced by the
+// dispatcher itself.
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 #[unsafe(no_mangle)]
 pub extern "Rust" fn syscall_dispatch(
     as_root: u64,
@@ -118,17 +133,23 @@ pub extern "Rust" fn syscall_dispatch(
         SYS_MMAP => sys_mmap(as_root, arg0, arg1, arg2),
         SYS_MUNMAP => process::sys_munmap(as_root, arg0, arg1),
         SYS_MPROTECT => process::sys_mprotect(as_root, arg0, arg1, arg2),
-        SYS_FORK => process::sys_fork(as_root, frame),
+        // SAFETY: `frame` is the live ExceptionFrame pushed by the SVC
+        // vector on the current kernel stack; the dispatcher owns that
+        // invariant for the duration of the call.
+        SYS_FORK => unsafe { process::sys_fork(as_root, frame) },
         SYS_WAITPID => process::sys_waitpid(arg0, arg1 as *mut i32, arg2) as u64,
         SYS_KILL => process::sys_kill(arg0, arg1),
         SYS_GETPID => process::sys_getpid(),
         SYS_GETPPID => process::sys_getppid(),
-        SYS_EXECVE => process::sys_execve(
-            frame,
-            arg0 as *const u8,
-            arg1 as *const *const u8,
-            arg2 as *const *const u8,
-        ),
+        // SAFETY: same frame invariant as SYS_FORK above.
+        SYS_EXECVE => unsafe {
+            process::sys_execve(
+                frame,
+                arg0 as *const u8,
+                arg1 as *const *const u8,
+                arg2 as *const *const u8,
+            )
+        },
         SYS_RT_SIGACTION => process::sys_sigaction(arg0, arg1, arg2),
         SYS_RT_SIGPROCMASK => ENOSYS, // stub: reserved for future sigprocmask
         SYS_RT_SIGRETURN => ENOSYS,   // reserved: no async delivery path (scope fence)
