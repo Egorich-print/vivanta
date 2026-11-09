@@ -43,6 +43,11 @@ echo "==> [build] EL0 userland + workspace check + QEMU target"
 ./tools/build-user-init.sh
 cargo check --workspace
 cargo build -p vivanta-target-qemu-aarch64
+# The portable base must keep building for a 32-bit ARMv7-A device — the
+# teXet TB-176FL's Cortex-A8 is the reason that is a supported target of the
+# BASE even though the kernel is still AArch64-only (ADR-036).
+echo "==> [build] ARMv7-A portability of the portable base"
+./tools/armv7-portability.sh
 
 # Run QEMU gate if not skipped
 if [ "${SKIP_QEMU:-0}" = 1 ]; then

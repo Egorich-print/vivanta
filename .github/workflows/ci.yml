@@ -88,6 +88,13 @@ jobs:
       - name: build QEMU AArch64 target
         working-directory: vivanta-boot
         run: cargo build -p vivanta-target-qemu-aarch64
+      # The portable base (arch-api, boot-info, boot_common, vm) must keep
+      # building for a 32-bit ARMv7-A device: the teXet TB-176FL's Cortex-A8
+      # is the reason that target is supported. The kernel is still
+      # AArch64-only — this checks the BASE, not a boot (ADR-036).
+      - name: ARMv7-A portability of the portable base
+        working-directory: vivanta-boot
+        run: ./tools/armv7-portability.sh
       - uses: actions/upload-artifact@v4
         with:
           name: qemu-kernel-${{ github.run_number }}-${{ github.run_attempt }}

@@ -6,7 +6,11 @@
 # kernel build on one reproducible compiler.
 [toolchain]
 channel = "1.98.0"
-targets = ["aarch64-unknown-none"]
+# armv7a-none-eabihf is here for the PORTABLE base: `arch-api`, `boot-info`,
+# `boot_common` and `vm` must compile for a 32-bit ARMv7-A device (the teXet
+# TB-176FL's Cortex-A8) unchanged — see tools/armv7-portability.sh and
+# ADR-036. The kernel itself is still AArch64-only (ADR-011).
+targets = ["aarch64-unknown-none", "armv7a-none-eabihf"]
 # rustfmt: local + CI formatting gate. llvm-tools: rust-objcopy for the RPi
 # kernel8.img / RK3568 .bin conversions in tools/make-rpi3b-image.sh.
 components = ["rustfmt", "clippy", "llvm-tools"]
