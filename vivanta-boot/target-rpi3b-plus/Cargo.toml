@@ -18,7 +18,7 @@ vivanta-kernel = { path = "../kernel" }
 vivanta-platform-rpi3b = { path = "../platform-rpi3b" }
 
 # Bare-metal firmware binary (no_main + linker script): no host libtest.
-# Verified via QEMU boot.
+# Links vivanta-kernel and calls kernel_main; never run on silicon.
 [[bin]]
 name = "vivanta-target-rpi3b-plus"
 path = "src/main.rs"

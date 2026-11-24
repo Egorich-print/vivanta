@@ -8,7 +8,8 @@ description = "Vivanta — Rockchip RK3568 target binary"
 vivanta-boot-common = { path = "../boot_common" }
 
 # Bare-metal firmware binary (no_main + linker script): no host libtest.
-# Verified via QEMU boot.
+# EL2 diagnostic only — does not link vivanta-kernel. Verified on silicon
+# (Stage 1-2 UART output, 2026-07-19); this revision is untested there.
 [[bin]]
 name = "vivanta-target-rk3568"
 path = "src/main.rs"

@@ -1,3 +1,25 @@
+> **RETIRED (2026-09-29) — point-in-time record, superseded.**
+> This report is a snapshot of the G-M7 acceptance mission. Its own dateline reads
+> **2026-08-21**, but every commit it cites (`1233cce`, `72eb73b`, `08859f1`) is
+> dated **2026-08-25** in git history — the report is dated **four days before**
+> the work it describes. Claims now stale:
+>
+> - **M7.6 COW — "NOT STARTED"** → shipped: `e883af7` / `661e22e` (2026-08-26/27,
+>   ADR-034), and later reverted-then-restored for gate stability (`978391b`,
+>   `eacfe20`).
+> - **M7.8 ELF loader / M7.9 first ELF userland — "NOT STARTED"** → shipped:
+>   `f8039b0` (2026-08-26, G-M8, first genuine ELF userland).
+> - **"host tests 14/14"** → the host suite is now **22** tests (12 in
+>   `vivanta-boot/vm/src/va_tests.rs`, 10 in `vivanta-boot/exec/src/elf_tests.rs`).
+> - **"QEMU gates 9/9 групп"** → the gate now requires **exactly 18 serial
+>   markers** and the CI job is **advisory** (`continue-on-error: true`).
+> - **"M7.1–M7.4 COMPLETE, COW+ELF deferred"** → the two deferrals became
+>   missions G-M8 and G-M9 and are no longer backlog.
+>
+> **Current state of the project lives in [`STATUS.md`](../../../STATUS.md) and
+> [`ROADMAP.md`](../../../ROADMAP.md).** The body below is preserved verbatim as
+> a historical record.
+
 # G-M7 FINAL ACCEPTANCE REPORT — Userland Foundation & Process Evolution
 
 **Date:** 2026-08-21 · **Base:** post-audit baseline (`1233cce`) · **Final:** `main` HEAD

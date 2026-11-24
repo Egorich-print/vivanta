@@ -1,3 +1,33 @@
+> **RETIRED (2026-09-29) — point-in-time record, superseded.**
+> This report is a snapshot of mission 4 (M6.0). Its own dateline reads
+> **2026-08-21**; the mission's commits are `d69a516` … `5fec9e6`, ending
+> 2026-08-23. Claims now stale:
+>
+> - **`MAX_ADDRESS_SPACES=8`** — the value is now **16**
+>   (`vivanta-boot/kernel/src/vmm/address_space.rs:19`).
+> - **"13/13 host tests"** — the host suite is now **22** tests (12 in
+>   `vivanta-boot/vm/src/va_tests.rs`, 10 in `vivanta-boot/exec/src/elf_tests.rs`).
+> - **"Reverse-direction verifier … deferred" (§HARDWARE VERIFIER,
+>   §KNOWN LIMITATIONS)** — shipped: `69f556b` (2026-08-24,
+>   `vivanta-boot/kernel/src/vmm` reverse-direction INV-VM-001 verifier,
+>   ghost-leaf detection).
+> - **"EL0-originated demand fills not resolved"** — shipped: ADR-032 §2.3
+>   amendment `09dcc99` (2026-08-25), EL0 translation faults resolve through the
+>   same validator.
+> - **§BACKLOG items that are no longer backlog** — mmap/munmap/mprotect
+>   syscalls shipped in `72eb73b` (2026-08-25, ADR-033); COW/shared anonymous
+>   frames shipped in `e883af7` / `661e22e` (2026-08-26/27, ADR-034); the ELF
+>   loader / user processes shipped in `f8039b0` (2026-08-26, G-M8).
+> - **"All 6 targets build"** — `target-qemu-armv7a` and the `target-test` /
+>   `arch-test-stub` proof crates were deleted 2026-09-25 (see
+>   `docs/audit/2026-09-25-cleanup.md`); `arch-armv7a` remains an 8-line frozen
+>   stub (ADR-011).
+>
+> **Current state of the project lives in [`STATUS.md`](../../../STATUS.md) and
+> [`ROADMAP.md`](../../../ROADMAP.md).** The body below is preserved verbatim as
+> a historical record; in particular its `VERIFIED` tags describe 2026-08-21
+> evidence, not today's tree.
+
 # AUTONOMOUS MISSION REPORT — M6.0 User Virtual Memory & Fault-Driven Mapping Foundation
 
 **Date:** 2026-08-21 (mission 4)

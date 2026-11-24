@@ -640,7 +640,7 @@ rather than designing its own capability system?
    - Deprecate per-platform boot crates
 2. **Phase 7**: Memory architecture consolidation
    - Remove `MemoryCapability` if no enforcement path
-   - Integrate `MemoryGeometry` ([memory-geometry.md](docs/architecture/memory-geometry.md))
+   - Integrate `MemoryGeometry` ([memory-geometry.md](../architecture/memory-geometry.md))
    - Replace 33 hardcoded `0x1000` references with `MemoryGeometry`
    - Either eliminate VMM stubs or implement them
 3. **Phase 8**: Extend hardware support

@@ -4,7 +4,8 @@
 #
 # CI calls the same scripts (build-user-init.sh, qemu-gates.sh,
 # make-rpi3b-image.sh); this orchestrator exists so the "prove it locally
-# before pushing" ritual (§7 of docs/tooling/ci-cd.md) is a single command.
+# before pushing" ritual ("Local ritual" in docs/tooling/ci-cd.md) is a
+# single command.
 #
 # Usage:  tools/ci-local.sh
 #   SKIP_QEMU=1   skip the QEMU gate (fast sanity pass)

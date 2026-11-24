@@ -389,10 +389,15 @@ Achieves ~280 words/second at 115200 baud.
 ### Known Issues
 
 1. ~~**println! hangs** — the `GlobalConsole` implementation in `boot_common` hangs when~~
-   ~~`println!()` is called.~~ ✅ **RESOLVED 2026-07-19**. Root cause: CPACR_EL1.FPEN=0
-   (not set in EL2 entry path) + CPTR_EL2.TFP=1 (trap all FP/SIMD to EL2). FP/SIMD
+   ~~`println!()` is called.~~ ✅ **RESOLVED 2026-07-19**. Root cause: the EL2 entry
+   path wrote `0b11 << 20` to `CPTR_EL2`, where `TFP` is bit 10 and bits 21:20 are
+   RES0 — an architectural no-op that does not set TFP — while the `msr CPACR_EL1` it
+   should have written sat behind a label the EL2 branch jumps past, so
+   `CPACR_EL1.FPEN` stayed at its reset value `0b00` (traps FP/SIMD to EL1). FP/SIMD
    instructions used by `write_volatile` alignment checks in debug builds caused
-   silent trap → hang. Fix: `msr CPACR_EL1, x5` + `msr CPTR_EL2, xzr` in EL2 entry path.
+   silent trap → no further progress (observed as a hang). Fix: `msr CPTR_EL2, xzr` +
+   `msr CPACR_EL1, x5` in EL2 entry path. *Diagnosis corrected 2026-09-29 — an earlier
+   revision of this line blamed `CPTR_EL2.TFP=1`; see `docs/architecture/arm-exception-state.md`.*
 
 2. **DTB cache coherency** — DTB loaded via `mm.l` while MMU was on. After MMU disable,
    the data cache has stale entries. DTB at physical address 0x0A100000 is not reliably
@@ -442,12 +447,17 @@ KC3FGZAB1CONSOLE OK231234WITH CONSOLE OK54X
 
 ```asm
 mov x5, #(0b11 << 20)
-msr CPTR_EL2, x5       // BUG: sets TFP=1 (trap ALL FP/SIMD to EL2)
+msr CPTR_EL2, x5       // BUG: no-op — 0b11<<20 is CPACR_EL1.FPEN, not CPTR_EL2.TFP (bit 10)
 ```
 
-And did NOT set CPACR_EL1. After eret to EL1:
-- CPTR_EL2.TFP=1 → any FP/SIMD instruction traps to EL2 (no vector table → hang)
-- CPACR_EL1=0 (reset value) → FPEN=0 → would trap to EL1 anyway
+And did NOT set CPACR_EL1 — the `msr CPACR_EL1` present in the file sits behind a
+label the EL2 branch jumps past, so it never runs. After eret to EL1:
+- bits 21:20 of `CPTR_EL2` are RES0, so that store does nothing at all: TFP is
+  neither set nor cleared and stays at its reset value `0` — no traps go to EL2
+- CPACR_EL1.FPEN=0b00 (reset value) → FP/SIMD traps to EL1
+- the trap reaches `el1_sync_handler`, which resolves only same-EL data aborts
+  (`vivanta-boot/arch-aarch64/src/exceptions.rs:90-116`), so an FP exception falls
+  through to `exception_handler`, which dumps and halts (`:118-119`, `:124-134`)
 
 **Fix** (applied 2026-07-19):
 
@@ -457,8 +467,15 @@ msr CPACR_EL1, x5       // FPEN=3: enable FP at EL1 and EL0
 msr CPTR_EL2, xzr       // clear TFP — no FP/SIMD traps to EL2
 ```
 
+Both stores are required on every entry path; `msr CPACR_EL1` is the one that
+actually enables FP/SIMD, `msr CPTR_EL2, xzr` only stops EL2 intercepting the
+resulting traps. `target-rk3568/src/main.rs:190-191` is the only target in the
+tree that does both on the EL2 path.
+
 **Symptom**: `write_volatile` in debug builds calls `precondition_check` →
-`is_aligned_to` which uses NEON (fmov, cnt, addv) → silent trap → hang.
+`is_aligned_to` which uses NEON (fmov, cnt, addv) → silent trap → no further
+output (observed on the board as a hang; the trap is taken at EL1 and ends in the
+`exception_handler` dump-and-halt, not at EL2).
 Release builds or `-C opt-level=z` omit these checks, which explains why QEMU
 with different optimisation settings sometimes worked.
 

@@ -10,7 +10,7 @@ extern crate vivanta_boot_common;
 pub mod barrier;
 pub mod boot;
 pub mod context;
-pub mod early_mmu; // used by target-rpi3b-plus (standalone diagnostic, not kernel path)
+pub mod early_mmu; // dead — zero callers anywhere in the tree
 pub mod exceptions;
 pub mod interrupts;
 pub mod mmio;

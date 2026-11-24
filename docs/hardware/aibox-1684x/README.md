@@ -26,4 +26,4 @@ replace the Linux kernel subimage inside the vendor FIT image.
 
 Research only — **no code, no bring-up attempted**. This target is not in the
 milestone roadmap; the declared silicon-validation target remains RK3568 and
-RPi3B+. See `AUTONOMOUS_MISSION_P0_REPORT.md` and `STATUS.md`.
+RPi3B+. See `docs/history/missions/AUTONOMOUS_MISSION_P0_REPORT.md` and `STATUS.md`.

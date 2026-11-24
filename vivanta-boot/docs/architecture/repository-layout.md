@@ -178,7 +178,7 @@ scheduler/
     timer.rs        — timer hooks
 ```
 
-### arch-aarch64 (post-10k LOC)
+### arch-aarch64 (4 172 lines)
 
 ```
 arch-aarch64/
