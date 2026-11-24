@@ -8,7 +8,7 @@ Status at end of session: pmOS boots to a working system with terminal access; f
 clean image (all fixes baked in) built but not yet flashed; TWRP downloaded as a
 rescue path; fastboot entry from buttons proved unreliable (see §7).
 
-Build tree: `~/ai-workstation/Projects/lavender-flasher/` (artifacts + Rust flasher).
+Build tree: `/Volumes/Netac_SSD/ai-workstation/Projects/lavender-flasher/` (artifacts + Rust flasher).
 Build VM: Lima `pmos-builder` (Alpine 3.23 aarch64, vz, 8 vCPU / 12 GiB).
 
 ---

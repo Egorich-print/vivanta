@@ -22,6 +22,6 @@
 
 ## Cross-project
 
-Build pipeline & artifacts: `~/ai-workstation/Projects/whyred-pve-uefi`
+Build pipeline & artifacts: `/Volumes/Netac_SSD/ai-workstation/Projects/whyred-pve-uefi`
 (GitHub: Egorich-print/whyred-pve-uefi). UEFI payload and Proxmox VE ARM64
 rootfs already built; flashing blocked on bootloader unlock.

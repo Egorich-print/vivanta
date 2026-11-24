@@ -7,7 +7,7 @@ replace the Linux kernel subimage inside the vendor FIT image.
 > **Provenance.** Migrated 2026-09-18 from loose files in the navigation hub
 > (`~/Documents/New OpenCode Project/`) into canonical project storage, per
 > `Knowledge/System/File Organization.md`. Backup of the originals:
-> `~/ai-workstation/Archives/Vivanta/hub-migration-2026-09-18.tar.gz`.
+> `/Volumes/Netac_SSD/ai-workstation/Archives/Vivanta/hub-migration-2026-09-18.tar.gz`.
 > Hub keeps symlinks under the original names.
 
 ## Documents

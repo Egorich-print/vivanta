@@ -62,7 +62,7 @@ exposed.
 
 # 0. SOURCE OF TRUTH
 
-Рабочий репозиторий: `/Users/egorich/ai-workstation/Projects/Vivanta`
+Рабочий репозиторий: `/Volumes/Netac_SSD/ai-workstation/Projects/Vivanta`
 
 Текущий baseline: **M5.0 GREEN BASELINE — PASS / CLOSED** (2026-08-11).
 Ratified: `vivanta-boot/docs/milestones/M5.0-green-baseline.md`

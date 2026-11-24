@@ -30,7 +30,7 @@ Built binaries live (git-ignored) in `vivanta-boot/images/`:
 > rkdeveloptool binary when run with the navigation hub as its cwd) were migrated
 > on 2026-09-18 out of `~/Documents/New OpenCode Project/` into `artifacts/`, per
 > `Knowledge/System/File Organization.md`. Backup of the originals:
-> `~/ai-workstation/Archives/Vivanta/hub-migration-2026-09-18-rk3568.tar.gz`.
+> `/Volumes/Netac_SSD/ai-workstation/Archives/Vivanta/hub-migration-2026-09-18-rk3568.tar.gz`.
 > The hub keeps a `rk3568` symlink to this directory.
 
 ## Status (2026-09-18)
